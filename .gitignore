@@ -1,0 +1,29 @@
+# 环境变量
+.env
+
+# 依赖
+node_modules/
+
+# 日志
+logs/
+*.log
+
+# 数据
+data/*.json
+!data/tasks.json
+!data/history.json
+
+# 备份
+data/backups/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# PM2
+.pm2/

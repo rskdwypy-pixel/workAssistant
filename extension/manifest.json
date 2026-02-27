@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "工作助手",
+  "version": "1.0.0",
+  "description": "AI工作助手 - 智能任务管理和日报生成",
+  "icons": {
+    "128": "icons/icon128.png"
+  },
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
+  "permissions": [
+    "contextMenus",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "http://localhost:3721/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ]
+}

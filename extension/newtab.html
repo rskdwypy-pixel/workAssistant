@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>工作助手</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="newtab.css">
+</head>
+
+<body>
+  <!-- Toast 容器 -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <!-- 确认对话框 -->
+  <div id="confirmDialog" class="confirm-dialog">
+    <div class="confirm-box">
+      <div class="confirm-icon">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M12 16v-4"></path>
+          <path d="M12 8h.01"></path>
+        </svg>
+      </div>
+      <h3 class="confirm-title" id="confirmTitle">确认操作</h3>
+      <p class="confirm-message" id="confirmMessage">确定要执行此操作吗？</p>
+      <div class="confirm-actions">
+        <button class="btn-confirm-cancel" id="confirmCancel">取消</button>
+        <button class="btn-confirm-ok" id="confirmOk">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="app-container">
+    <!-- 左侧边栏：日历 + 快速操作 -->
+    <aside class="sidebar">
+      <!-- 日历 -->
+      <section class="calendar-section">
+        <div class="calendar-header">
+          <button id="prevMonth" class="calendar-nav-btn">&lt;</button>
+          <span id="currentMonth" class="calendar-title"></span>
+          <button id="nextMonth" class="calendar-nav-btn">&gt;</button>
+        </div>
+        <div class="calendar-wrapper">
+          <div class="calendar-weekdays">
+            <div class="calendar-weekday">日</div>
+            <div class="calendar-weekday">一</div>
+            <div class="calendar-weekday">二</div>
+            <div class="calendar-weekday">三</div>
+            <div class="calendar-weekday">四</div>
+            <div class="calendar-weekday">五</div>
+            <div class="calendar-weekday">六</div>
+          </div>
+          <div class="calendar-days" id="calendarContainer">
+            <!-- 日历将由JS动态生成 -->
+          </div>
+        </div>
+        <div class="calendar-legend github-style">
+          <span class="legend-dot level-0"></span>
+          <span class="legend-dot level-1"></span>
+          <span class="legend-dot level-2"></span>
+          <span class="legend-dot level-3"></span>
+          <span class="legend-dot level-4"></span>
+        </div>
+      </section>
+
+      <!-- 快速操作 -->
+      <div class="sidebar-section">
+        <h3 class="add-task-title">📝 添加任务</h3>
+        <div class="add-task-form">
+          <div class="task-input-wrapper">
+            <textarea id="taskInput" placeholder=" " rows="3"></textarea>
+            <span class="enter-hint">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              Enter
+            </span>
+          </div>
+          <div class="add-task-hint">按回车添加 · Shift+回车换行</div>
+          <button id="addTaskBtn" class="btn-primary" style="margin-bottom: 8px; display: none;">添加任务</button>
+        </div>
+
+        <div style="margin-top: 24px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h3 style="margin: 0;">🤖 智能总结</h3>
+            <button id="promptSettingsBtn" class="icon-btn" title="提示词设置"
+              style="display: flex; align-items: center; justify-content: center; padding: 4px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+            </button>
+          </div>
+          <button id="genDailyBtn" class="btn-secondary" data-type="daily">生成日报</button>
+          <button id="genWeeklyBtn" class="btn-secondary" data-type="weekly">生成周报</button>
+          <button id="genMonthlyBtn" class="btn-secondary" data-type="monthly">生成月报</button>
+        </div>
+
+        <!-- 测试按钮区域 (用于测试定时任务) -->
+        <div id="testButtons" class="test-buttons" style="margin-top: 24px;">
+          <h3 style="margin-bottom: 8px; font-size: 12px; color: #999;">🧪 测试按钮</h3>
+          <button id="testMorningBtn" class="btn-test"
+            style="padding: 6px 12px; font-size: 12px; background: #f39c12; border: none; border-radius: 4px; color: white; cursor: pointer;">早9点通知</button>
+          <button id="testEveningBtn" class="btn-test"
+            style="padding: 6px 12px; font-size: 12px; background: #8e44ad; border: none; border-radius: 4px; color: white; cursor: pointer;">晚9点日报</button>
+          <button id="testWeeklyBtn" class="btn-test"
+            style="padding: 6px 12px; font-size: 12px; background: #16a085; border: none; border-radius: 4px; color: white; cursor: pointer;">周五晚周报</button>
+          <button id="testMonthlyBtn" class="btn-test"
+            style="padding: 6px 12px; font-size: 12px; background: #d35400; border: none; border-radius: 4px; color: white; cursor: pointer;">月末晚月报</button>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- 主内容区 -->
+    <main class="main-content">
+      <!-- 任务看板 -->
+      <section class="task-board">
+        <div class="task-board-header">
+          <div class="task-board-left">
+            <h2 id="taskBoardTitle">📋 今日任务</h2>
+            <div class="task-board-stats">
+              <div class="stat-item">
+                <span class="stat-label">本周</span>
+                <span class="stat-value" id="weekDone">0</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">本月</span>
+                <span class="stat-value" id="monthDone">0</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">连续</span>
+                <span class="stat-value" id="streak">0</span>
+              </div>
+            </div>
+          </div>
+          <div class="task-board-center">
+            <input type="text" id="searchInput" placeholder="搜索任务..." class="header-search">
+          </div>
+          <div class="task-board-right">
+            <button id="viewAllHistory" class="header-btn">📊 历史报告</button>
+            <button id="settingsBtn" class="header-btn">⚙️ 设置</button>
+            <button id="debugToggleBtn" class="icon-btn debug-btn" title="调试模式">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path
+                  d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="task-columns">
+          <!-- 待办列 -->
+          <div class="task-column">
+            <div class="column-header">
+              <h3>🔴 待办</h3>
+              <span class="column-count" id="todoColumnCount">0</span>
+            </div>
+            <div class="task-list" id="todoList">
+              <!-- 任务卡片将由JS动态生成 -->
+            </div>
+          </div>
+
+          <!-- 进行中列 -->
+          <div class="task-column">
+            <div class="column-header">
+              <h3>🟢 进行中</h3>
+              <span class="column-count" id="inProgressColumnCount">0</span>
+            </div>
+            <div class="task-list" id="inProgressList">
+              <!-- 任务卡片将由JS动态生成 -->
+            </div>
+          </div>
+
+          <!-- 已完成列 -->
+          <div class="task-column">
+            <div class="column-header">
+              <h3>⚪ 已完成</h3>
+              <span class="column-count" id="doneColumnCount">0</span>
+            </div>
+            <div class="task-list" id="doneList">
+              <!-- 任务卡片将由JS动态生成 -->
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- 任务详情弹窗 -->
+  <div id="taskModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modalTitle">任务详情</h3>
+        <button class="close-btn" id="closeModal">&times;</button>
+      </div>
+      <div class="modal-body" id="modalBody">
+        <!-- 任务详情内容 -->
+      </div>
+    </div>
+  </div>
+
+  <!-- 设置弹窗 -->
+  <div id="settingsModal" class="modal">
+    <div class="modal-content settings-modal-content">
+      <div class="modal-header">
+        <h3>⚙️ 设置</h3>
+        <button class="close-btn" id="closeSettings">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="settings-section">
+          <h4>🤖 AI 配置</h4>
+          <div class="settings-item">
+            <label>API 服务</label>
+            <select id="aiProvider">
+              <option value="zhipu">智谱AI (推荐)</option>
+              <option value="openai">OpenAI 官方</option>
+              <option value="custom">自定义</option>
+            </select>
+          </div>
+          <div class="settings-item">
+            <label>API Key <span class="required">*</span></label>
+            <input type="password" id="apiKey" placeholder="请输入 API Key">
+          </div>
+          <div class="settings-item">
+            <label>API 地址</label>
+            <input type="text" id="apiBaseUrl" placeholder="https://open.bigmodel.cn/api/paas/v4/">
+          </div>
+          <div class="settings-item">
+            <label>模型</label>
+            <input type="text" id="aiModel" placeholder="glm-4-flash">
+          </div>
+          <button id="testAi" class="btn-secondary">🧪 测试连接</button>
+          <span id="aiTestResult" class="test-result"></span>
+        </div>
+
+        <div class="settings-section">
+          <h4>🔔 通知配置</h4>
+          <div class="settings-item">
+            <label>早间提醒时间</label>
+            <input type="number" id="morningHour" min="0" max="23" value="9">
+          </div>
+          <div class="settings-item">
+            <label>晚间日报时间</label>
+            <input type="number" id="eveningHour" min="0" max="23" value="21">
+          </div>
+          <div class="settings-item">
+            <label>Webhook URL (可选)</label>
+            <input type="text" id="webhookUrl" placeholder="飞书/钉钉/企业微信 Webhook 地址">
+          </div>
+          <div class="settings-item">
+            <label>Webhook 类型</label>
+            <select id="webhookType">
+              <option value="generic">通用</option>
+              <option value="feishu">飞书</option>
+              <option value="dingtalk">钉钉</option>
+              <option value="wecom">企业微信</option>
+            </select>
+          </div>
+          <button id="testWebhook" class="btn-secondary">🧪 测试推送</button>
+          <span id="webhookTestResult" class="test-result"></span>
+        </div>
+
+        <div class="settings-section">
+          <h4>📋 服务状态</h4>
+          <div class="service-status">
+            <span id="serviceStatusDot" class="status-dot unknown"></span>
+            <span id="serviceStatusText">检测中...</span>
+            <button id="checkService" class="btn-secondary">🔄 检查服务</button>
+          </div>
+          <div class="service-actions">
+            <p class="hint">⚠️ 浏览器插件无法直接启动后端服务，请手动启动：</p>
+            <code>cd /Users/itreenewbee/Pictures/Github/workAssistant && npm start</code>
+            <p class="hint">或使用 PM2：<code>pm2 start ecosystem.config.js</code></p>
+          </div>
+        </div>
+
+        <div class="settings-footer">
+          <button id="saveSettings" class="btn-primary">💾 保存配置</button>
+          <button id="resetSettings" class="btn-secondary">🔄 重置默认</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 提示词设置弹窗 -->
+  <div id="promptModal" class="modal">
+    <div class="modal-content" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3>🤖 提示词设置</h3>
+        <button class="close-btn" id="closePromptModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="settings-section" style="margin-bottom: 12px;">
+          <p class="hint" style="margin-bottom: 12px; font-size: 13px;">
+            可以在这里修改每日、每周、每月工作报告的生成提示词，以及添加任务的分析提示词。留空则使用系统默认提示词。注意保持要求JSON返回格式说明，否则可能导致报告或任务生成失败。</p>
+          <div class="settings-item" style="flex-direction: column; align-items: flex-start; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; width: 100%; margin-bottom: 8px;">
+              <label>📝 添加任务分析提示词</label>
+              <button id="resetAddTaskPromptBtn" class="btn-secondary"
+                style="padding: 2px 8px; font-size: 12px;">恢复默认</button>
+            </div>
+            <textarea id="promptAddTask" rows="6" placeholder="正在加载..."
+              style="width: 100%; resize: vertical; padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-family: monospace; font-size: 12px;"></textarea>
+          </div>
+          <div class="settings-item" style="flex-direction: column; align-items: flex-start;">
+            <div style="display: flex; justify-content: space-between; width: 100%; margin-bottom: 8px;">
+              <label>📝 日报提示词</label>
+              <button id="resetDailyPromptBtn" class="btn-secondary"
+                style="padding: 2px 8px; font-size: 12px;">恢复默认</button>
+            </div>
+            <textarea id="promptDaily" rows="6" placeholder="正在加载..."
+              style="width: 100%; resize: vertical; padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-family: monospace; font-size: 12px;"></textarea>
+          </div>
+          <div class="settings-item" style="flex-direction: column; align-items: flex-start; margin-top: 16px;">
+            <div style="display: flex; justify-content: space-between; width: 100%; margin-bottom: 8px;">
+              <label>📊 周报提示词</label>
+              <button id="resetWeeklyPromptBtn" class="btn-secondary"
+                style="padding: 2px 8px; font-size: 12px;">恢复默认</button>
+            </div>
+            <textarea id="promptWeekly" rows="6" placeholder="正在加载..."
+              style="width: 100%; resize: vertical; padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-family: monospace; font-size: 12px;"></textarea>
+          </div>
+          <div class="settings-item" style="flex-direction: column; align-items: flex-start; margin-top: 16px;">
+            <div style="display: flex; justify-content: space-between; width: 100%; margin-bottom: 8px;">
+              <label>📈 月报提示词</label>
+              <button id="resetMonthlyPromptBtn" class="btn-secondary"
+                style="padding: 2px 8px; font-size: 12px;">恢复默认</button>
+            </div>
+            <textarea id="promptMonthly" rows="6" placeholder="正在加载..."
+              style="width: 100%; resize: vertical; padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-family: monospace; font-size: 12px;"></textarea>
+          </div>
+        </div>
+        <div class="settings-footer">
+          <button id="savePromptBtn" class="btn-primary">💾 保存并同步</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 报告详情模态框 -->
+  <div id="reportModal" class="modal">
+    <div class="modal-content report-modal" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3 id="reportModalTitle">智能汇报</h3>
+        <span class="close-btn" id="closeReportModal">&times;</span>
+      </div>
+      <div class="modal-body" id="reportModalBody" style="max-height: 400px; overflow-y: auto;">
+        <!-- 报告内容将由JS加载 -->
+      </div>
+      <div class="modal-footer"
+        style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #1c2128; padding-top: 16px; margin-top: 16px;">
+        <button id="deleteReportBtn" class="btn-danger">删除此报告</button>
+        <div style="display: flex; gap: 8px;">
+          <button id="regenReportBtn" class="btn-secondary">重新生成</button>
+          <button id="pushReportBtn" class="btn-primary">推送通知</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  </div>
+  </div>
+
+  <!-- 设置时间模态框 -->
+  <div id="datetimeModal" class="modal">
+    <div class="modal-content" style="max-width: 320px;">
+      <div class="modal-header">
+        <h3 id="dtModalTitle" style="font-size: 15px;">设置时间</h3>
+        <button class="close-btn" id="closeDatetimeModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div style="margin-bottom: 16px;">
+          <input type="datetime-local" id="dtModalInput"
+            style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; box-sizing: border-box; font-family: inherit;">
+        </div>
+        <div style="display: flex; gap: 8px; margin-bottom: 24px;">
+          <button class="btn-secondary" id="dtBtnTomorrow" style="flex: 1; padding: 6px; font-size: 12px;">明天</button>
+          <button class="btn-secondary" id="dtBtnThisWeek" style="flex: 1; padding: 6px; font-size: 12px;">本周末</button>
+          <button class="btn-secondary" id="dtBtnThisMonth" style="flex: 1; padding: 6px; font-size: 12px;">本月末</button>
+        </div>
+        <button class="btn-primary" id="dtModalConfirmBtn" style="width: 100%;">确定保存</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="newtab.js"></script>
+</body>
+
+</html>

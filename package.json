@@ -1,0 +1,23 @@
+{
+  "name": "work-assistant",
+  "version": "1.0.0",
+  "description": "AI工作助手 - 智能任务管理和日报生成",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["ai", "task", "assistant", "daily-report"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "openai": "^4.26.0",
+    "node-cron": "^3.0.3",
+    "uuid": "^9.0.1",
+    "dotenv": "^16.3.1",
+    "node-fetch": "^3.3.2"
+  }
+}
