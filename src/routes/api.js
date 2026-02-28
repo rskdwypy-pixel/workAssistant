@@ -565,4 +565,186 @@ router.post('/prompts', async (req, res) => {
   }
 });
 
+// ==================== 数据同步接口 ====================
+
+/**
+ * GET /api/sync/export - 导出完整数据用于同步
+ */
+router.get('/sync/export', async (req, res) => {
+  try {
+    // 获取所有任务
+    const tasks = await taskManager.getAllTasks();
+
+    // 获取历史报告
+    const summaryService = await import('../services/summary.js');
+    const history = await summaryService.getHistoryList(1000);
+
+    // 生成校验和
+    const crypto = await import('crypto');
+    const dataStr = JSON.stringify({ tasks, history });
+    const checksum = crypto.createHash('sha256').update(dataStr).digest('hex');
+
+    res.json({
+      success: true,
+      data: {
+        version: '1.0',
+        timestamp: new Date().toISOString(),
+        tasks,
+        history,
+        checksum
+      }
+    });
+  } catch (err) {
+    console.error('[API] 导出同步数据失败:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/sync/import - 导入同步数据（智能合并）
+ */
+router.post('/sync/import', async (req, res) => {
+  try {
+    const { tasks, history, deletedTaskIds } = req.body;
+
+    if (!tasks || !Array.isArray(tasks)) {
+      return res.status(400).json({ error: '无效的同步数据' });
+    }
+
+    // 验证校验和
+    const crypto = await import('crypto');
+    const dataStr = JSON.stringify({ tasks, history });
+    const expectedChecksum = crypto.createHash('sha256').update(dataStr).digest('hex');
+
+    if (req.body.checksum && req.body.checksum !== expectedChecksum) {
+      return res.status(400).json({ error: '数据校验失败，可能已损坏' });
+    }
+
+    let importedCount = 0;
+    let updatedCount = 0;
+    let skippedCount = 0;
+    const existingTasks = await taskManager.getAllTasks();
+    const existingTaskMap = new Map(existingTasks.map(t => [t.id, t]));
+
+    // 处理任务同步（最新修改优先）
+    for (const remoteTask of tasks) {
+      const localTask = existingTaskMap.get(remoteTask.id);
+
+      if (!localTask) {
+        // 新任务，直接添加
+        await taskManager.addOrUpdateTask(remoteTask.content, remoteTask);
+        importedCount++;
+      } else {
+        // 已存在，比较更新时间
+        const localTime = new Date(localTask.updatedAt || localTask.createdAt);
+        const remoteTime = new Date(remoteTask.updatedAt || remoteTask.createdAt);
+
+        if (remoteTime > localTime) {
+          // 远程更新，更新本地
+          await taskManager.updateTask(remoteTask.id, remoteTask);
+          updatedCount++;
+        } else {
+          skippedCount++;
+        }
+      }
+    }
+
+    // 发送删除动作
+    if (deletedTaskIds && Array.isArray(deletedTaskIds)) {
+      for (const taskId of deletedTaskIds) {
+        if (existingTaskMap.has(taskId)) {
+          await taskManager.deleteTask(taskId);
+        }
+      }
+    }
+
+    // 处理历史报告同步
+    let historyImportedCount = 0;
+    let historyUpdatedCount = 0;
+    if (history && Array.isArray(history)) {
+      const storageModule = await import('../utils/storage.js');
+      const localHistoryData = await storageModule.readHistory();
+      if (!localHistoryData.reports) localHistoryData.reports = localHistoryData.dailySummaries || [];
+
+      const existingHistoryMap = new Map(localHistoryData.reports.map(r => [r.id, r]));
+
+      for (const remoteReport of history) {
+        const localReport = existingHistoryMap.get(remoteReport.id);
+
+        if (!localReport) {
+          // 新的历史报告
+          localHistoryData.reports.push(remoteReport);
+          existingHistoryMap.set(remoteReport.id, remoteReport);
+          historyImportedCount++;
+        } else {
+          // 比较更新时间，通常报告生成后不会有大量修改，但仍需确保同步
+          const localTime = new Date(localReport.createdAt).getTime();
+          const remoteTime = new Date(remoteReport.createdAt).getTime();
+          if (remoteTime > localTime) {
+            Object.assign(localReport, remoteReport);
+            historyUpdatedCount++;
+          }
+        }
+      }
+
+      // 按创建时间倒序排序
+      localHistoryData.reports.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      localHistoryData.dailySummaries = localHistoryData.reports;
+      await storageModule.writeHistory(localHistoryData);
+    }
+
+    console.log(`[API] 同步导入完成: 新增${importedCount}, 更新${updatedCount}, 跳过${skippedCount}`);
+
+    res.json({
+      success: true,
+      data: {
+        imported: importedCount,
+        updated: updatedCount,
+        skipped: skippedCount
+      }
+    });
+  } catch (err) {
+    console.error('[API] 导入同步数据失败:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/sync/summary - 获取本地数据摘要（用于快速判断是否需要同步）
+ */
+router.get('/sync/summary', async (req, res) => {
+  try {
+    const tasks = await taskManager.getAllTasks();
+    const summaryService = await import('../services/summary.js');
+    const history = await summaryService.getHistoryList(1);
+
+    // 找到最新更新时间
+    let lastUpdate = null;
+    for (const task of tasks) {
+      const taskTime = new Date(task.updatedAt || task.createdAt);
+      if (!lastUpdate || taskTime > lastUpdate) {
+        lastUpdate = taskTime;
+      }
+    }
+
+    // 生成校验和
+    const crypto = await import('crypto');
+    const dataStr = JSON.stringify({ tasks, history });
+    const checksum = crypto.createHash('sha256').update(dataStr).digest('hex');
+
+    res.json({
+      success: true,
+      data: {
+        taskCount: tasks.length,
+        historyCount: history.length,
+        lastUpdate: lastUpdate ? lastUpdate.toISOString() : null,
+        checksum
+      }
+    });
+  } catch (err) {
+    console.error('[API] 获取同步摘要失败:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
