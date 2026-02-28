@@ -475,28 +475,39 @@ class ZentaoClient {
     const stageId = this.determineStageId(taskData.title);
 
     const payload = new URLSearchParams();
-    payload.append('execution', this.getConfig().projectId); // execution 对应 project ID
-    payload.append('type', 'devel');
+    // 依据用户抓包，实际提交到 execution 字段的不是总级的 projectId，而是具体执行的 stageId (如162)
+    payload.append('execution', stageId || this.getConfig().projectId);
+    payload.append('type', 'test'); // 用户抓包用的 test，可根据项目实际约定用 devel 或 test
     payload.append('module', '0');
-    payload.append('assignedTo[]', ''); // 可以留空，或者取自设定的 assignee
+    payload.append('assignedTo[]', this.getConfig().username || ''); // 自动指派给绑定的用户名
+    payload.append('teamMember', '');
     payload.append('mode', 'linear');
     payload.append('status', 'wait');
+    payload.append('story', '');
+    payload.append('color', '');
     payload.append('name', taskData.title);
+    payload.append('storyEstimate', '');
+    payload.append('storyDesc', '');
+    payload.append('storyPri', '');
     payload.append('pri', this.mapPriority(taskData.priority).toString());
+    payload.append('estimate', '');
     payload.append('desc', taskData.content || taskData.title);
+    payload.append('estStarted', '');
     payload.append('deadline', taskData.dueDate || '');
     payload.append('after', 'toTaskList');
+    payload.append('uid', '69a286e9ac5b1'); // 模拟UID防止拦截（可为任意固定字符串或随机）
 
     console.log('[Zentao] 创建任务:', {
       title: taskData.title,
       stage: stageId === this.getConfig().pocStageId ? 'POC' : '交付',
+      executionId: stageId || this.getConfig().projectId,
       deadline: taskData.dueDate
     });
 
     try {
-      // 禅道开源版接口如 /zentao/task-create-162-0-0.html，162 是 execution (projectId)
-      const executionId = this.getConfig().projectId;
-      const endpoint = `/zentao/task-create-${executionId}-0-0.json`;
+      // 禅道开源版接口，路径中的 executionId 实际上是阶段ID（stageId）
+      const targetExecutionId = stageId || this.getConfig().projectId;
+      const endpoint = `/zentao/task-create-${targetExecutionId}-0-0.json`;
 
       const response = await this.fetchWithSession(endpoint, {
         method: 'POST',
