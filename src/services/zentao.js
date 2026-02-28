@@ -474,28 +474,34 @@ class ZentaoClient {
     // 判断阶段
     const stageId = this.determineStageId(taskData.title);
 
-    const payload = {
-      project: this.getConfig().projectId,
-      build: stageId,              // 阶段 ID
-      name: taskData.title,
-      desc: taskData.content || taskData.title,
-      type: 'devel',               // 任务类型：开发
-      status: 'wait',              // 状态：未开始
-      pri: this.mapPriority(taskData.priority),
-      deadline: taskData.dueDate || null,
-      estimate: taskData.estimate || 48  // 预计工时（小时）
-    };
+    const payload = new URLSearchParams();
+    payload.append('execution', this.getConfig().projectId); // execution 对应 project ID
+    payload.append('type', 'devel');
+    payload.append('module', '0');
+    payload.append('assignedTo[]', ''); // 可以留空，或者取自设定的 assignee
+    payload.append('mode', 'linear');
+    payload.append('status', 'wait');
+    payload.append('name', taskData.title);
+    payload.append('pri', this.mapPriority(taskData.priority).toString());
+    payload.append('desc', taskData.content || taskData.title);
+    payload.append('deadline', taskData.dueDate || '');
+    payload.append('after', 'toTaskList');
 
     console.log('[Zentao] 创建任务:', {
-      title: payload.name,
+      title: taskData.title,
       stage: stageId === this.getConfig().pocStageId ? 'POC' : '交付',
-      deadline: payload.deadline
+      deadline: taskData.dueDate
     });
 
     try {
-      const response = await this.fetchWithSession(API_ENDPOINTS.TASKS, {
+      // 禅道开源版接口如 /zentao/task-create-162-0-0.html，162 是 execution (projectId)
+      const executionId = this.getConfig().projectId;
+      const endpoint = `/zentao/task-create-${executionId}-0-0.json`;
+
+      const response = await this.fetchWithSession(endpoint, {
         method: 'POST',
-        body: JSON.stringify(payload)
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: payload
       });
 
       if (!response.ok) {
