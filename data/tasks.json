@@ -22,10 +22,11 @@
       "reminderTime": null,
       "progress": 66,
       "createdAt": "2026-02-27T06:47:00.524Z",
-      "updatedAt": "2026-02-27T13:07:54.764Z",
+      "updatedAt": "2026-02-28T03:42:57.804Z",
       "reminder3hTriggered": false,
       "reminderExactTriggered": false,
-      "order": 4
+      "priority": 2,
+      "order": null
     },
     {
       "id": "0a3869cb-6e89-44a2-9dab-d4fa4199dac3",
@@ -36,10 +37,11 @@
       "reminderTime": "2026-03-06T10:00:00.000Z",
       "progress": 0,
       "createdAt": "2026-02-27T07:59:44.215Z",
-      "updatedAt": "2026-02-27T13:07:54.764Z",
+      "updatedAt": "2026-02-28T03:42:40.560Z",
       "reminder3hTriggered": false,
       "reminderExactTriggered": false,
-      "order": 1
+      "priority": 2,
+      "order": null
     },
     {
       "id": "30f8994c-10b9-45fa-b966-557e630e6d04",
@@ -62,12 +64,13 @@
       "status": "todo",
       "dueDate": null,
       "reminderTime": "2026-02-28T17:00:00",
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
+      "reminder3hTriggered": true,
+      "reminderExactTriggered": true,
       "progress": 0,
       "createdAt": "2026-02-27T12:09:36.208Z",
-      "updatedAt": "2026-02-27T13:07:54.764Z",
-      "order": 0
+      "updatedAt": "2026-02-28T09:00:37.198Z",
+      "order": 0,
+      "priority": 1
     },
     {
       "id": "e4de284f-f737-4847-b3d8-88889e99e2db",
@@ -80,8 +83,9 @@
       "reminderExactTriggered": false,
       "progress": 38,
       "createdAt": "2026-02-27T12:18:36.438Z",
-      "updatedAt": "2026-02-27T13:07:54.764Z",
-      "order": 3
+      "updatedAt": "2026-02-28T03:43:00.506Z",
+      "priority": 4,
+      "order": null
     },
     {
       "id": "d6e5d389-862f-4c5a-8c89-b46350f245ee",
@@ -94,8 +98,9 @@
       "reminderExactTriggered": false,
       "progress": 0,
       "createdAt": "2026-02-27T12:19:52.672Z",
-      "updatedAt": "2026-02-27T13:07:54.764Z",
-      "order": 2
+      "updatedAt": "2026-02-28T03:14:21.267Z",
+      "priority": 3,
+      "order": null
     },
     {
       "id": "10e7a513-6d24-46a1-b86d-87526a8ea58d",
@@ -124,7 +129,66 @@
       "createdAt": "2026-02-27T12:46:06.417Z",
       "updatedAt": "2026-02-27T13:07:54.764Z",
       "order": 6
+    },
+    {
+      "id": "500f7306-3b70-4fbc-8500-f234d6a8a073",
+      "content": "江苏农信锁屏问题排查",
+      "title": "江苏农信锁屏问题排查",
+      "status": "done",
+      "dueDate": null,
+      "reminderTime": null,
+      "reminder3hTriggered": false,
+      "reminderExactTriggered": false,
+      "progress": 100,
+      "createdAt": "2026-02-28T01:45:50.556Z",
+      "updatedAt": "2026-02-28T03:02:34.075Z",
+      "priority": 1,
+      "order": 6
+    },
+    {
+      "id": "4d0ed8ca-4a17-4442-a3fb-cbffbd59c31a",
+      "content": "爱建证券 POC",
+      "title": "爱建证券POC",
+      "status": "todo",
+      "dueDate": null,
+      "reminderTime": null,
+      "reminder3hTriggered": false,
+      "reminderExactTriggered": false,
+      "progress": 0,
+      "createdAt": "2026-02-28T02:42:39.079Z",
+      "updatedAt": "2026-02-28T03:42:46.501Z",
+      "priority": 3,
+      "order": null
+    },
+    {
+      "id": "19839b14-fb99-4b86-beac-46dd54c53c9f",
+      "content": "修改工商银行脚本",
+      "title": "修改工商银行脚本",
+      "status": "in_progress",
+      "priority": 3,
+      "dueDate": null,
+      "reminderTime": null,
+      "reminder3hTriggered": false,
+      "reminderExactTriggered": false,
+      "progress": 22,
+      "createdAt": "2026-02-28T08:03:31.461Z",
+      "updatedAt": "2026-02-28T08:33:38.277Z"
+    },
+    {
+      "id": "9d61a150-0587-41a2-8d91-111728d1d9d4",
+      "content": "修改阿迪脚本",
+      "title": "修改阿迪脚本",
+      "status": "in_progress",
+      "priority": 3,
+      "dueDate": null,
+      "reminderTime": null,
+      "reminder3hTriggered": false,
+      "reminderExactTriggered": false,
+      "progress": 56,
+      "createdAt": "2026-02-28T08:22:29.680Z",
+      "updatedAt": "2026-02-28T08:44:33.088Z",
+      "zentaoId": "539"
     }
   ],
-  "lastUpdated": "2026-02-27T13:07:54.764Z"
+  "lastUpdated": "2026-02-28T09:13:44.972Z"
 }

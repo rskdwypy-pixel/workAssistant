@@ -43,20 +43,31 @@ async function getAllTasks(filters = {}) {
     tasks = getTasksByDate(tasks, filters.date);
   }
 
-  // 排序：未完成优先，然后按时间或自定义顺序
+  // 排序规则：
+  // 1. 手动拖拽位置（order）优先级最高
+  // 2. 优先级（priority）高排序靠前
+  // 3. 最后修改时间（updatedAt）排序靠前
   tasks.sort((a, b) => {
-    if (a.status !== b.status) {
-      const statusOrder = { todo: 0, in_progress: 1, done: 2 };
-      return statusOrder[a.status] - statusOrder[b.status];
-    }
-    // 同状态下，根据order排序（如果有），如果没有，使用时间倒序
+    // 1. 优先使用手动拖拽的 order 值
+    // 如果两个任务都有 order 值，按 order 排序
     if (a.order !== undefined && b.order !== undefined) {
       return a.order - b.order;
     }
+    // 如果只有一个有 order 值，有 order 的排前面
     if (a.order !== undefined) return -1;
     if (b.order !== undefined) return 1;
 
-    return new Date(b.createdAt) - new Date(a.createdAt);
+    // 2. 按 priority 排序（1最高，4最低）
+    const aPriority = a.priority ?? 3;
+    const bPriority = b.priority ?? 3;
+    if (aPriority !== bPriority) {
+      return aPriority - bPriority;
+    }
+
+    // 3. 按 updatedAt 降序排序（最新修改的在前）
+    const aTime = new Date(a.updatedAt || a.createdAt).getTime();
+    const bTime = new Date(b.updatedAt || b.createdAt).getTime();
+    return bTime - aTime;
   });
 
   return tasks;
@@ -118,11 +129,13 @@ async function addTask(content) {
     content: content,
     title: analysis.data.title || content.slice(0, 20),
     status: parsedStatus,
+    priority: analysis.data.priority ?? 3,
     dueDate: analysis.data.dueDate || null,
     reminderTime: analysis.data.reminderTime || null,
     reminder3hTriggered: analysis.data.reminderTime ? (new Date(analysis.data.reminderTime).getTime() - Date.now() <= 3 * 3600000) : false,
     reminderExactTriggered: false,
     progress: parsedProgress,
+    zentaoId: null,        // 禅道任务 ID（由浏览器插件同步）
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -130,7 +143,69 @@ async function addTask(content) {
   data.tasks.push(task);
   await writeTasks(data);
 
+  // 注意：禅道同步现在由浏览器插件负责，服务端不再主动同步
+
   return task;
+}
+
+/**
+ * 同步任务到禅道
+ */
+async function syncTaskToZentao(task) {
+  try {
+    const { config } = await import('../config.js');
+
+    console.log('[TaskManager] 禅道配置状态:', {
+      enabled: config.zentao.enabled,
+      hasUrl: !!config.zentao.url,
+      url: config.zentao.url,
+      hasUsername: !!config.zentao.username,
+      hasExecutionId: !!config.zentao.executionId,
+      executionId: config.zentao.executionId
+    });
+
+    if (!config.zentao.enabled) {
+      console.log('[TaskManager] 禅道同步未启用，跳过');
+      return;
+    }
+
+    if (!config.zentao.executionId) {
+      console.warn('[TaskManager] 禅道执行 ID 未配置，跳过同步');
+      return;
+    }
+
+    console.log(`[TaskManager] 开始同步任务到禅道: ${task.title}`);
+
+    const { getZentaoClient } = await import('./zentao.js');
+    const client = getZentaoClient();
+
+    const result = await client.createTask({
+      title: task.title,
+      content: task.content,
+      priority: task.priority,
+      dueDate: task.dueDate
+    });
+
+    if (result.success) {
+      // 更新任务的禅道 ID
+      task.zentaoId = result.taskId;
+
+      // 保存更新后的任务
+      const data = await readTasks();
+      const index = data.tasks.findIndex(t => t.id === task.id);
+      if (index !== -1) {
+        data.tasks[index].zentaoId = task.zentaoId;
+        await writeTasks(data);
+      }
+
+      console.log(`[TaskManager] 任务同步成功，禅道 ID: ${result.taskId}`);
+    } else {
+      console.error(`[TaskManager] 任务同步失败: ${result.error}`);
+    }
+  } catch (err) {
+    console.error('[TaskManager] 同步任务到禅道异常:', err.message);
+    // 不抛出异常，避免影响主流程
+  }
 }
 
 /**
@@ -171,7 +246,7 @@ function findSimilarTask(tasks, title) {
 /**
  * 添加或更新任务（智能去重）
  */
-async function addOrUpdateTask(content) {
+async function addOrUpdateTask(content, options = {}) {
   const data = await readTasks();
 
   // AI分析任务
@@ -186,6 +261,7 @@ async function addOrUpdateTask(content) {
   const newTask = {
     title: analysis.data.title || content.slice(0, 20),
     status: parsedStatus,
+    priority: analysis.data.priority ?? 3,
     dueDate: analysis.data.dueDate || null,
     reminderTime: analysis.data.reminderTime || null,
     reminder3hTriggered: analysis.data.reminderTime ? (new Date(analysis.data.reminderTime).getTime() - Date.now() <= 3 * 3600000) : false,
@@ -215,12 +291,19 @@ async function addOrUpdateTask(content) {
     id: uuidv4(),
     content: content,
     ...newTask,
+    zentaoId: options.zentaoId || null, // 支持传入浏览器端已创建的 zentaoId
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
 
   data.tasks.push(task);
   await writeTasks(data);
+
+  // 注意：禅道同步现在由浏览器插件负责，服务端不再主动同步
+  // 如果浏览器端已创建 zentaoId，使用它；否则留空等待浏览器端后续同步
+  if (task.zentaoId) {
+    console.log('[TaskManager] 使用浏览器端创建的禅道任务:', task.zentaoId);
+  }
 
   return { task, isNew: true };
 }
@@ -266,6 +349,11 @@ async function updateTask(taskId, updates) {
     }
   }
 
+  // 如果 order 明确设置为 null，则删除该字段（取消手动排序）
+  if (updates.hasOwnProperty('order') && updates.order === null) {
+    delete task.order;
+  }
+
   Object.assign(task, updates, {
     updatedAt: new Date().toISOString()
   });
@@ -285,10 +373,47 @@ async function deleteTask(taskId) {
     throw new Error('任务不存在');
   }
 
+  const task = data.tasks[index];
+
+  // 如果任务已同步到禅道，先关闭禅道任务
+  if (task.zentaoId) {
+    await closeZentaoTask(task.zentaoId);
+  }
+
   data.tasks.splice(index, 1);
   await writeTasks(data);
 
   return { success: true };
+}
+
+/**
+ * 关闭禅道任务
+ */
+async function closeZentaoTask(zentaoTaskId) {
+  try {
+    const { config } = await import('../config.js');
+
+    if (!config.zentao.enabled) {
+      console.log('[TaskManager] 禅道同步未启用，跳过关闭任务');
+      return;
+    }
+
+    console.log(`[TaskManager] 关闭禅道任务: ${zentaoTaskId}`);
+
+    const { getZentaoClient } = await import('./zentao.js');
+    const client = getZentaoClient();
+
+    const result = await client.closeTask(zentaoTaskId);
+
+    if (result.success) {
+      console.log(`[TaskManager] 禅道任务关闭成功`);
+    } else {
+      console.error(`[TaskManager] 禅道任务关闭失败: ${result.error}`);
+    }
+  } catch (err) {
+    console.error('[TaskManager] 关闭禅道任务异常:', err.message);
+    // 不抛出异常，避免影响主流程
+  }
 }
 
 /**

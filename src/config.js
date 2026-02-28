@@ -38,6 +38,15 @@ const config = {
     type: process.env.WEBHOOK_TYPE || 'generic'
   },
 
+  // 禅道配置
+  zentao: {
+    enabled: process.env.ZENTAO_ENABLED === 'true',
+    url: process.env.ZENTAO_URL || '',
+    username: process.env.ZENTAO_USERNAME || '',
+    password: process.env.ZENTAO_PASSWORD || '',
+    createTaskUrl: process.env.ZENTAO_CREATE_TASK_URL || ''
+  },
+
   // 数据目录
   paths: {
     root: join(__dirname, '..'),
@@ -63,6 +72,25 @@ function validateConfig() {
   if (!config.webhook.url) {
     console.log('ℹ️  Webhook 未配置，将仅使用系统通知');
   }
+
+  // 禅道配置验证
+  if (config.zentao.enabled) {
+    if (!config.zentao.url) {
+      console.warn('⚠️  禅道已启用但未配置 URL');
+    }
+    if (!config.zentao.username || !config.zentao.password) {
+      console.warn('⚠️  禅道已启用但未配置账号或密码');
+    }
+    if (!config.zentao.executionId) {
+      console.warn('⚠️  禅道已启用但未配置执行 ID');
+    }
+    if (config.zentao.url && config.zentao.username && config.zentao.password && config.zentao.executionId) {
+      console.log('✅ 禅道配置完整，同步已启用');
+    }
+  } else {
+    console.log('ℹ️  禅道同步未启用');
+  }
+
   return true;
 }
 

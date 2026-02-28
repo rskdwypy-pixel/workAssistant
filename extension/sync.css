@@ -1,0 +1,117 @@
+/* ==================== 同步 UI 样式（集成到设置页面）==================== */
+
+/* 上次同步时间 */
+.sync-last-time {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #8b949e;
+}
+
+/* 服务商选择标签 */
+.sync-provider-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.sync-tab {
+  padding: 6px 12px;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #8b949e;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.sync-tab:hover {
+  background: #30363d;
+  color: #c9d1d9;
+}
+
+.sync-tab.active {
+  background: #1f6feb;
+  border-color: #1f6feb;
+  color: #ffffff;
+}
+
+/* 坚果云帮助信息 */
+.jianguoyun-help {
+  padding: 10px 12px;
+  background: #1f6feb22;
+  border: 1px solid #1f6feb44;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.jianguoyun-help p {
+  margin: 0 0 6px 0;
+  font-size: 13px;
+  color: #58a6ff;
+}
+
+.help-link {
+  color: #58a6ff;
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.help-link:hover {
+  text-decoration: underline;
+}
+
+/* 复选框样式 */
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* 设置面板中的同步按钮 */
+.settings-footer #syncNowBtn {
+  background: #238636;
+  border-color: #238636;
+}
+
+.settings-footer #syncNowBtn:hover:not(:disabled) {
+  background: #2ea043;
+  border-color: #2ea043;
+}
+
+.settings-footer #syncNowBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 设置页面内同步按钮样式 */
+.settings-section .btn-secondary {
+  margin-top: 8px;
+}
+
+.settings-section #syncNowBtn:disabled {
+  background: #6e7681;
+  border-color: #6e7681;
+}
+
+/* 测试结果 */
+.test-result {
+  margin-left: 12px;
+  font-size: 12px;
+}
+
+.test-result.success {
+  color: #238636;
+}
+
+.test-result.error {
+  color: #f85149;
+}

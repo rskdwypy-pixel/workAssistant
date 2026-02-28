@@ -13,13 +13,13 @@ const router = express.Router();
  */
 router.post('/task', async (req, res) => {
   try {
-    const { content } = req.body;
+    const { content, zentaoId } = req.body;
 
     if (!content) {
       return res.status(400).json({ error: '请输入任务内容' });
     }
 
-    const result = await taskManager.addOrUpdateTask(content);
+    const result = await taskManager.addOrUpdateTask(content, { zentaoId });
     res.json({
       success: true,
       data: result.task,
@@ -150,7 +150,7 @@ router.put('/task/:id', async (req, res) => {
 router.put('/task/:id/progress', async (req, res) => {
   try {
     const { id } = req.params;
-    const { progress } = req.body;
+    const { progress, progressComment, consumedTime } = req.body;
 
     if (progress < 0 || progress > 100) {
       return res.status(400).json({ error: '进度必须在0-100之间' });
@@ -171,11 +171,60 @@ router.put('/task/:id/progress', async (req, res) => {
       await taskManager.updateTaskStatus(id, 'todo');
     }
 
+    // 同步工时到禅道
+    if (task.zentaoId) {
+      await syncEffortToZentao(task, progress, progressComment, consumedTime);
+    }
+
     res.json({ success: true, data: { ...task, progress, status } });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
+/**
+ * 同步工时到禅道
+ */
+async function syncEffortToZentao(task, progress, comment, consumedTime = 0) {
+  try {
+    const { config } = await import('../config.js');
+
+    if (!config.zentao.enabled) {
+      console.log('[API] 禅道同步未启用，跳过工时同步');
+      return;
+    }
+
+    console.log(`[API] 同步工时到禅道: ${task.title}, 进度: ${progress}%, 消耗工时: ${consumedTime}h`);
+
+    const { getZentaoClient } = await import('../services/zentao.js');
+    const client = getZentaoClient();
+
+    // 使用用户输入的工时记录进度
+    if (consumedTime > 0 || comment) {
+      const effortResult = await client.recordEstimate(
+        task.zentaoId,
+        comment || `进度更新至 ${progress}%`,
+        consumedTime || 0.5  // 如果用户没有输入，默认0.5小时
+      );
+
+      if (effortResult.success) {
+        console.log(`[API] 工时记录成功`);
+      } else {
+        console.error(`[API] 工时记录失败: ${effortResult.error}`);
+      }
+    }
+
+    // 更新禅道任务状态
+    if (progress === 100) {
+      await client.updateTaskStatus(task.zentaoId, 'done', progress);
+    } else if (progress > 0) {
+      await client.updateTaskStatus(task.zentaoId, 'in_progress', progress);
+    }
+  } catch (err) {
+    console.error('[API] 同步工时到禅道异常:', err.message);
+    // 不抛出异常，避免影响主流程
+  }
+}
 
 /**
  * DELETE /api/task/:id - 删除任务
@@ -744,6 +793,273 @@ router.get('/sync/summary', async (req, res) => {
   } catch (err) {
     console.error('[API] 获取同步摘要失败:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ==================== 禅道集成接口 ====================
+
+/**
+ * GET /api/zentao/config - 获取禅道配置状态
+ */
+router.get('/zentao/config', async (req, res) => {
+  try {
+    const configModule = await import('../config.js');
+    const zentaoConfig = configModule.config.zentao;
+
+    res.json({
+      success: true,
+      data: {
+        enabled: zentaoConfig.enabled || false,
+        url: zentaoConfig.url || '',
+        username: zentaoConfig.username || '',
+        password: zentaoConfig.password || '', // 返回密码供浏览器端使用
+        createTaskUrl: zentaoConfig.createTaskUrl || ''
+      }
+    });
+  } catch (err) {
+    console.error('[API] 获取禅道配置失败:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/zentao/config - 保存禅道配置
+ */
+router.post('/zentao/config', async (req, res) => {
+  try {
+    const {
+      enabled,
+      url,
+      username,
+      password,
+      createTaskUrl
+    } = req.body;
+
+    console.log('[API] 保存禅道配置:', {
+      enabled,
+      url: url ? url.substring(0, 30) + '...' : '(空)',
+      username,
+      createTaskUrl
+    });
+
+    // 更新运行时配置
+    const configModule = await import('../config.js');
+    configModule.config.zentao.enabled = enabled === true || enabled === 'true';
+    configModule.config.zentao.url = url || '';
+    configModule.config.zentao.username = username || '';
+    configModule.config.zentao.password = password || '';
+    configModule.config.zentao.createTaskUrl = createTaskUrl || '';
+
+    // 持久化到 .env 文件
+    const envUpdates = {
+      ZENTAO_ENABLED: enabled === true || enabled === 'true' ? 'true' : 'false',
+      ZENTAO_URL: url || '',
+      ZENTAO_USERNAME: username || '',
+      ZENTAO_PASSWORD: password || '',
+      ZENTAO_CREATE_TASK_URL: createTaskUrl || ''
+    };
+    configModule.updateEnvFile(envUpdates);
+
+    console.log('[API] 禅道配置已保存');
+    res.json({ success: true, message: '禅道配置已保存' });
+  } catch (err) {
+    console.error('[API] 保存禅道配置失败:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/zentao/test - 测试禅道连接
+ */
+router.post('/zentao/test', async (req, res) => {
+  try {
+    const { url, username, password } = req.body;
+
+    console.log('[API] 测试禅道连接...');
+
+    // 临时保存配置到环境变量进行测试
+    const configModule = await import('../config.js');
+    const originalEnabled = configModule.config.zentao.enabled;
+    const originalUrl = configModule.config.zentao.url;
+    const originalUsername = configModule.config.zentao.username;
+    const originalPassword = configModule.config.zentao.password;
+
+    // 设置测试配置
+    configModule.config.zentao.enabled = true;
+    configModule.config.zentao.url = url;
+    configModule.config.zentao.username = username;
+    configModule.config.zentao.password = password;
+
+    try {
+      const { getZentaoClient } = await import('../services/zentao.js');
+      const client = getZentaoClient();
+      const result = await client.testConnection();
+
+      if (result.success) {
+        console.log('[API] 禅道连接测试成功');
+        res.json({ success: true, message: '连接成功' });
+      } else {
+        console.error('[API] 禅道连接测试失败:', result.message);
+        res.status(400).json({ success: false, error: result.message });
+      }
+    } finally {
+      // 恢复原始配置
+      configModule.config.zentao.enabled = originalEnabled;
+      configModule.config.zentao.url = originalUrl;
+      configModule.config.zentao.username = originalUsername;
+      configModule.config.zentao.password = originalPassword;
+    }
+  } catch (err) {
+    console.error('[API] 测试禅道连接异常:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/zentao/projects - 获取项目列表
+ */
+router.get('/zentao/projects', async (req, res) => {
+  try {
+    const configModule = await import('../config.js');
+    const zentaoConfig = configModule.config.zentao;
+
+    if (!zentaoConfig.enabled || !zentaoConfig.url || !zentaoConfig.username || !zentaoConfig.password) {
+      return res.status(400).json({ success: false, error: '禅道未配置或未启用' });
+    }
+
+    console.log('[API] 获取禅道项目列表...');
+
+    const { getZentaoClient } = await import('../services/zentao.js');
+    const client = getZentaoClient();
+
+    const projects = await client.getProjects();
+
+    res.json({
+      success: true,
+      data: projects
+    });
+  } catch (err) {
+    console.error('[API] 获取禅道项目列表失败:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/zentao/stages - 获取指定项目的阶段列表
+ */
+router.get('/zentao/stages', async (req, res) => {
+  try {
+    const { projectId } = req.query;
+
+    if (!projectId) {
+      return res.status(400).json({ success: false, error: '请提供项目 ID' });
+    }
+
+    console.log(`[API] 获取项目 ${projectId} 的阶段列表...`);
+
+    const configModule = await import('../config.js');
+
+    if (!configModule.config.zentao.enabled) {
+      return res.status(400).json({ success: false, error: '禅道未启用' });
+    }
+
+    const { getZentaoClient } = await import('../services/zentao.js');
+    const client = getZentaoClient();
+
+    const stages = await client.getProjectStages(projectId);
+
+    res.json({
+      success: true,
+      data: stages
+    });
+  } catch (err) {
+    console.error('[API] 获取禅道阶段列表失败:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/zentao/sync-session - 浏览器插件同步禅道会话 Cookie
+ */
+router.post('/zentao/sync-session', async (req, res) => {
+  try {
+    const { cookies, sessionToken } = req.body;
+
+    if (!cookies) {
+      return res.status(400).json({ success: false, error: '缺少 cookies 参数' });
+    }
+
+    // 获取 ZentaoClient 单例并更新 session
+    const { getZentaoClient } = await import('../services/zentao.js');
+    const client = getZentaoClient();
+
+    // 更新服务端的 session
+    client.session = cookies;
+    if (sessionToken) {
+      client.sessionToken = sessionToken;
+    }
+    client.lastLoginTime = Date.now();
+
+    console.log('[API] 浏览器同步禅道会话成功');
+
+    res.json({ success: true, message: '会话同步成功' });
+  } catch (err) {
+    console.error('[API] 同步禅道会话失败:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/zentao/login - 服务端登录禅道（由浏览器插件触发）
+ */
+router.post('/zentao/login', async (req, res) => {
+  try {
+    const { getZentaoClient } = await import('../services/zentao.js');
+    const client = getZentaoClient();
+
+    // 执行登录
+    const success = await client.login();
+
+    if (success) {
+      // 返回 session 和 sessionToken 供浏览器插件使用
+      res.json({
+        success: true,
+        message: '登录成功',
+        data: {
+          session: client.session,
+          sessionToken: client.sessionToken
+        }
+      });
+    } else {
+      res.json({ success: false, error: '登录失败' });
+    }
+  } catch (err) {
+    console.error('[API] 禅道登录失败:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/zentao/session-status - 获取当前禅道会话状态
+ */
+router.get('/zentao/session-status', async (req, res) => {
+  try {
+    const { getZentaoClient } = await import('../services/zentao.js');
+    const client = getZentaoClient();
+
+    const isValid = await client.validate();
+
+    res.json({
+      success: true,
+      data: {
+        isValid,
+        hasSession: !!client.session,
+        lastLoginTime: client.lastLoginTime
+      }
+    });
+  } catch (err) {
+    console.error('[API] 获取禅道会话状态失败:', err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

@@ -35,6 +35,29 @@
     </div>
   </div>
 
+  <!-- 进度更新输入对话框 -->
+  <div id="progressInputDialog" class="confirm-dialog">
+    <div class="confirm-box" style="max-width: 400px;">
+      <h3 class="confirm-title" id="progressInputTitle">更新进度</h3>
+      <p class="confirm-message" id="progressInputMessage" style="margin-bottom: 16px;"></p>
+      <div class="input-group" style="margin-bottom: 16px;">
+        <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">工作内容</label>
+        <textarea id="progressInputWork" rows="3" placeholder="请填写本次工作内容..."
+          style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical; box-sizing: border-box;"></textarea>
+      </div>
+      <div class="input-group" style="margin-bottom: 16px;">
+        <label
+          style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">消耗工时（小时）</label>
+        <input type="number" id="progressInputConsumed" min="0" max="999" step="0.5" placeholder="如: 1.5"
+          style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit; box-sizing: border-box;">
+      </div>
+      <div class="confirm-actions">
+        <button class="btn-confirm-cancel" id="progressInputCancel">取消</button>
+        <button class="btn-confirm-ok" id="progressInputOk">确定</button>
+      </div>
+    </div>
+  </div>
+
   <div class="app-container">
     <!-- 左侧边栏：日历 + 快速操作 -->
     <aside class="sidebar">
@@ -321,6 +344,40 @@
           </div>
           <button id="testWebhook" class="btn-secondary">🧪 测试推送</button>
           <span id="webhookTestResult" class="test-result"></span>
+        </div>
+
+        <!-- 禅道集成配置 -->
+        <div class="settings-section">
+          <h4>🐉 禅道集成</h4>
+          <div class="settings-item">
+            <label class="checkbox-label">
+              <input type="checkbox" id="zentaoEnabled">
+              <span>启用禅道同步</span>
+            </label>
+          </div>
+          <div class="settings-item">
+            <label>禅道 API 地址 <span class="required">*</span></label>
+            <input type="text" id="zentaoUrl" placeholder="http://your-zentao.com">
+            <span class="input-hint">💡 如: http://10.128.1.8:8088</span>
+          </div>
+          <div class="settings-item">
+            <label>禅道账号 <span class="required">*</span></label>
+            <input type="text" id="zentaoUsername" placeholder="your-account">
+          </div>
+          <div class="settings-item">
+            <label>禅道密码 <span class="required">*</span></label>
+            <input type="password" id="zentaoPassword" placeholder="your-password">
+          </div>
+          <div class="settings-item">
+            <label>新建任务地址 <span class="required">*</span></label>
+            <input type="text" id="zentaoCreateTaskUrl"
+              placeholder="如：http://10.128.1.8:8088/zentao/task-create-162-0-0.html">
+            <span class="input-hint">💡 以后所有的新建任务都通过这个地址来创建</span>
+          </div>
+          <div style="display: flex; gap: 8px; margin-top: 12px;">
+            <button id="testZentao" class="btn-secondary">🧪 测试连接</button>
+          </div>
+          <span id="zentaoTestResult" class="test-result"></span>
         </div>
 
 

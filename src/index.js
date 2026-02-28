@@ -3,6 +3,7 @@ import { config, validateConfig } from './config.js';
 import apiRouter from './routes/api.js';
 import { startReminder } from './services/reminder.js';
 import { startSummary } from './services/summary.js';
+import { getZentaoClient } from './services/zentao.js';
 
 const app = express();
 const { server } = config;
@@ -67,11 +68,20 @@ function startServer() {
   // 启动定时任务
   startReminder();
   startSummary();
+
+  // 启动禅道会话保活（如果已启用）
+  if (config.zentao.enabled) {
+    const zentaoClient = getZentaoClient();
+    zentaoClient.startKeepAlive(5); // 每 5 分钟检测一次
+  }
 }
 
 // 优雅关闭
 function shutdown() {
   console.log('\n👋 正在关闭服务...');
+  // 停止禅道会话保活定时器
+  const zentaoClient = getZentaoClient();
+  zentaoClient.stopKeepAlive();
   process.exit(0);
 }
 

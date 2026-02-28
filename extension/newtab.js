@@ -130,6 +130,96 @@ const Confirm = {
   }
 };
 
+// ==================== 进度更新输入对话框 ====================
+const ProgressInputDialog = {
+  dialog: null,
+
+  init() {
+    this.dialog = document.getElementById('progressInputDialog');
+    this.titleEl = document.getElementById('progressInputTitle');
+    this.messageEl = document.getElementById('progressInputMessage');
+    this.workInput = document.getElementById('progressInputWork');
+    this.consumedInput = document.getElementById('progressInputConsumed');
+    this.cancelBtn = document.getElementById('progressInputCancel');
+    this.okBtn = document.getElementById('progressInputOk');
+
+    // 默认关闭事件
+    this.cancelBtn.addEventListener('click', () => this.hide(null));
+  },
+
+  show(title, message, defaultWork = '', defaultConsumed = '') {
+    if (!this.dialog) this.init();
+
+    this.titleEl.textContent = title;
+    this.messageEl.textContent = message;
+    this.workInput.value = defaultWork;
+    this.consumedInput.value = defaultConsumed;
+
+    this.dialog.classList.add('active');
+
+    // 聚焦到工作内容输入框
+    setTimeout(() => this.workInput.focus(), 100);
+
+    return new Promise((resolve) => {
+      const handleOk = () => {
+        const work = this.workInput.value.trim();
+        const consumed = this.consumedInput.value.trim();
+
+        // 验证消耗工时
+        if (consumed && (isNaN(parseFloat(consumed)) || parseFloat(consumed) < 0)) {
+          Toast.warning('请输入有效的工时数值');
+          this.consumedInput.focus();
+          return;
+        }
+
+        this.hide();
+        this.okBtn.removeEventListener('click', handleOk);
+        resolve({ work, consumed: parseFloat(consumed) || 0 });
+      };
+
+      this.okBtn.addEventListener('click', handleOk);
+
+      // 支持回车提交
+      const handleKeyPress = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          handleOk();
+        }
+      };
+      this.workInput.addEventListener('keydown', handleKeyPress);
+      this.consumedInput.addEventListener('keydown', handleKeyPress);
+
+      // 点击遮罩关闭 = 取消
+      const handleMaskClick = (e) => {
+        if (e.target === this.dialog) {
+          this.hide();
+          this.dialog.removeEventListener('click', handleMaskClick);
+          this.workInput.removeEventListener('keydown', handleKeyPress);
+          this.consumedInput.removeEventListener('keydown', handleKeyPress);
+          resolve(null);
+        }
+      };
+      this.dialog.addEventListener('click', handleMaskClick);
+
+      // 清理函数
+      this._cleanup = () => {
+        this.okBtn.removeEventListener('click', handleOk);
+        this.workInput.removeEventListener('keydown', handleKeyPress);
+        this.consumedInput.removeEventListener('keydown', handleKeyPress);
+        this.dialog.removeEventListener('click', handleMaskClick);
+      };
+    });
+  },
+
+  hide() {
+    this.dialog.classList.remove('active');
+    if (this._cleanup) {
+      this._cleanup();
+      this._cleanup = null;
+    }
+  }
+};
+
 // 快捷函数
 function showToast(message, type = 'info', duration = 3000) {
   return Toast.show(message, type, duration);
@@ -204,6 +294,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadTasks();
   await loadHistoryPreview();
   await checkTodayReports();
+
+  // 自动登录禅道（如果已配置）
+  ZentaoBrowserClient.autoInit().catch(err => {
+    console.log('[ZentaoBrowser] 自动登录跳过:', err.message);
+  });
 
   // 初始化同步功能
   if (typeof syncManager !== 'undefined' && typeof SyncUI !== 'undefined') {
@@ -471,6 +566,45 @@ function bindEvents() {
     }
   });
 
+  // ========== 禅道相关事件 ==========
+
+  // 测试禅道连接
+  document.getElementById('testZentao').addEventListener('click', async () => {
+    const url = document.getElementById('zentaoUrl').value.trim();
+    const username = document.getElementById('zentaoUsername').value.trim();
+    const password = document.getElementById('zentaoPassword').value.trim();
+    const resultEl = document.getElementById('zentaoTestResult');
+
+    if (!url || !username || !password) {
+      resultEl.textContent = '❌ 请先填写禅道地址、账号和密码';
+      resultEl.className = 'test-result error';
+      return;
+    }
+
+    resultEl.textContent = '⏳ 测试连接中...';
+    resultEl.className = 'test-result';
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/zentao/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, username, password })
+      });
+
+      const result = await response.json();
+      if (response.ok && result.success) {
+        resultEl.textContent = '✅ 连接成功！';
+        resultEl.className = 'test-result success';
+      } else {
+        resultEl.textContent = `❌ ${result.error || result.message || '连接失败'}`;
+        resultEl.className = 'test-result error';
+      }
+    } catch (err) {
+      resultEl.textContent = `❌ 连接失败: ${err.message}`;
+      resultEl.className = 'test-result error';
+    }
+  });
+
   // 保存配置
   document.getElementById('saveSettings').addEventListener('click', async () => {
     const config = {
@@ -482,6 +616,12 @@ function bindEvents() {
       webhookUrl: document.getElementById('webhookUrl').value.trim(),
       webhookType: document.getElementById('webhookType').value,
       aiProvider: document.getElementById('aiProvider').value,
+      // 禅道配置
+      zentaoEnabled: document.getElementById('zentaoEnabled')?.checked || false,
+      zentaoUrl: document.getElementById('zentaoUrl')?.value.trim() || '',
+      zentaoUsername: document.getElementById('zentaoUsername')?.value.trim() || '',
+      zentaoPassword: document.getElementById('zentaoPassword')?.value.trim() || '',
+      zentaoCreateTaskUrl: document.getElementById('zentaoCreateTaskUrl')?.value.trim() || '',
       // 后端服务URL（与AI API URL分开）
       backendUrl: 'http://localhost:3721'
     };
@@ -513,6 +653,30 @@ function bindEvents() {
       }
     } catch (err) {
       console.error('同步配置失败:', err);
+    }
+
+    // 同步禅道配置到后端
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/zentao/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: config.zentaoEnabled,
+          url: config.zentaoUrl,
+          username: config.zentaoUsername,
+          password: config.zentaoPassword,
+          createTaskUrl: config.zentaoCreateTaskUrl
+        })
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        console.log('[前端] 禅道配置已保存');
+      } else {
+        console.error('[前端] 禅道配置保存失败:', result.error);
+      }
+    } catch (err) {
+      console.error('同步禅道配置失败:', err);
     }
 
     // 更新后端服务地址
@@ -1227,7 +1391,10 @@ function createTaskCard(task) {
   card.innerHTML = `
     <div class="task-title" style="display: flex; align-items: flex-start; gap: 8px; width:100%;">
       <input type="checkbox" class="task-checkbox" data-task-id="${task.id}" ${task.status === 'done' ? 'checked' : ''} style="margin-top: 4px; cursor: pointer;">
-      <span style="flex:1;">${escapeHtml(task.title)}</span>
+      <span style="flex:1;">
+        ${escapeHtml(task.title)}
+        ${task.zentaoId ? `<a href="${getZentaoTaskUrl(task.zentaoId)}" target="_blank" class="zentao-link" style="margin-left: 6px; color: #3b82f6; text-decoration: none; font-size: 12px;">#${task.zentaoId}</a>` : ''}
+      </span>
       ${priorityHTML}
     </div>
     ${task.status !== 'done' ? `
@@ -1429,11 +1596,40 @@ async function addTask() {
   const originalPlaceholder = input.placeholder;
   input.placeholder = '✨ AI 正在努力分析并提取任务属性，请稍候...';
 
+  // 浏览器端禅道任务 ID（如果成功创建）
+  let browserZentaoId = null;
+
   try {
+    // 第一步：尝试在浏览器端创建禅道任务（利用浏览器登录状态）
+    try {
+      await ZentaoBrowserClient.initConfig();
+      if (ZentaoBrowserClient.isConfigured()) {
+        console.log('[AddTask] 尝试使用浏览器端创建禅道任务...');
+        const zentaoResult = await ZentaoBrowserClient.createTask({
+          title: content,
+          content: content,
+          dueDate: null
+        });
+
+        if (zentaoResult.success && zentaoResult.taskId) {
+          browserZentaoId = zentaoResult.taskId;
+          console.log('[AddTask] 浏览器端创建禅道任务成功:', browserZentaoId);
+        } else if (zentaoResult.fallbackNeeded) {
+          console.log('[AddTask] 浏览器端创建失败，将由服务端处理');
+        }
+      }
+    } catch (err) {
+      console.log('[AddTask] 浏览器端创建禅道任务出错，将由服务端处理:', err.message);
+    }
+
+    // 第二步：调用服务端 API 创建任务
     const response = await fetch(`${API_BASE_URL}/api/task`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content })
+      body: JSON.stringify({
+        content,
+        zentaoId: browserZentaoId // 如果浏览器端已创建，传递 zentaoId
+      })
     });
 
     const result = await response.json();
@@ -1446,7 +1642,7 @@ async function addTask() {
       if (result.isNew === false) {
         Toast.info(result.message || '已更新现有任务');
       } else {
-        Toast.success('任务已添加');
+        Toast.success('任务已添加' + (browserZentaoId ? ' (已同步至禅道)' : ''));
       }
 
       // 触发同步
@@ -1474,10 +1670,56 @@ async function addTask() {
 // 更新任务进度
 async function updateTaskProgress(taskId, progress) {
   try {
+    // 获取任务信息，用于弹窗提示
+    const task = allTasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    let progressComment = '';
+    let consumedTime = 0;
+
+    // 如果进度有变化，弹出输入框让用户填写工作内容和消耗工时
+    if (task.progress !== progress) {
+      const result = await ProgressInputDialog.show(
+        '更新进度',
+        `更新进度至 ${progress}%`,
+        `进度更新至 ${progress}%`,
+        ''
+      );
+
+      // 用户取消则不更新
+      if (result === null) {
+        console.log('[Progress] 用户取消进度更新');
+        return;
+      }
+
+      progressComment = result.work || `进度更新至 ${progress}%`;
+      consumedTime = result.consumed || 0;
+    }
+
+    // 第一步：尝试在浏览器端更新禅道任务状态（如果有 zentaoId）
+    if (task.zentaoId) {
+      try {
+        // 根据进度确定状态
+        let status = 'todo';
+        if (progress > 0 && progress < 100) status = 'in_progress';
+        else if (progress === 100) status = 'done';
+
+        const zentaoResult = await ZentaoBrowserClient.updateTaskStatus(task.zentaoId, status, progress);
+        if (zentaoResult.success) {
+          console.log('[Progress] 浏览器端更新禅道状态成功');
+        } else if (zentaoResult.fallbackNeeded) {
+          console.log('[Progress] 浏览器端更新失败，将由服务端处理');
+        }
+      } catch (err) {
+        console.log('[Progress] 浏览器端更新禅道状态出错，将由服务端处理:', err.message);
+      }
+    }
+
+    // 第二步：调用服务端 API 更新进度
     const response = await fetch(`${API_BASE_URL}/api/task/${taskId}/progress`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ progress })
+      body: JSON.stringify({ progress, progressComment, consumedTime })
     });
 
     const result = await response.json();
@@ -1701,6 +1943,18 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// 获取禅道任务URL
+function getZentaoTaskUrl(taskId) {
+  // 从本地存储获取禅道配置
+  const config = localStorage.getItem('workAssistantConfig');
+  if (config) {
+    const parsed = JSON.parse(config);
+    const baseUrl = parsed.zentaoUrl?.replace(/\/$/, '') || '';
+    return `${baseUrl}/zentao/task-view-${taskId}.html`;
+  }
+  return `#`;
+}
+
 function debounce(func, wait) {
   let timeout;
   return function executedFunction(...args) {
@@ -1826,6 +2080,16 @@ function loadSettings() {
   setVal('webhookUrl', config.webhookUrl || '');
   setVal('webhookType', config.webhookType || 'generic');
 
+  // 加载禅道配置
+  const zentaoEnabled = document.getElementById('zentaoEnabled');
+  if (zentaoEnabled) {
+    zentaoEnabled.checked = config.zentaoEnabled || false;
+  }
+  setVal('zentaoUrl', config.zentaoUrl || '');
+  setVal('zentaoUsername', config.zentaoUsername || '');
+  setVal('zentaoPassword', config.zentaoPassword || '');
+  setVal('zentaoCreateTaskUrl', config.zentaoCreateTaskUrl || '');
+
   // 同步调试模式复选框状态
   const debugModeToggle = document.getElementById('debugModeToggle');
   if (debugModeToggle) {
@@ -1835,6 +2099,32 @@ function loadSettings() {
   // 加载同步配置
   if (window.syncUI) {
     window.syncUI.loadCurrentSyncSettings();
+  }
+
+  // 加载禅道配置状态
+  loadZentaoConfigStatus();
+}
+
+// 加载禅道配置状态
+async function loadZentaoConfigStatus() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/zentao/config`);
+    if (response.ok) {
+      const result = await response.json();
+      if (result.success && result.data) {
+        console.log('[前端] 禅道配置状态:', result.data);
+        // 如果后端有配置，可以使用后端的配置覆盖前端的
+        if (result.data.enabled && !document.getElementById('zentaoUrl').value) {
+          document.getElementById('zentaoEnabled').checked = true;
+          document.getElementById('zentaoUrl').value = result.data.urlPrefix?.replace('...', '') || '';
+          document.getElementById('zentaoUsername').value = result.data.username || '';
+          document.getElementById('zentaoPassword').value = result.data.password || '';
+          document.getElementById('zentaoCreateTaskUrl').value = result.data.createTaskUrl || '';
+        }
+      }
+    }
+  } catch (err) {
+    console.log('[前端] 获取禅道配置状态失败（可能后端未启动）');
   }
 }
 
@@ -2243,3 +2533,691 @@ function triggerSync() {
     }
   }
 }
+
+// ==================== 禅道浏览器客户端 ====================
+
+/**
+ * 禅道浏览器客户端
+ * 利用浏览器的登录状态直接调用禅道 API
+ */
+const ZentaoBrowserClient = {
+  config: null,
+  isLoggedIn: false,
+  sessionToken: null,
+  cookies: null, // 手动存储的 Cookie 字符串
+  keepAliveTimer: null,
+
+  /**
+   * 初始化配置
+   */
+  async initConfig() {
+    if (this.config) return this.config;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/zentao/config`);
+      const result = await response.json();
+      if (result.success) {
+        this.config = result.data;
+      }
+    } catch (err) {
+      console.error('[ZentaoBrowser] 获取配置失败:', err);
+    }
+    return this.config;
+  },
+
+  /**
+   * 获取禅道基础 URL
+   */
+  getBaseUrl() {
+    return this.config?.url?.replace(/\/$/, '') || '';
+  },
+
+  /**
+   * 检查是否已配置
+   */
+  isConfigured() {
+    return this.config?.enabled && this.config.url && this.config.createTaskUrl;
+  },
+
+  /**
+   * 登录禅道
+   */
+  async login() {
+    await this.initConfig();
+
+    if (!this.isConfigured()) {
+      console.log('[ZentaoBrowser] 禅道未配置');
+      return false;
+    }
+
+    if (this.isLoggedIn) {
+      console.log('[ZentaoBrowser] 已登录，跳过');
+      return true;
+    }
+
+    console.log('[ZentaoBrowser] 开始登录禅道...');
+
+    const params = new URLSearchParams();
+    params.append('account', this.config.username || '');
+    params.append('password', this.config.password || '');
+
+    try {
+      const response = await fetch(`${this.getBaseUrl()}/zentao/user-login.json`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json, text/javascript, */*; q=0.01',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        body: params,
+        credentials: 'include'
+      });
+
+      const text = await response.text();
+      console.log('[ZentaoBrowser] 登录响应状态:', response.status);
+
+      if (!response.ok) {
+        console.error('[ZentaoBrowser] 登录失败:', response.status);
+        return false;
+      }
+
+      const data = JSON.parse(text);
+      console.log('[ZentaoBrowser] 登录响应:', data);
+
+      if (data.status === 'success') {
+        // 解析 session token
+        try {
+          const dataData = JSON.parse(data.data);
+          if (dataData.s) {
+            this.sessionToken = dataData.s;
+            console.log('[ZentaoBrowser] 登录成功，获取到 session token');
+          }
+        } catch (e) {
+          // 忽略解析错误
+        }
+
+        this.isLoggedIn = true;
+
+        // 通知服务端登录（让服务端也获取 session）
+        this.notifyServerLogin().catch(err => {
+          console.log('[ZentaoBrowser] 通知服务端登录失败:', err.message);
+        });
+
+        Toast.success('禅道登录成功');
+        return true;
+      } else {
+        console.error('[ZentaoBrowser] 登录返回失败:', data);
+        Toast.error('禅道登录失败');
+        return false;
+      }
+    } catch (err) {
+      console.error('[ZentaoBrowser] 登录异常:', err.message);
+      Toast.error('禅道登录异常');
+      return false;
+    }
+  },
+
+  /**
+   * 自动初始化（页面加载时调用）
+   */
+  async autoInit() {
+    await this.initConfig();
+    if (this.isConfigured()) {
+      // 尝试从 localStorage 恢复之前保存的 session
+      try {
+        const savedCookies = localStorage.getItem('zentao_cookies');
+        const savedToken = localStorage.getItem('zentao_sessionToken');
+        if (savedCookies && savedToken) {
+          this.cookies = savedCookies;
+          this.sessionToken = savedToken;
+          this.isLoggedIn = true;
+          console.log('[ZentaoBrowser] 从本地恢复登录状态');
+          // 启动定时检查
+          this.startKeepAlive();
+          // 验证恢复的 session 是否有效
+          const isValid = await this.validateSession();
+          if (!isValid) {
+            console.log('[ZentaoBrowser] 恢复的 session 已失效，重新登录...');
+            this.cookies = null;
+            this.sessionToken = null;
+            this.isLoggedIn = false;
+            await this.login();
+          }
+          return;
+        }
+      } catch (e) {
+        // 忽略存储错误
+      }
+
+      // 没有保存的 session，执行登录
+      await this.login();
+      // 启动定时检查服务端会话状态
+      this.startKeepAlive();
+    }
+  },
+
+  /**
+   * 验证当前 session 是否有效
+   */
+  async validateSession() {
+    try {
+      const headers = {};
+      if (this.cookies) {
+        headers['Cookie'] = this.cookies;
+      }
+
+      const response = await fetch(`${this.getBaseUrl()}/zentao/user.json`, {
+        headers
+      });
+
+      if (response.ok) {
+        const text = await response.text();
+        // 检查是否是 JSON 格式
+        if (text.startsWith('{')) {
+          try {
+            const data = JSON.parse(text);
+            // 检查是否是登录失效的响应
+            if (data.result === false && data.message && (
+              data.message.includes('登录已超时') ||
+              data.message.includes('请重新登入') ||
+              data.message.includes('请先登录')
+            )) {
+              console.log('[ZentaoBrowser] Session 已失效:', data.message);
+              return false;
+            }
+            return true;
+          } catch (e) {
+            // 解析失败，假设有效
+            return true;
+          }
+        }
+      }
+      return false;
+    } catch (err) {
+      console.error('[ZentaoBrowser] 验证 session 失败:', err.message);
+      return false;
+    }
+  },
+
+  /**
+   * 启动定时保活检查
+   */
+  startKeepAlive(intervalMinutes = 2) {
+    if (this.keepAliveTimer) {
+      clearInterval(this.keepAliveTimer);
+    }
+
+    const intervalMs = intervalMinutes * 60 * 1000;
+    console.log(`[ZentaoBrowser] 启动会话保活，检测间隔: ${intervalMinutes} 分钟`);
+
+    // 立即执行一次检查
+    this.keepAliveCheck();
+
+    // 启动定时器
+    this.keepAliveTimer = setInterval(() => {
+      this.keepAliveCheck();
+    }, intervalMs);
+  },
+
+  /**
+   * 停止定时保活检查
+   */
+  stopKeepAlive() {
+    if (this.keepAliveTimer) {
+      clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = null;
+      console.log('[ZentaoBrowser] 会话保活定时器已停止');
+    }
+  },
+
+  /**
+   * 刷新 Cookie（通知服务端重新登录）
+   */
+  async refreshCookies() {
+    try {
+      console.log('[ZentaoBrowser] 正在刷新 Cookie...');
+      const response = await fetch(`${API_BASE_URL}/api/zentao/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      const result = await response.json();
+      if (result.success && result.data) {
+        if (result.data.session) {
+          this.cookies = result.data.session;
+          console.log('[ZentaoBrowser] Cookie 已刷新');
+        }
+        if (result.data.sessionToken) {
+          this.sessionToken = result.data.sessionToken;
+        }
+        // 更新 localStorage
+        try {
+          localStorage.setItem('zentao_cookies', result.data.session);
+          localStorage.setItem('zentao_sessionToken', result.data.sessionToken);
+        } catch (e) {
+          // 忽略存储错误
+        }
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('[ZentaoBrowser] 刷新 Cookie 失败:', err.message);
+      return false;
+    }
+  },
+
+  /**
+   * 会话保活检查
+   */
+  async keepAliveCheck() {
+    if (!this.isConfigured()) return;
+
+    try {
+      // 检查浏览器端的登录状态（通过调用禅道 API）
+      const headers = {};
+      if (this.cookies) {
+        headers['Cookie'] = this.cookies;
+      }
+
+      const response = await fetch(`${this.getBaseUrl()}/zentao/user.json`, {
+        headers
+      });
+
+      if (response.ok) {
+        const text = await response.text();
+        // 如果返回 HTML，说明登录失效
+        if (!text.startsWith('{')) {
+          console.log('[ZentaoBrowser] 检测到浏览器登录失效，正在重新登录...');
+          await this.login();
+        } else {
+          // 解析 JSON 检查是否真的有效
+          try {
+            const data = JSON.parse(text);
+            if (data.result === false && data.message && (
+              data.message.includes('登录已超时') ||
+              data.message.includes('请重新登入')
+            )) {
+              console.log('[ZentaoBrowser] Session 已失效:', data.message);
+              await this.login();
+            } else {
+              console.log('[ZentaoBrowser] 浏览器会话正常');
+            }
+          } catch (e) {
+            console.log('[ZentaoBrowser] 浏览器会话正常');
+          }
+        }
+      } else {
+        console.log('[ZentaoBrowser] 检测到浏览器登录失效，正在重新登录...');
+        await this.login();
+      }
+    } catch (err) {
+      console.error('[ZentaoBrowser] 会话保活检查失败:', err.message);
+    }
+  },
+
+  /**
+   * 通知服务端登录（让服务端也获取 session）
+   */
+  async notifyServerLogin() {
+    try {
+      console.log('[ZentaoBrowser] 通知服务端登录...');
+      const response = await fetch(`${API_BASE_URL}/api/zentao/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      const result = await response.json();
+      if (result.success && result.data) {
+        console.log('[ZentaoBrowser] 服务端登录成功');
+        // 保存服务端返回的 session
+        if (result.data.session) {
+          this.cookies = result.data.session;
+          console.log('[ZentaoBrowser] 已保存服务端 Cookie');
+        }
+        if (result.data.sessionToken) {
+          this.sessionToken = result.data.sessionToken;
+        }
+        // 保存到 localStorage 以便刷新后使用
+        try {
+          localStorage.setItem('zentao_cookies', result.data.session);
+          localStorage.setItem('zentao_sessionToken', result.data.sessionToken);
+        } catch (e) {
+          // 忽略存储错误
+        }
+      } else {
+        console.log('[ZentaoBrowser] 服务端登录失败:', result.error);
+      }
+    } catch (err) {
+      console.error('[ZentaoBrowser] 通知服务端登录异常:', err.message);
+    }
+  },
+
+  /**
+   * 生成随机 UID
+   */
+  generateUid() {
+    return Math.random().toString(36).substring(2, 14);
+  },
+
+  /**
+   * 构建 multipart/form-data
+   */
+  buildMultipartFormData(fieldList) {
+    const boundary = `----WebKitFormBoundary${Math.random().toString(36).substring(2, 14)}`;
+    let body = '';
+
+    for (const field of fieldList) {
+      body += `--${boundary}\r\n`;
+      body += `Content-Disposition: form-data; name="${field.name}"\r\n\r\n`;
+      body += `${field.value}\r\n`;
+    }
+
+    body += `--${boundary}--\r\n`;
+    return { boundary, formData: body };
+  },
+
+  /**
+   * 获取 session token（通过 GET 请求获取用户信息页面）
+   */
+  async getSessionToken() {
+    try {
+      const response = await fetch(`${this.getBaseUrl()}/zentao/api.php?mode=getconfig`);
+      if (!response.ok) return null;
+
+      const text = await response.text();
+      // 尝试从响应中提取 session token
+      const match = text.match(/"s":"([^"]+)"/);
+      if (match) {
+        return match[1];
+      }
+    } catch (err) {
+      console.error('[ZentaoBrowser] 获取 session token 失败:', err);
+    }
+    return null;
+  },
+
+  /**
+   * 创建任务
+   */
+  async createTask(taskData) {
+    await this.initConfig();
+
+    if (!this.isConfigured()) {
+      console.log('[ZentaoBrowser] 禅道未配置或不完整');
+      return { success: false, fallbackNeeded: true };
+    }
+
+    // 确保已登录
+    if (!this.isLoggedIn) {
+      console.log('[ZentaoBrowser] 未登录，尝试登录...');
+      const loginSuccess = await this.login();
+      if (!loginSuccess) {
+        console.log('[ZentaoBrowser] 登录失败，无法创建任务');
+        return { success: false, fallbackNeeded: true };
+      }
+    }
+
+    const createTaskUrl = this.config.createTaskUrl || '';
+    let executionId = '0';
+    const match = createTaskUrl.match(/task-create-(\d+)/);
+    if (match) {
+      executionId = match[1];
+    }
+    const username = this.config.username || 'admin';
+
+    console.log('[ZentaoBrowser] 准备创建任务:', taskData.title);
+
+    try {
+      // 构建 multipart 表单数据
+      const fieldList = [
+        { name: 'execution', value: executionId },
+        { name: 'type', value: 'test' },
+        { name: 'module', value: '0' },
+        { name: 'assignedTo[]', value: username },
+        { name: 'teamMember', value: '' },
+        { name: 'mode', value: 'linear' },
+        { name: 'status', value: 'wait' },
+        { name: 'story', value: '' },
+        { name: 'color', value: '' },
+        { name: 'name', value: taskData.title },
+        { name: 'storyEstimate', value: '' },
+        { name: 'storyDesc', value: '' },
+        { name: 'storyPri', value: '' },
+        { name: 'pri', value: '3' },
+        { name: 'estimate', value: '' },
+        { name: 'desc', value: taskData.content || taskData.title },
+        { name: 'estStarted', value: '' },
+        { name: 'deadline', value: taskData.dueDate || '' },
+        { name: 'after', value: 'toTaskList' },
+        { name: 'uid', value: this.generateUid() },
+        // team[] 等字段重复5次
+        { name: 'team[]', value: '' },
+        { name: 'teamSource[]', value: '' },
+        { name: 'teamEstimate[]', value: '' },
+        { name: 'team[]', value: '' },
+        { name: 'teamSource[]', value: '' },
+        { name: 'teamEstimate[]', value: '' },
+        { name: 'team[]', value: '' },
+        { name: 'teamSource[]', value: '' },
+        { name: 'teamEstimate[]', value: '' },
+        { name: 'team[]', value: '' },
+        { name: 'teamSource[]', value: '' },
+        { name: 'teamEstimate[]', value: '' },
+        { name: 'team[]', value: '' },
+        { name: 'teamSource[]', value: '' },
+        { name: 'teamEstimate[]', value: '' },
+      ];
+
+      const { boundary, formData } = this.buildMultipartFormData(fieldList);
+
+      let endpoint = createTaskUrl;
+      // 如果不是以 http 开头，自动拼接 baseURL
+      if (!endpoint.startsWith('http')) {
+        endpoint = `${this.getBaseUrl()}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+      }
+
+      // 添加 session token 到 URL
+      const urlObj = new URL(endpoint);
+      if (this.sessionToken) {
+        urlObj.searchParams.set('s', this.sessionToken);
+      }
+      endpoint = urlObj.toString();
+
+      console.log('[ZentaoBrowser] 发送创建任务请求到:', endpoint);
+
+      // 构建请求头，手动添加 Cookie
+      const headers = {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'X-Requested-With': 'XMLHttpRequest',
+      };
+
+      // 如果有保存的 Cookie，手动添加
+      if (this.cookies) {
+        headers['Cookie'] = this.cookies;
+      }
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: formData
+      });
+
+      const responseText = await response.text();
+      console.log('[ZentaoBrowser] 响应状态:', response.status);
+      console.log('[ZentaoBrowser] 响应内容:', responseText.substring(0, 500));
+
+      if (!response.ok) {
+        console.error('[ZentaoBrowser] HTTP 错误:', response.status);
+        return { success: false, fallbackNeeded: true };
+      }
+
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        console.error('[ZentaoBrowser] 响应不是有效的 JSON');
+        return { success: false, fallbackNeeded: true };
+      }
+
+      // 检查是否是登录失效
+      if (data.result === false && data.message && (
+        data.message.includes('登录已超时') ||
+        data.message.includes('请重新登入') ||
+        data.message.includes('请先登录')
+      )) {
+        console.log('[ZentaoBrowser] 检测到登录失效，尝试刷新 Cookie...');
+
+        // 通知服务端重新登录，获取新的 Cookie
+        const refreshSuccess = await this.refreshCookies();
+
+        if (refreshSuccess) {
+          console.log('[ZentaoBrowser] Cookie 已刷新，重试创建任务');
+          // 重试一次
+          return await this.createTask(taskData);
+        }
+
+        console.log('[ZentaoBrowser] Cookie 刷新失败，需要回退到服务端');
+        return { success: false, fallbackNeeded: true, reason: 'not_logged_in' };
+      }
+
+      // 检查创建结果
+      if (data && data.result === 'success' && data.locate) {
+        console.log('[ZentaoBrowser] 任务创建成功，locate:', data.locate);
+
+        // 从 locate URL 中提取任务ID
+        let taskId = null;
+        const locateMatch = data.locate.match(/task[-_]view[-_]?(\d+)/) ||
+          data.locate.match(/execution-task[-_][^/-]+-(\d+)/);
+        if (locateMatch) {
+          taskId = locateMatch[1];
+          console.log('[ZentaoBrowser] 从 locate 提取到任务ID:', taskId);
+          return { success: true, taskId };
+        }
+
+        // 如果直接提取失败，尝试访问页面
+        console.log('[ZentaoBrowser] 尝试从页面提取任务ID');
+        taskId = await this.extractTaskIdFromHtml(data.locate);
+        if (taskId) {
+          return { success: true, taskId };
+        }
+      }
+
+      console.log('[ZentaoBrowser] 创建任务未返回有效结果');
+      return { success: false, fallbackNeeded: true };
+    } catch (err) {
+      console.error('[ZentaoBrowser] 创建任务异常:', err.message);
+      return { success: false, fallbackNeeded: true };
+    }
+  },
+
+  /**
+   * 从 HTML 页面提取任务ID
+   */
+  async extractTaskIdFromHtml(locatePath) {
+    try {
+      const response = await fetch(`${this.getBaseUrl()}${locatePath}`, {
+        credentials: 'include'
+      });
+
+      if (!response.ok) {
+        console.error('[ZentaoBrowser] 获取任务列表页面失败:', response.status);
+        return null;
+      }
+
+      const html = await response.text();
+      const match = html.match(/<tr\s+data-id=['"](\d+)['"]/);
+
+      if (match && match[1]) {
+        return match[1];
+      }
+
+      console.error('[ZentaoBrowser] HTML 中未找到任务ID');
+      return null;
+    } catch (err) {
+      console.error('[ZentaoBrowser] 提取任务ID异常:', err.message);
+      return null;
+    }
+  },
+
+  /**
+   * 更新任务状态
+   */
+  async updateTaskStatus(taskId, status, progress) {
+    await this.initConfig();
+
+    if (!this.isConfigured()) {
+      return { success: false, fallbackNeeded: true };
+    }
+
+    // 确保已登录
+    if (!this.isLoggedIn) {
+      console.log('[ZentaoBrowser] 更新状态前检查登录...');
+      const loginSuccess = await this.login();
+      if (!loginSuccess) {
+        return { success: false, fallbackNeeded: true };
+      }
+    }
+
+    const statusMap = {
+      'done': 'closed',
+      'in_progress': 'doing',
+      'todo': 'wait'
+    };
+
+    const zentaoStatus = statusMap[status] || 'wait';
+
+    const payload = {
+      status: zentaoStatus,
+      finishedDate: status === 'done' ? new Date().toISOString() : null,
+      comment: progress === 100 ? '任务已完成' : '进度更新'
+    };
+
+    console.log('[ZentaoBrowser] 更新任务状态:', { taskId, status: zentaoStatus, progress });
+
+    try {
+      // 构建请求头，手动添加 Cookie
+      const headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'X-Requested-With': 'XMLHttpRequest',
+      };
+
+      // 如果有保存的 Cookie，手动添加
+      if (this.cookies) {
+        headers['Cookie'] = this.cookies;
+      }
+
+      const response = await fetch(`${this.getBaseUrl()}/zentao/task.json/${taskId}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        return { success: false, fallbackNeeded: true };
+      }
+
+      const data = await response.json();
+
+      if (data && data.result === 'success') {
+        console.log('[ZentaoBrowser] 任务状态更新成功');
+        return { success: true };
+      }
+
+      // 检查是否是登录失效
+      if (data.result === false && data.message && (
+        data.message.includes('登录已超时') ||
+        data.message.includes('请重新登入')
+      )) {
+        return { success: false, fallbackNeeded: true, reason: 'not_logged_in' };
+      }
+
+      console.error('[ZentaoBrowser] 更新状态返回失败:', data);
+      return { success: false, fallbackNeeded: true };
+    } catch (err) {
+      console.error('[ZentaoBrowser] 更新状态异常:', err.message);
+      return { success: false, fallbackNeeded: true };
+    }
+  }
+};
