@@ -13,6 +13,9 @@ AI驱动的智能任务管理和日报生成工具。
 - 🔍 **快速搜索** - 支持关键词搜索任务
 - 📱 **浏览器插件** - 覆盖新标签页，随时使用
 - 🔔 **多渠道通知** - 系统通知 + Webhook（干净格式，支持飞书/钉钉/企业微信）
+- 🐉 **禅道集成** - 自动同步任务到禅道，支持工时记录和状态同步
+- ⌨️ **键盘快捷键** - 选中任务后按Delete删除，按Esc取消选中
+- ☁️ **数据同步** - 支持坚果云/WebDAV多设备同步
 
 ## 技术栈
 
@@ -20,7 +23,7 @@ AI驱动的智能任务管理和日报生成工具。
 - **前端**: Chrome/Edge 浏览器插件
 - **AI**: 智谱AI / OpenAI API（支持自定义baseURL）
 - **进程管理**: PM2
-- **数据存储**: 本地JSON文件
+- **数据存储**: 本地JSON文件 + WebDAV云同步
 
 ## 快速开始
 
@@ -83,6 +86,13 @@ EVENING_HOUR=21
 # Webhook通知配置（可选）
 WEBHOOK_URL=
 WEBHOOK_TYPE=generic
+
+# 禅道集成配置（可选）
+ZENTAO_ENABLED=false
+ZENTAO_URL=http://your-zentao.com
+ZENTAO_USERNAME=your-account
+ZENTAO_PASSWORD=your-password
+ZENTAO_CREATE_TASK_URL=167
 ```
 
 **智谱AI 配置说明**：
@@ -122,6 +132,8 @@ pm2 startup  # 开机自启
 | **模型** | glm-4-flash / gpt-4o-mini 等 |
 | **早/晚提醒** | 设置提醒时间（默认9点/21点） |
 | **Webhook** | 飞书/钉钉/企业微信通知地址 |
+| **数据同步** | 坚果云/WebDAV多设备同步 |
+| **禅道集成** | 禅道账号、密码、执行ID |
 
 > 💡 配置保存在浏览器本地，后端服务配置仍然需要在 `.env` 文件中设置。
 
@@ -163,6 +175,29 @@ pm2 startup  # 开机自启
 3. **鼠标按住任务卡片**即可上下拖拽调整顺序，或左右拖拽变更状态
 4. 点击日历中的日期查看那天的任务
 5. 选中网页文字 → 右键 → "添加到任务"
+6. **键盘快捷键**：
+   - 点击任务选中，按 `Delete/Backspace` 弹出确认删除
+   - 按 `Enter` 直接删除选中任务
+   - 按 `Esc` 取消选中
+
+### 禅道集成
+
+1. 在设置中配置禅道账号、密码和执行ID
+2. 创建任务时自动同步到禅道
+3. 更新进度时自动记录工时到禅道
+4. 删除任务时同步删除禅道任务
+
+**工时计算**：
+- 剩余工时自动根据累计消耗工时和进度计算
+- 公式：`剩余工时 = 累计消耗 / (进度 / 100) - 累计消耗`
+
+### 数据同步
+
+支持坚果云/WebDAV多设备同步：
+
+1. 在设置中配置WebDAV信息
+2. 数据变更时自动上传到云端
+3. 换设备后登录坚果云即可同步
 
 ### 命令行（可选）
 
@@ -202,11 +237,22 @@ GET    /api/tasks/today       # 获取今日任务
 GET    /api/tasks/date/:date  # 获取指定日期任务
 GET    /api/tasks/search?q=   # 搜索任务
 PUT    /api/task/:id/status   # 更新任务状态
+PUT    /api/task/:id          # 更新任务
 DELETE /api/task/:id          # 删除任务
 
 GET    /api/calendar/:year/:month  # 获取日历数据
 GET    /api/history           # 获取历史日报
 GET    /api/stats             # 获取统计数据
+
+# 同步接口
+GET    /api/sync/export       # 导出数据
+POST   /api/sync/import       # 导入数据
+GET    /api/sync/summary      # 获取同步摘要
+
+# 禅道接口
+GET    /api/zentao/config     # 获取禅道配置
+POST   /api/zentao/config     # 保存禅道配置
+POST   /api/zentao/task/create # 创建禅道任务
 ```
 
 ## 常用命令

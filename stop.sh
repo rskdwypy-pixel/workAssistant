@@ -36,16 +36,22 @@ if [ -f "$PID_FILE" ]; then
 fi
 
 # 方式2: 通过端口查找并停止
-PORT_PID=$(lsof -ti :$PORT 2>/dev/null)
-if [ -n "$PORT_PID" ]; then
-    echo "发现端口 $PORT 被占用 (PID: $PORT_PID)，正在停止..."
-    kill "$PORT_PID" 2>/dev/null
+PORT_PIDS=$(lsof -ti :$PORT 2>/dev/null)
+if [ -n "$PORT_PIDS" ]; then
+    PID_STR=$(echo $PORT_PIDS | tr '\n' ' ')
+    echo "发现端口 $PORT 被占用 (PID: $PID_STR)，正在停止..."
+    for PID in $PORT_PIDS; do
+        kill $PID 2>/dev/null
+    done
     sleep 1
 
     # 检查是否还在运行
-    if lsof -ti :$PORT >/dev/null 2>&1; then
+    REMAIN_PIDS=$(lsof -ti :$PORT 2>/dev/null)
+    if [ -n "$REMAIN_PIDS" ]; then
         echo -e "${YELLOW}强制停止...${NC}"
-        kill -9 "$PORT_PID" 2>/dev/null
+        for PID in $REMAIN_PIDS; do
+            kill -9 $PID 2>/dev/null
+        done
     fi
     STOPPED=1
 fi
@@ -71,7 +77,9 @@ if [ $STOPPED -eq 1 ]; then
     REMAINING=$(lsof -ti :$PORT 2>/dev/null)
     if [ -n "$REMAINING" ]; then
         echo -e "${RED}⚠️  端口仍被占用，尝试最后清理...${NC}"
-        kill -9 "$REMAINING" 2>/dev/null
+        for PID in $REMAINING; do
+            kill -9 $PID 2>/dev/null
+        done
     fi
     echo -e "${GREEN}✅ 服务已停止${NC}"
 else

@@ -59,13 +59,19 @@ fi
 
 # 清理可能存在的旧进程（通过端口查找）
 PORT=3721
-OLD_PORT_PID=$(lsof -ti :$PORT 2>/dev/null)
-if [ -n "$OLD_PORT_PID" ]; then
-    echo -e "${YELLOW}🛑 发现端口 $PORT 被占用 (PID: $OLD_PORT_PID)，正在清理...${NC}"
-    kill "$OLD_PORT_PID" 2>/dev/null
+OLD_PORT_PIDS=$(lsof -ti :$PORT 2>/dev/null)
+if [ -n "$OLD_PORT_PIDS" ]; then
+    PID_STR=$(echo $OLD_PORT_PIDS | tr '\n' ' ')
+    echo -e "${YELLOW}🛑 发现端口 $PORT 被占用 (PID: $PID_STR)，正在清理...${NC}"
+    for PID in $OLD_PORT_PIDS; do
+        kill $PID 2>/dev/null
+    done
     sleep 1
-    if lsof -ti :$PORT >/dev/null 2>&1; then
-        kill -9 "$OLD_PORT_PID" 2>/dev/null
+    REMAIN_PIDS=$(lsof -ti :$PORT 2>/dev/null)
+    if [ -n "$REMAIN_PIDS" ]; then
+        for PID in $REMAIN_PIDS; do
+            kill -9 $PID 2>/dev/null
+        done
     fi
 fi
 

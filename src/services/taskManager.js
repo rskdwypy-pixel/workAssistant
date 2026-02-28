@@ -136,6 +136,7 @@ async function addTask(content) {
     reminderExactTriggered: false,
     progress: parsedProgress,
     zentaoId: null,        // 禅道任务 ID（由浏览器插件同步）
+    totalConsumedTime: 0,  // 累计消耗工时（用于计算剩余工时）
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -148,65 +149,6 @@ async function addTask(content) {
   return task;
 }
 
-/**
- * 同步任务到禅道
- */
-async function syncTaskToZentao(task) {
-  try {
-    const { config } = await import('../config.js');
-
-    console.log('[TaskManager] 禅道配置状态:', {
-      enabled: config.zentao.enabled,
-      hasUrl: !!config.zentao.url,
-      url: config.zentao.url,
-      hasUsername: !!config.zentao.username,
-      hasExecutionId: !!config.zentao.executionId,
-      executionId: config.zentao.executionId
-    });
-
-    if (!config.zentao.enabled) {
-      console.log('[TaskManager] 禅道同步未启用，跳过');
-      return;
-    }
-
-    if (!config.zentao.executionId) {
-      console.warn('[TaskManager] 禅道执行 ID 未配置，跳过同步');
-      return;
-    }
-
-    console.log(`[TaskManager] 开始同步任务到禅道: ${task.title}`);
-
-    const { getZentaoClient } = await import('./zentao.js');
-    const client = getZentaoClient();
-
-    const result = await client.createTask({
-      title: task.title,
-      content: task.content,
-      priority: task.priority,
-      dueDate: task.dueDate
-    });
-
-    if (result.success) {
-      // 更新任务的禅道 ID
-      task.zentaoId = result.taskId;
-
-      // 保存更新后的任务
-      const data = await readTasks();
-      const index = data.tasks.findIndex(t => t.id === task.id);
-      if (index !== -1) {
-        data.tasks[index].zentaoId = task.zentaoId;
-        await writeTasks(data);
-      }
-
-      console.log(`[TaskManager] 任务同步成功，禅道 ID: ${result.taskId}`);
-    } else {
-      console.error(`[TaskManager] 任务同步失败: ${result.error}`);
-    }
-  } catch (err) {
-    console.error('[TaskManager] 同步任务到禅道异常:', err.message);
-    // 不抛出异常，避免影响主流程
-  }
-}
 
 /**
  * 查找相似任务（用于去重）
@@ -292,18 +234,13 @@ async function addOrUpdateTask(content, options = {}) {
     content: content,
     ...newTask,
     zentaoId: options.zentaoId || null, // 支持传入浏览器端已创建的 zentaoId
+    totalConsumedTime: 0,  // 累计消耗工时（用于计算剩余工时）
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
 
   data.tasks.push(task);
   await writeTasks(data);
-
-  // 注意：禅道同步现在由浏览器插件负责，服务端不再主动同步
-  // 如果浏览器端已创建 zentaoId，使用它；否则留空等待浏览器端后续同步
-  if (task.zentaoId) {
-    console.log('[TaskManager] 使用浏览器端创建的禅道任务:', task.zentaoId);
-  }
 
   return { task, isNew: true };
 }
@@ -373,47 +310,10 @@ async function deleteTask(taskId) {
     throw new Error('任务不存在');
   }
 
-  const task = data.tasks[index];
-
-  // 如果任务已同步到禅道，先关闭禅道任务
-  if (task.zentaoId) {
-    await closeZentaoTask(task.zentaoId);
-  }
-
   data.tasks.splice(index, 1);
   await writeTasks(data);
 
   return { success: true };
-}
-
-/**
- * 关闭禅道任务
- */
-async function closeZentaoTask(zentaoTaskId) {
-  try {
-    const { config } = await import('../config.js');
-
-    if (!config.zentao.enabled) {
-      console.log('[TaskManager] 禅道同步未启用，跳过关闭任务');
-      return;
-    }
-
-    console.log(`[TaskManager] 关闭禅道任务: ${zentaoTaskId}`);
-
-    const { getZentaoClient } = await import('./zentao.js');
-    const client = getZentaoClient();
-
-    const result = await client.closeTask(zentaoTaskId);
-
-    if (result.success) {
-      console.log(`[TaskManager] 禅道任务关闭成功`);
-    } else {
-      console.error(`[TaskManager] 禅道任务关闭失败: ${result.error}`);
-    }
-  } catch (err) {
-    console.error('[TaskManager] 关闭禅道任务异常:', err.message);
-    // 不抛出异常，避免影响主流程
-  }
 }
 
 /**

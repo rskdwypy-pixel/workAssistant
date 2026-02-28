@@ -78,15 +78,6 @@ function validateConfig() {
     if (!config.zentao.url) {
       console.warn('⚠️  禅道已启用但未配置 URL');
     }
-    if (!config.zentao.username || !config.zentao.password) {
-      console.warn('⚠️  禅道已启用但未配置账号或密码');
-    }
-    if (!config.zentao.executionId) {
-      console.warn('⚠️  禅道已启用但未配置执行 ID');
-    }
-    if (config.zentao.url && config.zentao.username && config.zentao.password && config.zentao.executionId) {
-      console.log('✅ 禅道配置完整，同步已启用');
-    }
   } else {
     console.log('ℹ️  禅道同步未启用');
   }
