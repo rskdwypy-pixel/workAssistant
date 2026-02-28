@@ -153,13 +153,32 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 恢复调试模式状态
   const savedDebugMode = localStorage.getItem('debugMode');
+  const debugModeToggle = document.getElementById('debugModeToggle');
   if (savedDebugMode === 'true') {
     debugMode = true;
     const testButtons = document.getElementById('testButtons');
-    const debugBtn = document.getElementById('debugToggleBtn');
     testButtons.classList.add('visible');
-    debugBtn.classList.add('active');
+    if (debugModeToggle) debugModeToggle.checked = true;
     console.log('%c[调试模式] 已自动开启', 'color: #f59e0b; font-size: 14px; font-weight: bold;');
+  }
+
+  // 调试模式切换（设置页面中的复选框）
+  if (debugModeToggle) {
+    debugModeToggle.addEventListener('change', () => {
+      debugMode = debugModeToggle.checked;
+      const testButtons = document.getElementById('testButtons');
+
+      if (debugMode) {
+        testButtons.classList.add('visible');
+        localStorage.setItem('debugMode', 'true');
+        Toast.success('调试模式已开启');
+        console.log('%c[调试模式] 测试按钮已显示', 'color: #f59e0b; font-size: 14px; font-weight: bold;');
+      } else {
+        testButtons.classList.remove('visible');
+        localStorage.removeItem('debugMode');
+        Toast.info('调试模式已关闭');
+      }
+    });
   }
 
   // 加载保存的配置
@@ -185,6 +204,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadTasks();
   await loadHistoryPreview();
   await checkTodayReports();
+
+  // 初始化同步功能
+  if (typeof syncManager !== 'undefined' && typeof SyncUI !== 'undefined') {
+    await syncManager.init();
+    const syncUI = new SyncUI(syncManager);
+    syncUI.init();
+    window.syncUI = syncUI; // 保存到全局以便后续使用
+  }
 
   // 绑定事件
   bindEvents();
@@ -238,26 +265,6 @@ function bindEvents() {
       currentYear++;
     }
     loadCalendar();
-  });
-
-  // 调试模式切换
-  document.getElementById('debugToggleBtn').addEventListener('click', () => {
-    debugMode = !debugMode;
-    const testButtons = document.getElementById('testButtons');
-    const debugBtn = document.getElementById('debugToggleBtn');
-
-    if (debugMode) {
-      testButtons.classList.add('visible');
-      debugBtn.classList.add('active');
-      localStorage.setItem('debugMode', 'true');
-      Toast.success('调试模式已开启');
-      console.log('%c[调试模式] 测试按钮已显示', 'color: #f59e0b; font-size: 14px; font-weight: bold;');
-    } else {
-      testButtons.classList.remove('visible');
-      debugBtn.classList.remove('active');
-      localStorage.removeItem('debugMode');
-      Toast.info('调试模式已关闭');
-    }
   });
 
   // 设置
@@ -464,9 +471,6 @@ function bindEvents() {
     }
   });
 
-  // 检查服务状态
-  document.getElementById('checkService').addEventListener('click', checkServiceStatus);
-
   // 保存配置
   document.getElementById('saveSettings').addEventListener('click', async () => {
     const config = {
@@ -513,6 +517,11 @@ function bindEvents() {
 
     // 更新后端服务地址
     API_BASE_URL = config.backendUrl || 'http://localhost:3721';
+
+    // 保存同步配置
+    if (window.syncUI) {
+      window.syncUI.saveSyncSettingsFromSettings();
+    }
 
     document.getElementById('settingsModal').classList.remove('active');
     loadTasks();
@@ -591,6 +600,15 @@ function bindEvents() {
   document.getElementById('datetimeModal').addEventListener('click', (e) => {
     if (e.target.id === 'datetimeModal') {
       document.getElementById('datetimeModal').classList.remove('active');
+    }
+  });
+
+  // 全局点击关闭所有优先级菜单
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.priority-dropdown') && !e.target.closest('.priority-menu')) {
+      document.querySelectorAll('.priority-menu').forEach(m => {
+        m.style.display = 'none';
+      });
     }
   });
 }
@@ -1090,11 +1108,25 @@ async function loadTasksByDate(dateStr) {
 function renderTasks() {
   let filteredTasks = [...allTasks];
 
+  // 排序规则：手动拖拽 > 优先级 > 修改时间
   filteredTasks.sort((a, b) => {
-    if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
-    if (a.order !== undefined) return -1;
-    if (b.order !== undefined) return 1;
-    return new Date(b.createdAt) - new Date(a.createdAt);
+    // 1. 手动拖拽位置（order）- 只有当 order 有具体数值时才认为有手动排序
+    const aHasOrder = typeof a.order === 'number';
+    const bHasOrder = typeof b.order === 'number';
+
+    if (aHasOrder && bHasOrder) return a.order - b.order;
+    if (aHasOrder) return -1;
+    if (bHasOrder) return 1;
+
+    // 2. 优先级（1最高，4最低）
+    const aPriority = a.priority ?? 3;
+    const bPriority = b.priority ?? 3;
+    if (aPriority !== bPriority) return aPriority - bPriority;
+
+    // 3. 最后修改时间
+    const aTime = new Date(a.updatedAt || a.createdAt).getTime();
+    const bTime = new Date(b.updatedAt || b.createdAt).getTime();
+    return bTime - aTime;
   });
 
   // 更新计数
@@ -1133,6 +1165,24 @@ function createTaskCard(task) {
   card.dataset.taskId = task.id;
   card.draggable = true;
 
+  // 获取优先级，默认为3
+  const priority = task.priority ?? 3;
+
+  // 优先级颜色映射
+  const priorityColors = {
+    1: { bg: 'rgba(239, 68, 68, 0.1)', border: '#ef4444', badge: '#ef4444' },  // 红色
+    2: { bg: 'rgba(245, 158, 11, 0.1)', border: '#f59e0b', badge: '#f59e0b' },  // 黄色
+    3: { bg: 'rgba(59, 130, 246, 0.1)', border: '#3b82f6', badge: '#3b82f6' },  // 蓝色
+    4: { bg: 'rgba(156, 163, 175, 0.1)', border: '#9ca3af', badge: '#9ca3af' }   // 灰色
+  };
+
+  const color = priorityColors[priority] || priorityColors[3];
+
+  // 设置优先级边框
+  if (task.status !== 'done') {
+    card.style.borderLeft = `3px solid ${color.border}`;
+  }
+
   card.addEventListener('dragstart', (e) => {
     e.dataTransfer.setData('text/plain', task.id);
     e.dataTransfer.effectAllowed = 'move';
@@ -1162,10 +1212,23 @@ function createTaskCard(task) {
         </div>
       </div>
     `;
+
+  // 优先级HTML - 下拉菜单选择（不显示当前优先级）
+  const priorityHTML = task.status !== 'done' ? `
+    <div class="priority-dropdown" style="position:relative;">
+      <button class="priority-toggle" data-task-id="${task.id}" data-priority="${priority}"
+        style="background:${color.bg}; color:${color.badge}; padding:4px 10px; border-radius:6px; font-size:11px; font-weight:600; border:none; cursor:pointer; transition:all 0.2s;"
+        title="点击选择优先级">
+        P${priority} <span style="margin-left:2px; font-size:8px;">▼</span>
+      </button>
+    </div>
+  ` : '';
+
   card.innerHTML = `
-    <div class="task-title" style="display: flex; align-items: flex-start; gap: 8px;">
+    <div class="task-title" style="display: flex; align-items: flex-start; gap: 8px; width:100%;">
       <input type="checkbox" class="task-checkbox" data-task-id="${task.id}" ${task.status === 'done' ? 'checked' : ''} style="margin-top: 4px; cursor: pointer;">
-      <span>${escapeHtml(task.title)}</span>
+      <span style="flex:1;">${escapeHtml(task.title)}</span>
+      ${priorityHTML}
     </div>
     ${task.status !== 'done' ? `
     <div class="task-meta">
@@ -1188,6 +1251,77 @@ function createTaskCard(task) {
       e.stopPropagation();
       const newProgress = e.target.checked ? 100 : 0;
       updateTaskProgress(task.id, newProgress);
+    });
+  }
+
+  // 绑定优先级下拉菜单事件
+  const priorityBtn = card.querySelector('.priority-toggle');
+
+  if (priorityBtn) {
+    // 创建菜单（挂载到 body，避免被 overflow 裁剪）
+    let priorityMenu = document.querySelector(`.priority-menu-${task.id}`);
+    if (!priorityMenu) {
+      priorityMenu = document.createElement('div');
+      priorityMenu.className = `priority-menu priority-menu-${task.id}`;
+      priorityMenu.style.cssText = 'display:none; position:fixed; background:white; border:1px solid #e2e8f0; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:99999; min-width:60px; padding:4px 0;';
+      priorityMenu.innerHTML = `
+        ${priority !== 1 ? `<div class="priority-option" data-priority="1" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#ef4444; text-align:center;">P1</div>` : ''}
+        ${priority !== 2 ? `<div class="priority-option" data-priority="2" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#f59e0b; text-align:center;">P2</div>` : ''}
+        ${priority !== 3 ? `<div class="priority-option" data-priority="3" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#3b82f6; text-align:center;">P3</div>` : ''}
+        ${priority !== 4 ? `<div class="priority-option" data-priority="4" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#9ca3af; text-align:center;">P4</div>` : ''}
+      `;
+      document.body.appendChild(priorityMenu);
+
+      // 绑定菜单选项事件
+      priorityMenu.querySelectorAll('.priority-option').forEach(option => {
+        option.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const newPriority = parseInt(e.currentTarget.dataset.priority);
+          updateTaskPriority(task.id, newPriority);
+          priorityMenu.style.display = 'none';
+        });
+        option.addEventListener('mouseenter', () => {
+          option.style.background = '#f1f5f9';
+        });
+        option.addEventListener('mouseleave', () => {
+          option.style.background = 'transparent';
+        });
+      });
+    }
+
+    // 点击按钮切换菜单显示
+    priorityBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // 关闭其他所有菜单
+      document.querySelectorAll('.priority-menu').forEach(m => {
+        m.style.display = 'none';
+      });
+
+      if (priorityMenu.style.display === 'none' || !priorityMenu.style.display) {
+        // 计算菜单位置（按钮下方）
+        const rect = priorityBtn.getBoundingClientRect();
+        priorityMenu.style.top = (rect.bottom + 2) + 'px';
+        priorityMenu.style.left = rect.left + 'px';
+        priorityMenu.style.display = 'block';
+      } else {
+        priorityMenu.style.display = 'none';
+      }
+    });
+
+    // 点击选项更新优先级
+    priorityMenu.querySelectorAll('.priority-option').forEach(option => {
+      option.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const newPriority = parseInt(e.currentTarget.dataset.priority);
+        updateTaskPriority(task.id, newPriority);
+        priorityMenu.style.display = 'none';
+      });
+      option.addEventListener('mouseenter', () => {
+        option.style.background = '#f1f5f9';
+      });
+      option.addEventListener('mouseleave', () => {
+        option.style.background = 'transparent';
+      });
     });
   }
 
@@ -1314,6 +1448,9 @@ async function addTask() {
       } else {
         Toast.success('任务已添加');
       }
+
+      // 触发同步
+      triggerSync();
     } else {
       input.value = originalVal; // 失败时恢复原来的输入
       const errorMsg = typeof result.error === 'object'
@@ -1353,6 +1490,27 @@ async function updateTaskProgress(taskId, progress) {
     }
   } catch (err) {
     console.error('更新进度失败:', err);
+  }
+}
+
+// 更新任务优先级
+async function updateTaskPriority(taskId, priority) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/task/${taskId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ priority, order: null })
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      await loadTasks();
+    } else {
+      console.error('更新优先级失败:', result.error);
+    }
+  } catch (err) {
+    console.error('更新优先级失败:', err);
   }
 }
 
@@ -1410,9 +1568,35 @@ function showTaskDetail(task) {
 
   const statusLabels = { todo: '待办', in_progress: '进行中', done: '已完成' };
 
+  // 优先级相关
+  const priority = task.priority ?? 3;
+  const priorityColors = {
+    1: { bg: '#fee2e2', text: '#dc2626' },
+    2: { bg: '#fef3c7', text: '#d97706' },
+    3: { bg: '#dbeafe', text: '#2563eb' },
+    4: { bg: '#f3f4f6', text: '#6b7280' }
+  };
+  const pColor = priorityColors[priority] || priorityColors[3];
+
   body.innerHTML = `
     <div style="margin-bottom: 16px;">
-      <h4 style="margin-bottom: 12px;">${escapeHtml(task.title)}</h4>
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+        <h4 style="margin:0; flex:1;">${escapeHtml(task.title)}</h4>
+        ${task.status !== 'done' ? `
+        <div class="detail-priority-selector" style="position:relative;">
+          <button class="detail-priority-btn" data-priority="${priority}"
+            style="background:${pColor.bg}; color:${pColor.text}; padding:6px 12px; border-radius:6px; font-size:12px; font-weight:600; border:none; cursor:pointer;">
+            P${priority} ▼
+          </button>
+          <div class="detail-priority-menu" style="display:none; position:absolute; top:100%; right:0; margin-top:4px; background:white; border:1px solid #e2e8f0; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.1); z-index:100; min-width:60px; padding:4px 0;">
+            ${priority !== 1 ? `<div class="detail-priority-option" data-priority="1" style="padding:8px 16px; cursor:pointer; font-size:13px; font-weight:500; color:#dc2626; text-align:center;">P1</div>` : ''}
+            ${priority !== 2 ? `<div class="detail-priority-option" data-priority="2" style="padding:8px 16px; cursor:pointer; font-size:13px; font-weight:500; color:#d97706; text-align:center;">P2</div>` : ''}
+            ${priority !== 3 ? `<div class="detail-priority-option" data-priority="3" style="padding:8px 16px; cursor:pointer; font-size:13px; font-weight:500; color:#2563eb; text-align:center;">P3</div>` : ''}
+            ${priority !== 4 ? `<div class="detail-priority-option" data-priority="4" style="padding:8px 16px; cursor:pointer; font-size:13px; font-weight:500; color:#6b7280; text-align:center;">P4</div>` : ''}
+          </div>
+        </div>
+        ` : ''}
+      </div>
       <div style="background-color: #f9f9f9; padding: 10px; border-radius: 6px; margin-bottom: 12px;">
         <strong style="font-size: 13px; color: #555;">原始输入内容:</strong>
         <p style="color: #666; margin-top: 6px; font-size: 14px; white-space: pre-wrap;">${escapeHtml(task.content || task.title)}</p>
@@ -1421,6 +1605,7 @@ function showTaskDetail(task) {
     <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 16px;">
       <div><strong>状态:</strong> ${statusLabels[task.status]}</div>
       ${task.status !== 'done' ? `<div><strong>${task.status === 'in_progress' ? '截止时间' : '提醒时间'}:</strong> ${task.reminderTime ? new Date(task.reminderTime).toLocaleString('zh-CN') : '未设置'}</div>` : ''}
+      <div><strong>进度:</strong> ${task.progress ?? 0}%</div>
       <div><strong>创建时间:</strong> ${new Date(task.createdAt).toLocaleString('zh-CN')}</div>
     </div>
     <div style="display: flex; gap: 8px;">
@@ -1428,6 +1613,53 @@ function showTaskDetail(task) {
       <button class="btn-secondary detail-action-btn" style="border-color: #e74c3c; color: #e74c3c;" data-action="delete">删除</button>
     </div>
   `;
+
+  // 绑定优先级选择事件
+  const priorityBtn = body.querySelector('.detail-priority-btn');
+  const priorityMenu = body.querySelector('.detail-priority-menu');
+
+  if (priorityBtn && priorityMenu) {
+    priorityBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      priorityMenu.style.display = priorityMenu.style.display === 'none' ? 'block' : 'none';
+    });
+
+    priorityMenu.querySelectorAll('.detail-priority-option').forEach(option => {
+      option.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const newPriority = parseInt(e.currentTarget.dataset.priority);
+        updateTaskPriority(task.id, newPriority);
+        priorityMenu.style.display = 'none';
+        // 刷新弹窗内容
+        setTimeout(() => {
+          // 重新获取任务数据
+          fetch(`${API_BASE_URL}/api/tasks`)
+            .then(r => r.json())
+            .then(result => {
+              if (result.success) {
+                const updatedTask = result.data.find(t => t.id === task.id);
+                if (updatedTask) {
+                  showTaskDetail(updatedTask);
+                }
+              }
+            });
+        }, 100);
+      });
+      option.addEventListener('mouseenter', () => {
+        option.style.background = '#f1f5f9';
+      });
+      option.addEventListener('mouseleave', () => {
+        option.style.background = 'transparent';
+      });
+    });
+
+    // 点击弹窗其他地方关闭菜单
+    modal.addEventListener('click', (e) => {
+      if (!e.target.closest('.detail-priority-selector')) {
+        priorityMenu.style.display = 'none';
+      }
+    });
+  }
 
   // 绑定事件解决 CSP 内联执行阻断问题
   body.querySelectorAll('.detail-action-btn').forEach(btn => {
@@ -1593,27 +1825,37 @@ function loadSettings() {
   setVal('eveningHour', config.eveningHour || 21);
   setVal('webhookUrl', config.webhookUrl || '');
   setVal('webhookType', config.webhookType || 'generic');
+
+  // 同步调试模式复选框状态
+  const debugModeToggle = document.getElementById('debugModeToggle');
+  if (debugModeToggle) {
+    debugModeToggle.checked = debugMode;
+  }
+
+  // 加载同步配置
+  if (window.syncUI) {
+    window.syncUI.loadCurrentSyncSettings();
+  }
 }
 
 // 检查服务状态
 async function checkServiceStatus() {
   const statusDot = document.getElementById('serviceStatusDot');
-  const statusText = document.getElementById('serviceStatusText');
 
   statusDot.className = 'status-dot unknown';
-  statusText.textContent = '检测中...';
+  statusDot.title = '检测中...';
 
   try {
     const response = await fetch(`${API_BASE_URL}/health`);
     if (response.ok) {
       statusDot.className = 'status-dot online';
-      statusText.textContent = '后端服务在线';
+      statusDot.title = '后端服务在线';
     } else {
       throw new Error('服务异常');
     }
   } catch (err) {
     statusDot.className = 'status-dot offline';
-    statusText.textContent = '后端服务离线';
+    statusDot.title = '后端服务离线';
   }
 }
 
@@ -1978,8 +2220,26 @@ async function handleDragEnd() {
       renderTasks();
       // 这里也一并更新左侧状态面板的数据
       updateCounts();
+
+      // 触发同步
+      triggerSync();
     } catch (err) {
       console.error('批量更新状态失败:', err);
+    }
+  }
+}
+
+// ==================== 数据同步触发 ====================
+
+/**
+ * 触发数据同步（数据变更时调用）
+ */
+function triggerSync() {
+  if (typeof syncManager !== 'undefined' && syncManager.syncConfig.enabled && syncManager.syncConfig.autoSync) {
+    syncManager.debouncedUpload();
+    // 更新UI状态
+    if (window.syncUI) {
+      window.syncUI.updateStatusDisplay();
     }
   }
 }
