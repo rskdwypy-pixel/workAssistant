@@ -2481,9 +2481,10 @@ function openDatetimeModal(task) {
   document.getElementById('dtBtnThisWeek').onclick = () => {
     const d = new Date();
     const day = d.getDay();
-    const diff = d.getDate() + (6 - day); // Saturday this week
+    // 计算本周日：0=周日时不变，其他情况加 (7-day) 天
+    const diff = d.getDate() + (day === 0 ? 0 : (7 - day));
     d.setDate(diff);
-    d.setHours(18, 0, 0, 0); // 18:00 on Saturday
+    d.setHours(18, 0, 0, 0); // 18:00 on Sunday
     input.value = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   };
 
