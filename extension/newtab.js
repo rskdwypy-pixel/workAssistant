@@ -288,7 +288,7 @@ function setupProgressDragEvents() {
 
       console.log('[Progress Drag] 鼠标释放:', { taskId, originalValue, newValue: clampedPercent });
 
-      // 重置拖拽状态
+      // 立即清空拖拽状态，防止在对话框显示期间鼠标移动继续更新进度
       draggingProgressTask = null;
       draggingProgressElement = null;
       draggingProgressOriginalValue = null;
@@ -297,8 +297,14 @@ function setupProgressDragEvents() {
       updateTaskProgress(taskId, clampedPercent).then((result) => {
         console.log('[Progress Drag] updateTaskProgress 返回:', result);
 
+        // 如果用户取消，立即恢复UI到原始值
+        if (result === false) {
+          console.log('[Progress Drag] 用户取消，恢复UI到原始值:', originalValue);
+          if (progressFill) progressFill.style.width = `${originalValue}%`;
+          if (progressInput) progressInput.value = originalValue;
+        }
+
         // 无论成功还是取消，都刷新任务列表以同步 UI
-        // 如果取消，updateTaskProgress 已经处理了恢复逻辑
         console.log('[Progress Drag] 刷新任务列表');
         loadTasks().catch(err => console.error('[Progress Drag] 刷新任务失败:', err));
 
@@ -307,6 +313,9 @@ function setupProgressDragEvents() {
         if (progressTrack) progressTrack.style.cursor = 'pointer';
       }).catch(err => {
         console.error('[Progress Drag] 更新进度失败:', err);
+        // 恢复UI到原始值
+        if (progressFill) progressFill.style.width = `${originalValue}%`;
+        if (progressInput) progressInput.value = originalValue;
         // 重置光标
         document.body.style.cursor = '';
         if (progressTrack) progressTrack.style.cursor = 'pointer';
@@ -333,23 +342,26 @@ function setupProgressDragEvents() {
   document.addEventListener('touchend', (e) => {
     if (draggingProgressTask) {
       const touch = e.changedTouches[0];
-      const { progressTrack } = draggingProgressElement;
+      const { progressTrack, progressFill, progressInput } = draggingProgressElement;
       const rect = progressTrack.getBoundingClientRect();
       const percent = Math.round(((touch.clientX - rect.left) / rect.width) * 100);
       const clampedPercent = Math.max(0, Math.min(100, percent));
       const taskId = draggingProgressTask;
       const originalValue = draggingProgressOriginalValue;
 
-      // 重置拖拽状态
+      // 立即清空拖拽状态，防止在对话框显示期间触摸移动继续更新进度
       draggingProgressTask = null;
       draggingProgressElement = null;
       draggingProgressOriginalValue = null;
 
       // 提交进度更新
       updateTaskProgress(taskId, clampedPercent).then((result) => {
-        // 如果用户取消，刷新 UI 恢复原始进度
+        // 如果用户取消，立即恢复UI到原始值
         if (result === false) {
-          console.log('[Progress Drag] 触摸用户取消，恢复进度到:', originalValue);
+          console.log('[Progress Drag] 触摸用户取消，恢复UI到原始值:', originalValue);
+          if (progressFill) progressFill.style.width = `${originalValue}%`;
+          if (progressInput) progressInput.value = originalValue;
+          // 刷新任务列表以确保完全同步
           loadTasks().catch(err => console.error('[Progress Drag] 刷新任务失败:', err));
         }
         // 重置光标
@@ -357,6 +369,10 @@ function setupProgressDragEvents() {
         if (progressTrack) progressTrack.style.cursor = 'pointer';
       }).catch(err => {
         console.error('[Progress Drag] 更新进度失败:', err);
+        // 恢复UI到原始值
+        if (progressFill) progressFill.style.width = `${originalValue}%`;
+        if (progressInput) progressInput.value = originalValue;
+        // 重置光标
         document.body.style.cursor = '';
         if (progressTrack) progressTrack.style.cursor = 'pointer';
       });
