@@ -10,6 +10,10 @@ let selectedTaskId = null;  // 当前选中的任务ID（用于键盘删除）
 // 调试模式状态
 let debugMode = false;
 
+// 进度条拖拽状态
+let draggingProgressTask = null; // 正在拖拽的任务 ID
+let draggingProgressElement = null; // 正在拖拽的进度条元素
+
 // ==================== Toast 通知系统 ====================
 const Toast = {
   container: null,
@@ -243,6 +247,93 @@ let lastReports = {
   monthly: null
 };
 
+// ==================== 进度条拖拽处理 ====================
+
+/**
+ * 设置进度条拖拽的全局事件
+ */
+function setupProgressDragEvents() {
+  // 根据鼠标位置更新进度显示（不提交）
+  function updateProgressFromMouse(e) {
+    if (!draggingProgressElement) return;
+    const { progressTrack, progressFill, progressInput } = draggingProgressElement;
+    const rect = progressTrack.getBoundingClientRect();
+    const percent = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+    progressFill.style.width = `${percent}%`;
+    if (progressInput) {
+      progressInput.value = Math.round(percent);
+    }
+  }
+
+  // 鼠标移动事件
+  document.addEventListener('mousemove', (e) => {
+    if (draggingProgressTask) {
+      e.preventDefault();
+      updateProgressFromMouse(e);
+    }
+  });
+
+  // 鼠标释放事件
+  document.addEventListener('mouseup', async (e) => {
+    if (draggingProgressTask) {
+      const { progressTrack } = draggingProgressElement;
+      const rect = progressTrack.getBoundingClientRect();
+      const percent = Math.round(((e.clientX - rect.left) / rect.width) * 100);
+      const clampedPercent = Math.max(0, Math.min(100, percent));
+
+      // 重置状态
+      document.body.style.cursor = '';
+      if (progressTrack) progressTrack.style.cursor = 'pointer';
+
+      // 保存任务 ID 并重置拖拽状态
+      const taskId = draggingProgressTask;
+      draggingProgressTask = null;
+      draggingProgressElement = null;
+
+      // 提交进度更新
+      await updateTaskProgress(taskId, clampedPercent);
+    }
+  });
+
+  // 触摸事件支持
+  document.addEventListener('touchmove', (e) => {
+    if (draggingProgressTask) {
+      const touch = e.touches[0];
+      if (draggingProgressElement) {
+        const { progressTrack, progressFill, progressInput } = draggingProgressElement;
+        const rect = progressTrack.getBoundingClientRect();
+        const percent = Math.max(0, Math.min(100, ((touch.clientX - rect.left) / rect.width) * 100));
+        progressFill.style.width = `${percent}%`;
+        if (progressInput) {
+          progressInput.value = Math.round(percent);
+        }
+      }
+    }
+  });
+
+  document.addEventListener('touchend', async (e) => {
+    if (draggingProgressTask) {
+      const touch = e.changedTouches[0];
+      const { progressTrack } = draggingProgressElement;
+      const rect = progressTrack.getBoundingClientRect();
+      const percent = Math.round(((touch.clientX - rect.left) / rect.width) * 100);
+      const clampedPercent = Math.max(0, Math.min(100, percent));
+
+      // 重置状态
+      document.body.style.cursor = '';
+      if (progressTrack) progressTrack.style.cursor = 'pointer';
+
+      // 保存任务 ID 并重置拖拽状态
+      const taskId = draggingProgressTask;
+      draggingProgressTask = null;
+      draggingProgressElement = null;
+
+      // 提交进度更新
+      await updateTaskProgress(taskId, clampedPercent);
+    }
+  });
+}
+
 // 初始化
 document.addEventListener('DOMContentLoaded', async () => {
   // 初始化 Toast
@@ -323,6 +414,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 function bindEvents() {
   bindReportEvents();
   bindDragAndDrop();
+
+  // 进度条拖拽全局事件
+  setupProgressDragEvents();
   // 添加任务
   document.getElementById('addTaskBtn').addEventListener('click', addTask);
   document.getElementById('taskInput').addEventListener('keydown', function (e) {
@@ -1560,18 +1654,23 @@ function createTaskCard(task) {
 
   // 绑定进度条事件
   const progressTrack = card.querySelector('.task-progress-track');
+  const progressFill = card.querySelector('.task-progress-fill');
   const progressInput = card.querySelector('.task-progress-input');
 
-  if (progressTrack && progressInput) {
-    // 点击进度条更新进度
-    progressTrack.addEventListener('click', (e) => {
+  if (progressTrack && progressFill) {
+    // 鼠标按下开始拖拽
+    progressTrack.addEventListener('mousedown', (e) => {
+      draggingProgressTask = task.id;
+      draggingProgressElement = { progressTrack, progressFill, progressInput };
       e.stopPropagation();
-      const rect = progressTrack.getBoundingClientRect();
-      const percent = Math.round(((e.clientX - rect.left) / rect.width) * 100);
-      updateTaskProgress(task.id, Math.max(0, Math.min(100, percent)));
+      document.body.style.cursor = 'ew-resize';
+      progressTrack.style.cursor = 'ew-resize';
+      updateProgressFromMouse(e);
     });
+  }
 
-    // 输入框修改进度
+  // 输入框修改进度（保留手动输入功能）
+  if (progressInput) {
     progressInput.addEventListener('change', (e) => {
       e.stopPropagation();
       let value = parseInt(e.target.value) || 0;
