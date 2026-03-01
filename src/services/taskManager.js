@@ -216,12 +216,14 @@ async function addOrUpdateTask(content, options = {}) {
   const similarTask = findSimilarTask(data.tasks, newTask.title);
 
   if (similarTask) {
-    // 更新现有任务
+    // 更新现有任务，保留原有的 zentaoId 和 zentaoExecution
     Object.assign(similarTask, {
       content: content,
       status: newTask.status,
       progress: newTask.progress,
       reminderTime: newTask.reminderTime || similarTask.reminderTime,
+      zentaoId: options.zentaoId || similarTask.zentaoId,  // 优先使用传入的，否则保留原值
+      zentaoExecution: options.zentaoExecution || similarTask.zentaoExecution,  // 优先使用传入的，否则保留原值
       updatedAt: new Date().toISOString()
     });
 
@@ -234,7 +236,8 @@ async function addOrUpdateTask(content, options = {}) {
     id: uuidv4(),
     content: content,
     ...newTask,
-    zentaoId: options.zentaoId || null, // 支持传入浏览器端已创建的 zentaoId
+    zentaoId: options.zentaoId || null,        // 支持传入浏览器端已创建的 zentaoId
+    zentaoExecution: options.zentaoExecution || null,  // 禅道执行 ID
     totalConsumedTime: 0,  // 累计消耗工时（用于计算剩余工时）
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
