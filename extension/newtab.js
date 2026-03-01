@@ -1717,7 +1717,7 @@ async function addTask() {
 
         // 准备默认值（当用户两个都没填时使用）
         const defaultWork = taskProgress === 100 ? '任务完成' : `初始进度 ${taskProgress}%`;
-        const defaultConsumed = 0;
+        const defaultConsumed = 1;  // 默认1小时
 
         // 弹出填写工时对话框
         const progressResult = await ProgressInputDialog.show(
@@ -1823,8 +1823,8 @@ async function updateTaskProgress(taskId, progress) {
         `更新进度至 ${progress}%`,
         '',                              // placeholder 工作
         '',                              // placeholder 消耗工时
-        `进度更新至 ${progress}%`,       // 默认工作（用户两个都没填时使用）
-        0                                // 默认消耗工时
+        '修改的进度',                       // 默认工作
+        1                                 // 默认消耗工时（1小时）
       );
 
       // 用户取消则不更新
@@ -1923,7 +1923,80 @@ async function updateTaskPriority(taskId, priority) {
     const result = await response.json();
 
     if (result.success) {
+      // 先重新加载任务数据
       await loadTasks();
+
+      // 更新任务卡片的优先级显示
+      const taskCard = document.querySelector(`.task-card[data-task-id="${taskId}"]`);
+      if (taskCard) {
+        const updatedTask = allTasks.find(t => t.id === taskId);
+        if (updatedTask) {
+          // 重新生成优先级按钮和菜单
+          const priorityBtn = taskCard.querySelector('.priority-toggle');
+          const priorityMenu = document.querySelector(`.priority-menu-${taskId}`);
+
+          // 移除旧的菜单
+          if (priorityMenu) priorityMenu.remove();
+
+          // 更新优先级按钮样式
+          const priorityColors = { 1: '#ef4444', 2: '#f59e0b', 3: '#3b82f6', 4: '#9ca3af' };
+          priorityBtn.style.color = priorityColors[priority];
+          priorityBtn.textContent = `P${priority}`;
+
+          // 创建新的菜单（排除当前优先级）
+          const newMenu = document.createElement('div');
+          newMenu.className = `priority-menu priority-menu-${taskId}`;
+          newMenu.style.cssText = 'display:none; position:fixed; background:white; border:1px solid #e2e8f0; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:99999; min-width:60px; padding:4px 0;';
+          newMenu.innerHTML = `
+            ${priority !== 1 ? `<div class="priority-option" data-priority="1" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#ef4444; text-align:center;">P1</div>` : ''}
+            ${priority !== 2 ? `<div class="priority-option" data-priority="2" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#f59e0b; text-align:center;">P2</div>` : ''}
+            ${priority !== 3 ? `<div class="priority-option" data-priority="3" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#3b82f6; text-align:center;">P3</div>` : ''}
+            ${priority !== 4 ? `<div class="priority-option" data-priority="4" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#9ca3af; text-align:center;">P4</div>` : ''}
+          `;
+          document.body.appendChild(newMenu);
+
+          // 重新绑定菜单事件
+          const newPriorityMenu = document.querySelector(`.priority-menu-${taskId}`);
+          newPriorityMenu.querySelectorAll('.priority-option').forEach(option => {
+            option.addEventListener('click', (e) => {
+              e.stopPropagation();
+              const newPriority = parseInt(e.currentTarget.dataset.priority);
+              updateTaskPriority(taskId, newPriority);
+              newPriorityMenu.style.display = 'none';
+            });
+            option.addEventListener('mouseenter', () => {
+              option.style.background = '#f1f5f9';
+            });
+            option.addEventListener('mouseleave', () => {
+              option.style.background = 'transparent';
+            });
+          });
+
+          // 重新绑定按钮点击事件（使用新菜单）
+          priorityBtn.onclick = (e) => {
+            e.stopPropagation();
+            document.querySelectorAll('.priority-menu').forEach(m => {
+              if (!m.classList.contains(`priority-menu-${taskId}`)) {
+                m.style.display = 'none';
+              }
+            });
+            newPriorityMenu.style.display = newPriorityMenu.style.display === 'none' ? 'block' : 'none';
+            const rect = priorityBtn.getBoundingClientRect();
+            newPriorityMenu.style.top = (rect.bottom + 2) + 'px';
+            newPriorityMenu.style.left = rect.left + 'px';
+          };
+        }
+      }
+
+      // 如果详情弹窗打开，也要更新
+      const detailModal = document.querySelector('.task-detail-modal.active');
+      if (detailModal) {
+        const detailTaskId = detailModal.querySelector('.detail-priority-btn')?.closest('.task-detail-modal')?.querySelector('.detail-priority-btn')?.parentElement?.querySelector('[data-action="close"]')?.dataset?.taskId;
+        // 简单的做法：关闭弹窗
+        if (detailTaskId === taskId) {
+          detailModal.remove();
+        }
+      }
     } else {
       console.error('更新优先级失败:', result.error);
     }
@@ -3182,8 +3255,11 @@ const ZentaoBrowserClient = {
           if (chrome.runtime.lastError) {
             console.error('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
             resolve({ success: false, reason: 'background_error' });
-          } else {
+          } else if (response) {
             resolve(response);
+          } else {
+            console.error('[ZentaoBrowser] Background 未返回响应');
+            resolve({ success: false, reason: 'no_response' });
           }
         });
       });
@@ -3329,8 +3405,11 @@ const ZentaoBrowserClient = {
           if (chrome.runtime.lastError) {
             console.error('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
             resolve({ success: false, reason: 'background_error' });
-          } else {
+          } else if (response) {
             resolve(response);
+          } else {
+            console.error('[ZentaoBrowser] Background 未返回响应');
+            resolve({ success: false, reason: 'no_response' });
           }
         });
       });
@@ -3370,8 +3449,11 @@ const ZentaoBrowserClient = {
           if (chrome.runtime.lastError) {
             console.error('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
             resolve({ success: false, reason: 'background_error' });
-          } else {
+          } else if (response) {
             resolve(response);
+          } else {
+            console.error('[ZentaoBrowser] Background 未返回响应');
+            resolve({ success: false, reason: 'no_response' });
           }
         });
       });
@@ -3413,8 +3495,11 @@ const ZentaoBrowserClient = {
           if (chrome.runtime.lastError) {
             console.error('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
             resolve({ success: false, reason: 'background_error' });
-          } else {
+          } else if (response) {
             resolve(response);
+          } else {
+            console.error('[ZentaoBrowser] Background 未返回响应');
+            resolve({ success: false, reason: 'no_response' });
           }
         });
       });

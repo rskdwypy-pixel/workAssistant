@@ -205,9 +205,9 @@ async function sendMorningReminder(tasks) {
   const content = `待办任务: ${todoCount} 项 | 进行中: ${inProgressCount} 项`;
 
   const items = tasks
-    .filter(t => t.status === 'todo')
+    .filter(t => t.status === 'todo' || t.status === 'in_progress')
     .slice(0, 10)
-    .map(t => `⚪ ${t.title}`);
+    .map(t => `${t.status === 'in_progress' ? '🔵' : '⚪'} ${t.title}`);
 
   return await sendNotification(title, content, items);
 }

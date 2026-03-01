@@ -8,8 +8,15 @@ let customReminderInterval = null;
 
 async function checkTaskReminders() {
   try {
-    const tasks = await getAllTasks();
     const now = new Date();
+    const dayOfWeek = now.getDay(); // 0=周日, 6=周六
+
+    // 周末不检查任务提醒
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      return;
+    }
+
+    const tasks = await getAllTasks();
 
     for (const task of tasks) {
       if (task.reminderTime && (!task.reminder3hTriggered || !task.reminderExactTriggered) && task.status !== 'done') {
@@ -78,10 +85,20 @@ async function sendSystemNotification(title, message) {
 
 /**
  * 早间提醒
+ * @param {boolean} skipWeekendCheck - 是否跳过周末检查（用于手动测试）
  */
-async function morningReminder() {
+async function morningReminder(skipWeekendCheck = false) {
   try {
     console.log('🌅 执行早间提醒...');
+
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0=周日, 6=周六
+
+    // 周末不提醒（除非是手动测试）
+    if (!skipWeekendCheck && (dayOfWeek === 0 || dayOfWeek === 6)) {
+      console.log('🛌 周末跳过早间提醒');
+      return;
+    }
 
     const tasks = await getTodayTasks();
     const todoTasks = tasks.filter(t => t.status === 'todo');
@@ -146,7 +163,7 @@ function stopReminder() {
  * 手动触发提醒（用于测试）
  */
 async function triggerMorningReminder() {
-  await morningReminder();
+  await morningReminder(true); // 跳过周末检查
 }
 
 export {
