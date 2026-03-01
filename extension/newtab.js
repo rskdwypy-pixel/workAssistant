@@ -302,6 +302,8 @@ function setupProgressDragEvents() {
         if (progressInput) {
           progressInput.value = originalValue;
         }
+        // 重新加载任务列表以确保 UI 正确显示
+        await loadTasks();
       }
 
       // 重置光标
@@ -352,6 +354,8 @@ function setupProgressDragEvents() {
         if (progressInput) {
           progressInput.value = originalValue;
         }
+        // 重新加载任务列表以确保 UI 正确显示
+        await loadTasks();
       }
 
       // 重置光标
