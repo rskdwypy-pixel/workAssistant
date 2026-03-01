@@ -515,6 +515,11 @@ async function editZentaoTask(params) {
   const results = await chrome.scripting.executeScript({
     target: { tabId: targetTab.id },
     func: (taskId, execution, name, pri, comment, consumed, left) => {
+      // 在 injected script 中生成 UID
+      function generateUid() {
+        return Math.random().toString(36).substring(2, 14);
+      }
+
       return new Promise((resolve) => {
         const endpoint = `${window.location.origin}/zentao/task-edit-${taskId}.html`;
 
