@@ -297,23 +297,11 @@ function setupProgressDragEvents() {
       updateTaskProgress(taskId, clampedPercent).then((result) => {
         console.log('[Progress Drag] updateTaskProgress 返回:', result);
 
-        // 如果用户取消，刷新 UI 恢复原始进度
-        if (result === false) {
-          console.log('[Progress Drag] 用户取消，恢复进度到:', originalValue);
-          // 先手动恢复 UI 显示
-          if (progressFill) {
-            progressFill.style.width = `${originalValue}%`;
-          }
-          if (progressInput) {
-            progressInput.value = originalValue;
-          }
-          // 然后刷新任务列表
-          loadTasks().catch(err => console.error('[Progress Drag] 刷新任务失败:', err));
-        } else {
-          console.log('[Progress Drag] 进度更新成功，刷新任务列表');
-          // 进度更新成功也刷新任务列表
-          loadTasks().catch(err => console.error('[Progress Drag] 刷新任务失败:', err));
-        }
+        // 无论成功还是取消，都刷新任务列表以同步 UI
+        // 如果取消，updateTaskProgress 已经处理了恢复逻辑
+        console.log('[Progress Drag] 刷新任务列表');
+        loadTasks().catch(err => console.error('[Progress Drag] 刷新任务失败:', err));
+
         // 重置光标
         document.body.style.cursor = '';
         if (progressTrack) progressTrack.style.cursor = 'pointer';
@@ -2000,6 +1988,8 @@ async function updateTaskProgress(taskId, progress) {
     const task = allTasks.find(t => t.id === taskId);
     if (!task) return;
 
+    console.log('[Progress] updateTaskProgress 调用:', { taskId, taskProgress: task.progress, newProgress: progress });
+
     let progressComment = '';
     let consumedTime = 0;
 
@@ -2090,6 +2080,7 @@ async function updateTaskProgress(taskId, progress) {
     if (result.success) {
       // 只重新渲染任务列表，不重新加载
       await loadTasks();
+      console.log('[Progress] 进度更新成功，返回 true');
       return true;
     } else {
       console.error('更新进度失败:', result.error);
