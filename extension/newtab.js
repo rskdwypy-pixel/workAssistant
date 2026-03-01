@@ -1614,15 +1614,24 @@ function createTaskCard(task) {
     checkbox.addEventListener('click', (e) => e.stopPropagation());
     checkbox.addEventListener('change', async (e) => {
       e.stopPropagation();
-      const newProgress = e.target.checked ? 100 : 0;
+      const isChecked = e.target.checked;
+      const newProgress = isChecked ? 100 : 0;
       const originalChecked = e.target.checked;
+      const originalProgress = task.progress;
 
-      // 调用更新进度，如果用户取消则恢复复选框状态
+      // 临时修改任务进度，确保 updateTaskProgress 能检测到变化并弹框
+      // 如果目标进度与当前进度相同，先设为不同的值
+      if (task.progress === newProgress) {
+        task.progress = newProgress === 100 ? 99 : 1;
+      }
+
+      // 调用更新进度，如果用户取消则恢复复选框状态和进度
       const result = await updateTaskProgress(task.id, newProgress);
 
       // updateTaskProgress 返回 false 表示用户取消
       if (result === false) {
-        e.target.checked = !originalChecked; // 恢复原始状态
+        e.target.checked = !originalChecked; // 恢复复选框状态
+        task.progress = originalProgress; // 恢复进度
       }
     });
   }
@@ -3111,11 +3120,100 @@ function getDragAfterElement(container, y) {
 }
 
 async function handleDragEnd() {
+  // 找出被拖拽的任务（状态或列发生变化的任务）
+  const draggedTask = findDraggedTask();
+  if (!draggedTask) {
+    // 没有任务被拖拽到不同列，只更新排序
+    await updateTaskOrder();
+    renderTasks();
+    updateCounts();
+    return;
+  }
+
+  const { taskId, oldStatus, oldProgress, newStatus, newProgress, card, oldListId } = draggedTask;
+  console.log('[Drag] 检测到被拖拽的任务:', { taskId, oldStatus, oldProgress, newStatus, newProgress });
+
+  // 如果进度有变化，调用 updateTaskProgress
+  if (newProgress !== oldProgress) {
+    // 确保 allTasks 中的任务状态和进度保持原值
+    const task = allTasks.find(t => t.id === taskId);
+    if (task) {
+      task.status = oldStatus;
+      task.progress = oldProgress;
+    }
+
+    const result = await updateTaskProgress(taskId, newProgress);
+    if (result === false) {
+      // 用户取消，将卡片移回原来的列
+      console.log('[Drag] 用户取消，将卡片移回原位置');
+      const oldList = document.getElementById(oldListId);
+      if (oldList && card) {
+        // 移回原来的列
+        oldList.appendChild(card);
+      }
+      // 恢复本地任务状态
+      if (task) {
+        task.status = oldStatus;
+        task.progress = oldProgress;
+      }
+      return;
+    }
+  }
+
+  // 用户确认或进度没变化，更新排序
+  await updateTaskOrder();
+  await loadTasks();
+  updateCounts();
+  triggerSync();
+}
+
+// 找出被拖拽的任务（状态或列发生变化的任务）
+function findDraggedTask() {
+  for (const listId of ['todoList', 'inProgressList', 'doneList']) {
+    const listStatus = listId === 'todoList' ? 'todo' : (listId === 'inProgressList' ? 'in_progress' : 'done');
+    const cards = document.getElementById(listId).querySelectorAll('.task-card');
+
+    for (const card of cards) {
+      const taskId = card.dataset.taskId;
+      const task = allTasks.find(t => t.id === taskId);
+      if (!task) continue;
+
+      // 如果任务状态与所在列的状态不同，说明这个任务被拖拽了
+      if (task.status !== listStatus) {
+        let newProgress = task.progress;
+
+        // 计算新进度
+        if (listStatus === 'in_progress') newProgress = 10;
+        else if (listStatus === 'done') newProgress = 100;
+        else if (listStatus === 'todo') newProgress = 0;
+
+        // 找到原始列的 ID
+        let oldListId;
+        if (task.status === 'todo') oldListId = 'todoList';
+        else if (task.status === 'in_progress') oldListId = 'inProgressList';
+        else oldListId = 'doneList';
+
+        return {
+          taskId,
+          oldStatus: task.status,
+          oldProgress: task.progress,
+          newStatus: listStatus,
+          newProgress,
+          card,
+          oldListId
+        };
+      }
+    }
+  }
+  return null;
+}
+
+// 更新所有任务的排序
+async function updateTaskOrder() {
   const updates = [];
   let indexCounter = 0;
 
   ['todoList', 'inProgressList', 'doneList'].forEach(listId => {
-    const listStatus = listId === 'todoList' ? 'todo' : (listId === 'inProgressList' ? 'in_progress' : 'done');
     const cards = document.getElementById(listId).querySelectorAll('.task-card');
 
     cards.forEach(card => {
@@ -3123,25 +3221,12 @@ async function handleDragEnd() {
       const task = allTasks.find(t => t.id === taskId);
       if (!task) return;
 
-      let newProgress = task.progress;
-      let newStatus = listStatus;
-
-      if (task.status !== newStatus) {
-        if (newStatus === 'in_progress') newProgress = 10;
-        else if (newStatus === 'done') newProgress = 100;
-        else if (newStatus === 'todo') newProgress = 0;
-      }
-
       updates.push({
         id: taskId,
         order: indexCounter++,
-        status: newStatus,
-        progress: newProgress
+        status: task.status,
+        progress: task.progress
       });
-
-      task.status = newStatus;
-      task.progress = newProgress;
-      task.order = updates[updates.length - 1].order;
     });
   });
 
@@ -3152,14 +3237,8 @@ async function handleDragEnd() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ updates })
       });
-      renderTasks();
-      // 这里也一并更新左侧状态面板的数据
-      updateCounts();
-
-      // 触发同步
-      triggerSync();
     } catch (err) {
-      console.error('批量更新状态失败:', err);
+      console.error('批量更新排序失败:', err);
     }
   }
 }
