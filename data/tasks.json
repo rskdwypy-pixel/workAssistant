@@ -73,21 +73,6 @@
       "order": null
     },
     {
-      "id": "d6e5d389-862f-4c5a-8c89-b46350f245ee",
-      "content": "江苏农信项目要求对竞品做分析，用于 3 月份领导汇报",
-      "title": "江苏农信竞品分析",
-      "status": "todo",
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 0,
-      "createdAt": "2026-02-27T12:19:52.672Z",
-      "updatedAt": "2026-02-28T03:14:21.267Z",
-      "priority": 3,
-      "order": null
-    },
-    {
       "id": "10e7a513-6d24-46a1-b86d-87526a8ea58d",
       "content": "处理 E 路有我账号登录问题，已完成",
       "title": "处理E路有我账号登录问题",
@@ -131,21 +116,6 @@
       "order": 6
     },
     {
-      "id": "4d0ed8ca-4a17-4442-a3fb-cbffbd59c31a",
-      "content": "爱建证券 POC",
-      "title": "爱建证券POC",
-      "status": "todo",
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 0,
-      "createdAt": "2026-02-28T02:42:39.079Z",
-      "updatedAt": "2026-02-28T03:42:46.501Z",
-      "priority": 3,
-      "order": null
-    },
-    {
       "id": "19839b14-fb99-4b86-beac-46dd54c53c9f",
       "content": "修改工商银行脚本",
       "title": "修改工商银行脚本",
@@ -158,71 +128,7 @@
       "progress": 22,
       "createdAt": "2026-02-28T08:03:31.461Z",
       "updatedAt": "2026-02-28T08:33:38.277Z"
-    },
-    {
-      "id": "9d61a150-0587-41a2-8d91-111728d1d9d4",
-      "content": "修改阿迪脚本",
-      "title": "修改阿迪脚本",
-      "status": "in_progress",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 56,
-      "createdAt": "2026-02-28T08:22:29.680Z",
-      "updatedAt": "2026-02-28T08:44:33.088Z",
-      "zentaoId": "539"
-    },
-    {
-      "id": "37fb1065-3f44-4d4e-a8cf-619a4ff46aa9",
-      "content": "打撒发",
-      "title": "打撒发",
-      "status": "todo",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 0,
-      "zentaoId": null,
-      "totalConsumedTime": 0,
-      "createdAt": "2026-03-01T04:53:30.327Z",
-      "updatedAt": "2026-03-01T04:53:30.327Z"
-    },
-    {
-      "id": "f94c7686-7e38-4e0d-bf00-6ea51409ab75",
-      "content": "阿迪发发",
-      "title": "阿迪发发",
-      "status": "in_progress",
-      "priority": 1,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 36,
-      "zentaoId": "557",
-      "totalConsumedTime": 1,
-      "createdAt": "2026-03-01T05:01:04.280Z",
-      "updatedAt": "2026-03-01T09:41:30.972Z",
-      "order": null
-    },
-    {
-      "id": "5a0bd512-f8df-42f7-836e-bc847992bd46",
-      "content": "佛挡杀佛",
-      "title": "佛挡杀佛",
-      "status": "in_progress",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 41,
-      "zentaoId": "558",
-      "totalConsumedTime": 0,
-      "createdAt": "2026-03-01T09:41:03.462Z",
-      "updatedAt": "2026-03-01T09:41:19.978Z"
     }
   ],
-  "lastUpdated": "2026-03-01T09:41:30.972Z"
+  "lastUpdated": "2026-03-01T09:52:41.200Z"
 }

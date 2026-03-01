@@ -313,12 +313,24 @@ async function updateZentaoTaskStatus(params) {
           },
           body: JSON.stringify({ status })
         })
-        .then(r => r.json())
-        .then(data => {
-          if (data && data.result === 'success') {
+        .then(async r => {
+          const text = await r.text();
+          if (!text || !text.trim()) {
+            console.warn('[Background] 更新状态响应为空');
+            return { success: false, reason: 'empty_response', status: r.status };
+          }
+          try {
+            return { success: true, data: JSON.parse(text), status: r.status };
+          } catch (e) {
+            console.warn('[Background] 解析响应失败:', text.substring(0, 200));
+            return { success: false, reason: 'invalid_json', responseText: text.substring(0, 200) };
+          }
+        })
+        .then(result => {
+          if (result.success && result.data && result.data.result === 'success') {
             resolve({ success: true });
           } else {
-            resolve({ success: false, reason: data?.message || '更新失败' });
+            resolve({ success: false, reason: result.reason || result.data?.message || '更新失败' });
           }
         })
         .catch(err => {
