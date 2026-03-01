@@ -500,7 +500,7 @@ async function deleteZentaoTask(params) {
 
 // 编辑禅道任务
 async function editZentaoTask(params) {
-  const { baseUrl, taskId, execution, name, pri, comment = '', consumed = 0, left = 0 } = params;
+  const { baseUrl, taskId, execution, name, pri } = params;
 
   console.log('[Background] 编辑禅道任务:', { taskId, execution, name, pri });
 
@@ -514,67 +514,125 @@ async function editZentaoTask(params) {
 
   const results = await chrome.scripting.executeScript({
     target: { tabId: targetTab.id },
-    func: (taskId, execution, name, pri, comment, consumed, left) => {
+    func: (taskId, execution, name, pri) => {
       // 在 injected script 中生成 UID
       function generateUid() {
         return Math.random().toString(36).substring(2, 14);
       }
 
-      return new Promise((resolve) => {
-        const endpoint = `${window.location.origin}/zentao/task-edit-${taskId}.html`;
+      return new Promise(async (resolve) => {
+        try {
+          // 第一步：获取任务编辑页面，解析现有字段值
+          const getEndpoint = `${window.location.origin}/zentao/task-edit-${taskId}.html`;
 
-        // 构建表单数据（multipart/form-data 使用 FormData）
-        const formData = new FormData();
-        formData.append('color', '');
-        formData.append('name', name || '');
-        formData.append('desc', comment || '');
-        formData.append('comment', '');
-        formData.append('lastEditedDate', '');
-        formData.append('consumed', consumed.toString());
-        formData.append('uid', generateUid());
-        formData.append('execution', execution);
-        formData.append('module', '0');
-        formData.append('parent', '');
-        formData.append('assignedTo', '');
-        formData.append('type', 'test');
-        formData.append('status', '');
-        formData.append('pri', pri.toString());
-        formData.append('estStarted', '');
-        formData.append('deadline', '');
-        formData.append('estimate', '0');
-        formData.append('left', left.toString());
-        formData.append('realStarted', '');
-        formData.append('finishedBy', '');
-        formData.append('finishedDate', '');
-        formData.append('canceledBy', '');
-        formData.append('canceledDate', '');
-        formData.append('closedBy', '');
-        formData.append('closedReason', '');
-        formData.append('closedDate', '');
+          const getResponse = await fetch(getEndpoint, {
+            method: 'GET',
+            headers: {
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            }
+          });
 
-        // 添加5个空的团队表单项
-        for (let i = 0; i < 5; i++) {
-          formData.append('team[]', '');
-          formData.append('teamSource[]', '');
-          formData.append('teamEstimate[]', '');
-        }
+          if (!getResponse.ok) {
+            resolve({ success: false, reason: '获取任务信息失败' });
+            return;
+          }
 
-        fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-          },
-          body: formData,
-          redirect: 'manual'
-        })
-        .then(async r => {
-          const text = await r.text();
-          console.log('[Edit Zentao Task] 响应状态:', r.status);
-          // 检查是否成功（返回的 HTML 中可能包含成功信息）
-          if (text.includes('class="alert alert-success"') || text.includes('保存成功') || text.includes('记录成功') || r.status === 302 || r.status === 301) {
+          const html = await getResponse.text();
+
+          // 从 HTML 中解析表单字段的当前值
+          function getFormValue(name) {
+            // 尝试匹配 input 的 value 属性
+            const inputMatch = html.match(new RegExp(`name="${name}"[^>]*value="([^"]*)"`, 'i'));
+            if (inputMatch) return inputMatch[1];
+
+            // 尝试匹配 textarea 的内容
+            const textareaMatch = html.match(new RegExp(`<textarea[^>]*name="${name}"[^>]*>([^<]*)</textarea>`, 'is'));
+            if (textareaMatch) return textareaMatch[1].trim();
+
+            // 尝试匹配 select 的选中值
+            const selectMatch = html.match(new RegExp(`<select[^>]*name="${name}"[^>]*>.*?<option[^>]*value="([^"]*)"[^>]*selected`, 'is'));
+            if (selectMatch) return selectMatch[1];
+
+            return '';
+          }
+
+          // 获取所有必要的字段值
+          const lastEditedDate = getFormValue('lastEditedDate');
+          const currentConsumed = getFormValue('consumed') || '0';
+          const currentLeft = getFormValue('left') || '0';
+          const currentEstimate = getFormValue('estimate') || '0';
+          const currentModule = getFormValue('module') || '0';
+          const currentType = getFormValue('type') || 'test';
+          const currentStatus = getFormValue('status') || '';
+          const currentAssignedTo = getFormValue('assignedTo') || '';
+          const currentDesc = getFormValue('desc') || '';
+          const currentColor = getFormValue('color') || '';
+          const currentParent = getFormValue('parent') || '';
+          const currentEstStarted = getFormValue('estStarted') || '';
+          const currentDeadline = getFormValue('deadline') || '';
+          const currentRealStarted = getFormValue('realStarted') || '';
+          const currentFinishedBy = getFormValue('finishedBy') || '';
+          const currentFinishedDate = getFormValue('finishedDate') || '';
+          const currentCanceledBy = getFormValue('canceledBy') || '';
+          const currentCanceledDate = getFormValue('canceledDate') || '';
+          const currentClosedBy = getFormValue('closedBy') || '';
+          const currentClosedReason = getFormValue('closedReason') || '';
+          const currentClosedDate = getFormValue('closedDate') || '';
+
+          console.log('[Edit Zentao Task] 解析到的 lastEditedDate:', lastEditedDate);
+
+          // 第二步：构建编辑请求
+          const formData = new FormData();
+          formData.append('color', currentColor);
+          formData.append('name', name || '');
+          formData.append('desc', currentDesc);
+          formData.append('comment', '');
+          formData.append('lastEditedDate', lastEditedDate);
+          formData.append('consumed', currentConsumed);
+          formData.append('uid', generateUid());
+          formData.append('execution', execution);
+          formData.append('module', currentModule);
+          formData.append('parent', currentParent);
+          formData.append('assignedTo', currentAssignedTo);
+          formData.append('type', currentType);
+          formData.append('status', currentStatus);
+          formData.append('pri', pri.toString());
+          formData.append('estStarted', currentEstStarted);
+          formData.append('deadline', currentDeadline);
+          formData.append('estimate', currentEstimate);
+          formData.append('left', currentLeft);
+          formData.append('realStarted', currentRealStarted);
+          formData.append('finishedBy', currentFinishedBy);
+          formData.append('finishedDate', currentFinishedDate);
+          formData.append('canceledBy', currentCanceledBy);
+          formData.append('canceledDate', currentCanceledDate);
+          formData.append('closedBy', currentClosedBy);
+          formData.append('closedReason', currentClosedReason);
+          formData.append('closedDate', currentClosedDate);
+
+          // 添加5个空的团队表单项
+          for (let i = 0; i < 5; i++) {
+            formData.append('team[]', '');
+            formData.append('teamSource[]', '');
+            formData.append('teamEstimate[]', '');
+          }
+
+          const postResponse = await fetch(getEndpoint, {
+            method: 'POST',
+            headers: {
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            },
+            body: formData,
+            redirect: 'manual'
+          });
+
+          const text = await postResponse.text();
+          console.log('[Edit Zentao Task] 响应状态:', postResponse.status);
+
+          // 检查是否成功
+          if (text.includes('class="alert alert-success"') || text.includes('保存成功') || text.includes('记录成功') || postResponse.status === 302 || postResponse.status === 301) {
             resolve({ success: true });
           } else if (text.includes('class="alert alert-danger"') || text.includes('错误')) {
-            // 尝试提取错误信息
             const errorMatch = text.match(/<div class="alert alert-danger"[^>]*>([^<]+)</);
             if (errorMatch) {
               resolve({ success: false, reason: errorMatch[1] });
@@ -582,17 +640,15 @@ async function editZentaoTask(params) {
               resolve({ success: false, reason: '编辑禅道任务失败' });
             }
           } else {
-            // 可能是重定向或其他情况，认为成功
             resolve({ success: true });
           }
-        })
-        .catch(err => {
+        } catch (err) {
           console.error('[Edit Zentao Task] 请求失败:', err);
           resolve({ success: false, reason: err.message });
-        });
+        }
       });
     },
-    args: [taskId, execution, name, pri, comment, consumed, left]
+    args: [taskId, execution, name, pri]
   });
 
   return results[0].result;
