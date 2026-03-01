@@ -1660,7 +1660,7 @@ function createTaskCard(task) {
   const progressInput = card.querySelector('.task-progress-input');
   const progressBar = card.querySelector('.task-progress-bar');
 
-  if (progressTrack && progressFill) {
+  if (progressTrack && progressFill && progressBar) {
     // 阻止进度条区域的拖拽事件冒泡到卡片
     progressBar.addEventListener('dragstart', (e) => {
       e.stopPropagation();
@@ -1668,14 +1668,18 @@ function createTaskCard(task) {
     });
 
     // 鼠标按下开始拖拽
-    progressTrack.addEventListener('mousedown', (e) => {
+    const startDrag = (e) => {
       draggingProgressTask = task.id;
       draggingProgressElement = { progressTrack, progressFill, progressInput };
+      e.preventDefault(); // 阻止默认拖拽行为
       e.stopPropagation();
       document.body.style.cursor = 'ew-resize';
       progressTrack.style.cursor = 'ew-resize';
       updateProgressFromMouse(e);
-    });
+    };
+
+    progressTrack.addEventListener('mousedown', startDrag);
+    progressFill.addEventListener('mousedown', startDrag);
   }
 
   // 输入框修改进度（保留手动输入功能）
