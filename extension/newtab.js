@@ -250,21 +250,23 @@ let lastReports = {
 // ==================== 进度条拖拽处理 ====================
 
 /**
+ * 根据鼠标位置更新进度显示（不提交）
+ */
+function updateProgressFromMouse(e) {
+  if (!draggingProgressElement) return;
+  const { progressTrack, progressFill, progressInput } = draggingProgressElement;
+  const rect = progressTrack.getBoundingClientRect();
+  const percent = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+  progressFill.style.width = `${percent}%`;
+  if (progressInput) {
+    progressInput.value = Math.round(percent);
+  }
+}
+
+/**
  * 设置进度条拖拽的全局事件
  */
 function setupProgressDragEvents() {
-  // 根据鼠标位置更新进度显示（不提交）
-  function updateProgressFromMouse(e) {
-    if (!draggingProgressElement) return;
-    const { progressTrack, progressFill, progressInput } = draggingProgressElement;
-    const rect = progressTrack.getBoundingClientRect();
-    const percent = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
-    progressFill.style.width = `${percent}%`;
-    if (progressInput) {
-      progressInput.value = Math.round(percent);
-    }
-  }
-
   // 鼠标移动事件
   document.addEventListener('mousemove', (e) => {
     if (draggingProgressTask) {
@@ -1656,8 +1658,15 @@ function createTaskCard(task) {
   const progressTrack = card.querySelector('.task-progress-track');
   const progressFill = card.querySelector('.task-progress-fill');
   const progressInput = card.querySelector('.task-progress-input');
+  const progressBar = card.querySelector('.task-progress-bar');
 
   if (progressTrack && progressFill) {
+    // 阻止进度条区域的拖拽事件冒泡到卡片
+    progressBar.addEventListener('dragstart', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+    });
+
     // 鼠标按下开始拖拽
     progressTrack.addEventListener('mousedown', (e) => {
       draggingProgressTask = task.id;
