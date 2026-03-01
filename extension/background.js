@@ -541,12 +541,18 @@ async function editZentaoTask(params) {
 
           // 从 HTML 中解析表单字段的当前值
           function getFormValue(name) {
-            // 尝试匹配 input 的 value 属性
-            const inputMatch = html.match(new RegExp(`name="${name}"[^>]*value="([^"]*)"`, 'i'));
+            // 尝试匹配 input 的 value 属性（处理单引号和双引号）
+            let inputMatch = html.match(new RegExp(`name="${name}"[^>]*value="([^"]*)"`, 'i'));
+            if (!inputMatch) {
+              inputMatch = html.match(new RegExp(`name='${name}'[^>]*value='([^']*)'`, 'i'));
+            }
             if (inputMatch) return inputMatch[1];
 
-            // 尝试匹配 textarea 的内容
-            const textareaMatch = html.match(new RegExp(`<textarea[^>]*name="${name}"[^>]*>([^<]*)</textarea>`, 'is'));
+            // 尝试匹配 textarea 的内容（多种格式）
+            let textareaMatch = html.match(new RegExp(`<textarea[^>]*name="${name}"[^>]*>([^<]*)</textarea>`, 'is'));
+            if (!textareaMatch) {
+              textareaMatch = html.match(new RegExp(`<textarea[^>]*name='${name}'[^>]*>([^<]*)</textarea>`, 'is'));
+            }
             if (textareaMatch) return textareaMatch[1].trim();
 
             // 尝试匹配 select 的选中值
@@ -563,9 +569,13 @@ async function editZentaoTask(params) {
           const currentEstimate = getFormValue('estimate') || '0';
           const currentModule = getFormValue('module') || '0';
           const currentType = getFormValue('type') || 'test';
-          const currentStatus = getFormValue('status') || '';
+          const currentStatus = getFormValue('status') || 'wait';
           const currentAssignedTo = getFormValue('assignedTo') || '';
-          const currentDesc = getFormValue('desc') || '';
+          // desc: 如果解析不到则使用新的 name 值
+          let currentDesc = getFormValue('desc');
+          if (!currentDesc) {
+            currentDesc = name;
+          }
           const currentColor = getFormValue('color') || '';
           const currentParent = getFormValue('parent') || '';
           const currentEstStarted = getFormValue('estStarted') || '';
@@ -579,13 +589,13 @@ async function editZentaoTask(params) {
           const currentClosedReason = getFormValue('closedReason') || '';
           const currentClosedDate = getFormValue('closedDate') || '';
 
-          console.log('[Edit Zentao Task] 解析到的 lastEditedDate:', lastEditedDate);
+          console.log('[Edit Zentao Task] 解析到的字段:', { lastEditedDate, currentStatus, currentAssignedTo, currentDesc, name });
 
           // 第二步：构建编辑请求
           const formData = new FormData();
           formData.append('color', currentColor);
           formData.append('name', name || '');
-          formData.append('desc', currentDesc);
+          formData.append('desc', currentDesc || name);  // 确保 desc 有值
           formData.append('comment', '');
           formData.append('lastEditedDate', lastEditedDate);
           formData.append('consumed', currentConsumed);
@@ -593,6 +603,7 @@ async function editZentaoTask(params) {
           formData.append('execution', execution);
           formData.append('module', currentModule);
           formData.append('parent', currentParent);
+          formData.append('mode', 'single');  // 添加 mode 字段
           formData.append('assignedTo', currentAssignedTo);
           formData.append('type', currentType);
           formData.append('status', currentStatus);
