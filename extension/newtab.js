@@ -13,6 +13,7 @@ let debugMode = false;
 // 进度条拖拽状态
 let draggingProgressTask = null; // 正在拖拽的任务 ID
 let draggingProgressElement = null; // 正在拖拽的进度条元素
+let draggingProgressOriginalValue = null; // 拖拽前的原始进度值
 
 // ==================== Toast 通知系统 ====================
 const Toast = {
@@ -278,22 +279,34 @@ function setupProgressDragEvents() {
   // 鼠标释放事件
   document.addEventListener('mouseup', async (e) => {
     if (draggingProgressTask) {
-      const { progressTrack } = draggingProgressElement;
+      const { progressTrack, progressFill, progressInput } = draggingProgressElement;
       const rect = progressTrack.getBoundingClientRect();
       const percent = Math.round(((e.clientX - rect.left) / rect.width) * 100);
       const clampedPercent = Math.max(0, Math.min(100, percent));
 
-      // 重置状态
-      document.body.style.cursor = '';
-      if (progressTrack) progressTrack.style.cursor = 'pointer';
-
-      // 保存任务 ID 并重置拖拽状态
+      // 保存任务 ID 和原始值
       const taskId = draggingProgressTask;
+      const originalValue = draggingProgressOriginalValue;
+
+      // 重置拖拽状态
       draggingProgressTask = null;
       draggingProgressElement = null;
+      draggingProgressOriginalValue = null;
 
       // 提交进度更新
-      await updateTaskProgress(taskId, clampedPercent);
+      const result = await updateTaskProgress(taskId, clampedPercent);
+
+      // 如果用户取消，恢复原始进度值
+      if (result === false) {
+        progressFill.style.width = `${originalValue}%`;
+        if (progressInput) {
+          progressInput.value = originalValue;
+        }
+      }
+
+      // 重置光标
+      document.body.style.cursor = '';
+      if (progressTrack) progressTrack.style.cursor = 'pointer';
     }
   });
 
@@ -316,22 +329,34 @@ function setupProgressDragEvents() {
   document.addEventListener('touchend', async (e) => {
     if (draggingProgressTask) {
       const touch = e.changedTouches[0];
-      const { progressTrack } = draggingProgressElement;
+      const { progressTrack, progressFill, progressInput } = draggingProgressElement;
       const rect = progressTrack.getBoundingClientRect();
       const percent = Math.round(((touch.clientX - rect.left) / rect.width) * 100);
       const clampedPercent = Math.max(0, Math.min(100, percent));
 
-      // 重置状态
-      document.body.style.cursor = '';
-      if (progressTrack) progressTrack.style.cursor = 'pointer';
-
-      // 保存任务 ID 并重置拖拽状态
+      // 保存任务 ID 和原始值
       const taskId = draggingProgressTask;
+      const originalValue = draggingProgressOriginalValue;
+
+      // 重置拖拽状态
       draggingProgressTask = null;
       draggingProgressElement = null;
+      draggingProgressOriginalValue = null;
 
       // 提交进度更新
-      await updateTaskProgress(taskId, clampedPercent);
+      const result = await updateTaskProgress(taskId, clampedPercent);
+
+      // 如果用户取消，恢复原始进度值
+      if (result === false) {
+        progressFill.style.width = `${originalValue}%`;
+        if (progressInput) {
+          progressInput.value = originalValue;
+        }
+      }
+
+      // 重置光标
+      document.body.style.cursor = '';
+      if (progressTrack) progressTrack.style.cursor = 'pointer';
     }
   });
 }
@@ -1671,6 +1696,8 @@ function createTaskCard(task) {
     const startDrag = (e) => {
       draggingProgressTask = task.id;
       draggingProgressElement = { progressTrack, progressFill, progressInput };
+      // 保存原始进度值
+      draggingProgressOriginalValue = task.progress ?? (task.status === 'done' ? 100 : (task.status === 'in_progress' ? 10 : 0));
       e.preventDefault(); // 阻止默认拖拽行为
       e.stopPropagation();
       document.body.style.cursor = 'ew-resize';
