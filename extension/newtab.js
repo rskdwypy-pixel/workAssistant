@@ -279,12 +279,14 @@ function setupProgressDragEvents() {
   // 鼠标释放事件
   document.addEventListener('mouseup', (e) => {
     if (draggingProgressTask) {
-      const { progressTrack } = draggingProgressElement;
+      const { progressTrack, progressFill, progressInput } = draggingProgressElement;
       const rect = progressTrack.getBoundingClientRect();
       const percent = Math.round(((e.clientX - rect.left) / rect.width) * 100);
       const clampedPercent = Math.max(0, Math.min(100, percent));
       const taskId = draggingProgressTask;
       const originalValue = draggingProgressOriginalValue;
+
+      console.log('[Progress Drag] 鼠标释放:', { taskId, originalValue, newValue: clampedPercent });
 
       // 重置拖拽状态
       draggingProgressTask = null;
@@ -293,9 +295,23 @@ function setupProgressDragEvents() {
 
       // 提交进度更新
       updateTaskProgress(taskId, clampedPercent).then((result) => {
+        console.log('[Progress Drag] updateTaskProgress 返回:', result);
+
         // 如果用户取消，刷新 UI 恢复原始进度
         if (result === false) {
           console.log('[Progress Drag] 用户取消，恢复进度到:', originalValue);
+          // 先手动恢复 UI 显示
+          if (progressFill) {
+            progressFill.style.width = `${originalValue}%`;
+          }
+          if (progressInput) {
+            progressInput.value = originalValue;
+          }
+          // 然后刷新任务列表
+          loadTasks().catch(err => console.error('[Progress Drag] 刷新任务失败:', err));
+        } else {
+          console.log('[Progress Drag] 进度更新成功，刷新任务列表');
+          // 进度更新成功也刷新任务列表
           loadTasks().catch(err => console.error('[Progress Drag] 刷新任务失败:', err));
         }
         // 重置光标
@@ -303,6 +319,7 @@ function setupProgressDragEvents() {
         if (progressTrack) progressTrack.style.cursor = 'pointer';
       }).catch(err => {
         console.error('[Progress Drag] 更新进度失败:', err);
+        // 重置光标
         document.body.style.cursor = '';
         if (progressTrack) progressTrack.style.cursor = 'pointer';
       });
