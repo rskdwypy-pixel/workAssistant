@@ -15,7 +15,31 @@ let summaryTask = null;
  */
 async function eveningSummary() {
   try {
-    console.log('🌙 执行晚间日报...');
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0=周日, 6=周六
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
+    console.log('🌙 执行晚间日报...', `isWeekend=${isWeekend}`);
+
+    // 如果是周末，检查今天是否有任务更新
+    if (isWeekend) {
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const allTasks = await getAllTasks();
+
+      // 检查今天是否有任务被创建或更新
+      const hasTodayUpdates = allTasks.some(t => {
+        const createdTime = new Date(t.createdAt).getTime();
+        const updatedTime = new Date(t.updatedAt || t.createdAt).getTime();
+        return createdTime >= todayStart || updatedTime >= todayStart;
+      });
+
+      if (!hasTodayUpdates) {
+        console.log('📅 周末无任务更新，跳过日报生成');
+        return;
+      }
+
+      console.log('💼 周末检测到任务更新（加班），生成日报');
+    }
 
     const tasks = await getTodayTasks();
     const todoTasks = tasks.filter(t => t.status === 'todo');
