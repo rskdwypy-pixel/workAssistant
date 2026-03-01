@@ -1848,7 +1848,7 @@ async function updateTaskProgress(taskId, progress) {
         `更新进度至 ${progress}%`,
         '',                              // placeholder 工作
         '',                              // placeholder 消耗工时
-        '修改的进度',                       // 默认工作
+        `更新进度至 ${progress}%`,         // 默认工作
         1                                 // 默认消耗工时（1小时）
       );
 
