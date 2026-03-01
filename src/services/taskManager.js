@@ -135,8 +135,9 @@ async function addTask(content) {
     reminder3hTriggered: analysis.data.reminderTime ? (new Date(analysis.data.reminderTime).getTime() - Date.now() <= 3 * 3600000) : false,
     reminderExactTriggered: false,
     progress: parsedProgress,
-    zentaoId: null,        // 禅道任务 ID（由浏览器插件同步）
-    totalConsumedTime: 0,  // 累计消耗工时（用于计算剩余工时）
+    zentaoId: null,           // 禅道任务 ID（由浏览器插件同步）
+    zentaoExecution: null,    // 禅道执行 ID（用于编辑任务）
+    totalConsumedTime: 0,     // 累计消耗工时（用于计算剩余工时）
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };

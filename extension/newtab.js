@@ -1448,10 +1448,11 @@ function createTaskCard(task) {
   card.innerHTML = `
     <div class="task-title" style="display: flex; align-items: flex-start; gap: 8px; width:100%;">
       <input type="checkbox" class="task-checkbox" data-task-id="${task.id}" ${task.status === 'done' ? 'checked' : ''} style="margin-top: 4px; cursor: pointer;">
-      <span style="flex:1;">
+      <span style="flex:1;" class="task-title-text" data-task-id="${task.id}">
         ${escapeHtml(task.title)}
         ${task.zentaoId ? `<a href="${getZentaoTaskUrl(task.zentaoId)}" target="_blank" class="zentao-link" style="margin-left: 6px; color: #3b82f6; text-decoration: none; font-size: 12px;">#${task.zentaoId}</a>` : ''}
       </span>
+      <button class="task-title-edit-btn" data-task-id="${task.id}" style="background:none; border:none; cursor:pointer; color:#9ca3af; font-size:14px; padding:2px 4px; opacity:0; transition:opacity 0.2s;" title="编辑标题">✏️</button>
       ${priorityHTML}
     </div>
     ${task.status !== 'done' ? `
@@ -1585,6 +1586,24 @@ function createTaskCard(task) {
     });
   }
 
+  // 绑定标题编辑按钮事件
+  const titleEditBtn = card.querySelector('.task-title-edit-btn');
+  const titleText = card.querySelector('.task-title-text');
+  if (titleEditBtn && titleText) {
+    // 鼠标悬停显示编辑按钮
+    card.addEventListener('mouseenter', () => {
+      titleEditBtn.style.opacity = '1';
+    });
+    card.addEventListener('mouseleave', () => {
+      titleEditBtn.style.opacity = '0';
+    });
+
+    titleEditBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      updateTaskTitle(task.id);
+    });
+  }
+
   card.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     showTaskDetail(task);
@@ -1697,14 +1716,20 @@ async function addTask() {
 
       // 更新任务的 zentaoId（如果禅道端创建成功）
       if (browserZentaoId) {
-        // 使用通用更新接口更新 zentaoId
+        // 获取 executionId 用于后续编辑操作
+        const executionId = ZentaoBrowserClient.config.createTaskUrl || '';
+
+        // 使用通用更新接口更新 zentaoId 和 zentaoExecution
         const updateResp = await fetch(`${API_BASE_URL}/api/task/${result.data.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ zentaoId: browserZentaoId })
+          body: JSON.stringify({
+            zentaoId: browserZentaoId,
+            zentaoExecution: executionId
+          })
         });
         if (updateResp.ok) {
-          console.log('[AddTask] zentaoId 已保存到任务:', browserZentaoId);
+          console.log('[AddTask] zentaoId 和 zentaoExecution 已保存到任务:', browserZentaoId, executionId);
         } else {
           console.error('[AddTask] 保存 zentaoId 失败:', updateResp.status);
         }
@@ -1914,6 +1939,27 @@ async function updateTaskProgress(taskId, progress) {
 // 更新任务优先级
 async function updateTaskPriority(taskId, priority) {
   try {
+    // 获取任务信息，用于同步到禅道
+    const task = allTasks.find(t => t.id === taskId);
+
+    // 如果有 zentaoId 和 zentaoExecution，先同步到禅道
+    if (task && task.zentaoId && task.zentaoExecution) {
+      try {
+        const zentaoResult = await ZentaoBrowserClient.editTask({
+          zentaoId: task.zentaoId,
+          execution: task.zentaoExecution,
+          pri: priority
+        });
+        if (zentaoResult.success) {
+          console.log('[Priority] 禅道优先级已同步');
+        } else {
+          console.log('[Priority] 禅道优先级同步失败:', zentaoResult.reason);
+        }
+      } catch (err) {
+        console.log('[Priority] 同步禅道优先级出错:', err.message);
+      }
+    }
+
     const response = await fetch(`${API_BASE_URL}/api/task/${taskId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -2002,6 +2048,59 @@ async function updateTaskPriority(taskId, priority) {
     }
   } catch (err) {
     console.error('更新优先级失败:', err);
+  }
+}
+
+// 更新任务标题
+async function updateTaskTitle(taskId) {
+  const task = allTasks.find(t => t.id === taskId);
+  if (!task) return;
+
+  // 使用简单的 prompt 获取新标题
+  const newTitle = prompt('编辑任务标题:', task.title);
+  if (newTitle === null || newTitle.trim() === '') {
+    return; // 用户取消或输入为空
+  }
+
+  const trimmedTitle = newTitle.trim();
+
+  try {
+    // 如果有 zentaoId 和 zentaoExecution，先同步到禅道
+    if (task.zentaoId && task.zentaoExecution) {
+      try {
+        const zentaoResult = await ZentaoBrowserClient.editTask({
+          zentaoId: task.zentaoId,
+          execution: task.zentaoExecution,
+          name: trimmedTitle
+        });
+        if (zentaoResult.success) {
+          console.log('[Title] 禅道标题已同步');
+        } else {
+          console.log('[Title] 禅道标题同步失败:', zentaoResult.reason);
+        }
+      } catch (err) {
+        console.log('[Title] 同步禅道标题出错:', err.message);
+      }
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/task/${taskId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: trimmedTitle })
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      Toast.success('标题已更新');
+      await loadTasks();
+    } else {
+      console.error('更新标题失败:', result.error);
+      Toast.error('更新失败');
+    }
+  } catch (err) {
+    console.error('更新标题失败:', err);
+    Toast.error('更新失败');
   }
 }
 
@@ -3507,6 +3606,55 @@ const ZentaoBrowserClient = {
       return result;
     } catch (err) {
       console.error('[ZentaoBrowser] 删除禅道任务异常:', err.message);
+      return { success: false, reason: err.message };
+    }
+  },
+
+  /**
+   * 编辑禅道任务（修改标题、优先级等）
+   * @param {Object} options - 编辑选项
+   * @param {string} options.zentaoId - 禅道任务ID
+   * @param {string} options.execution - 执行ID
+   * @param {string} [options.name] - 任务标题
+   * @param {number} [options.pri] - 优先级 (1-4)
+   */
+  async editTask({ zentaoId, execution, name, pri }) {
+    await this.initConfig();
+
+    if (!this.isConfigured()) {
+      return { success: false, reason: 'not_configured' };
+    }
+
+    const baseUrl = this.getBaseUrl();
+
+    console.log('[ZentaoBrowser] 准备编辑禅道任务:', { zentaoId, execution, name, pri });
+
+    try {
+      // 通过 background.js 在禅道页面中执行
+      const result = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+          action: 'editZentaoTask',
+          baseUrl,
+          taskId: zentaoId,
+          execution,
+          name: name || '',
+          pri: pri || 3
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
+            resolve({ success: false, reason: 'background_error' });
+          } else if (response) {
+            resolve(response);
+          } else {
+            console.error('[ZentaoBrowser] Background 未返回响应');
+            resolve({ success: false, reason: 'no_response' });
+          }
+        });
+      });
+
+      return result;
+    } catch (err) {
+      console.error('[ZentaoBrowser] 编辑禅道任务异常:', err.message);
       return { success: false, reason: err.message };
     }
   }

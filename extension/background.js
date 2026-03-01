@@ -188,6 +188,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch(err => sendResponse({ success: false, reason: err.message }));
     return true; // 保持异步返回
   }
+
+  if (request.action === 'editZentaoTask') {
+    editZentaoTask(request)
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, reason: err.message }));
+    return true; // 保持异步返回
+  }
 });
 
 // 在禅道页面中执行请求（使用 content script）
@@ -486,6 +493,101 @@ async function deleteZentaoTask(params) {
       });
     },
     args: [executionId, zentaoId]
+  });
+
+  return results[0].result;
+}
+
+// 编辑禅道任务
+async function editZentaoTask(params) {
+  const { baseUrl, taskId, execution, name, pri, comment = '', consumed = 0, left = 0 } = params;
+
+  console.log('[Background] 编辑禅道任务:', { taskId, execution, name, pri });
+
+  // 查找禅道标签页
+  const tabs = await chrome.tabs.query({ url: `${baseUrl}/*` });
+  let targetTab = tabs.find(tab => tab.url.includes('zentao') && !tab.url.includes('user-login'));
+
+  if (!targetTab) {
+    return { success: false, reason: '未找到禅道页面，请先打开禅道网站' };
+  }
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: targetTab.id },
+    func: (taskId, execution, name, pri, comment, consumed, left) => {
+      return new Promise((resolve) => {
+        const endpoint = `${window.location.origin}/zentao/task-edit-${taskId}.html`;
+
+        // 构建表单数据（multipart/form-data 使用 FormData）
+        const formData = new FormData();
+        formData.append('color', '');
+        formData.append('name', name || '');
+        formData.append('desc', comment || '');
+        formData.append('comment', '');
+        formData.append('lastEditedDate', '');
+        formData.append('consumed', consumed.toString());
+        formData.append('uid', generateUid());
+        formData.append('execution', execution);
+        formData.append('module', '0');
+        formData.append('parent', '');
+        formData.append('assignedTo', '');
+        formData.append('type', 'test');
+        formData.append('status', '');
+        formData.append('pri', pri.toString());
+        formData.append('estStarted', '');
+        formData.append('deadline', '');
+        formData.append('estimate', '0');
+        formData.append('left', left.toString());
+        formData.append('realStarted', '');
+        formData.append('finishedBy', '');
+        formData.append('finishedDate', '');
+        formData.append('canceledBy', '');
+        formData.append('canceledDate', '');
+        formData.append('closedBy', '');
+        formData.append('closedReason', '');
+        formData.append('closedDate', '');
+
+        // 添加5个空的团队表单项
+        for (let i = 0; i < 5; i++) {
+          formData.append('team[]', '');
+          formData.append('teamSource[]', '');
+          formData.append('teamEstimate[]', '');
+        }
+
+        fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+          },
+          body: formData,
+          redirect: 'manual'
+        })
+        .then(async r => {
+          const text = await r.text();
+          console.log('[Edit Zentao Task] 响应状态:', r.status);
+          // 检查是否成功（返回的 HTML 中可能包含成功信息）
+          if (text.includes('class="alert alert-success"') || text.includes('保存成功') || text.includes('记录成功') || r.status === 302 || r.status === 301) {
+            resolve({ success: true });
+          } else if (text.includes('class="alert alert-danger"') || text.includes('错误')) {
+            // 尝试提取错误信息
+            const errorMatch = text.match(/<div class="alert alert-danger"[^>]*>([^<]+)</);
+            if (errorMatch) {
+              resolve({ success: false, reason: errorMatch[1] });
+            } else {
+              resolve({ success: false, reason: '编辑禅道任务失败' });
+            }
+          } else {
+            // 可能是重定向或其他情况，认为成功
+            resolve({ success: true });
+          }
+        })
+        .catch(err => {
+          console.error('[Edit Zentao Task] 请求失败:', err);
+          resolve({ success: false, reason: err.message });
+        });
+      });
+    },
+    args: [taskId, execution, name, pri, comment, consumed, left]
   });
 
   return results[0].result;
