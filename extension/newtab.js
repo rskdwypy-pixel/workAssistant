@@ -1948,6 +1948,7 @@ async function updateTaskPriority(taskId, priority) {
         const zentaoResult = await ZentaoBrowserClient.editTask({
           zentaoId: task.zentaoId,
           execution: task.zentaoExecution,
+          name: task.title,  // 传入任务标题，用于 desc 字段
           pri: priority
         });
         if (zentaoResult.success) {
