@@ -277,14 +277,12 @@ function setupProgressDragEvents() {
   });
 
   // 鼠标释放事件
-  document.addEventListener('mouseup', async (e) => {
+  document.addEventListener('mouseup', (e) => {
     if (draggingProgressTask) {
-      const { progressTrack, progressFill, progressInput } = draggingProgressElement;
+      const { progressTrack } = draggingProgressElement;
       const rect = progressTrack.getBoundingClientRect();
       const percent = Math.round(((e.clientX - rect.left) / rect.width) * 100);
       const clampedPercent = Math.max(0, Math.min(100, percent));
-
-      // 保存任务 ID 和原始值
       const taskId = draggingProgressTask;
       const originalValue = draggingProgressOriginalValue;
 
@@ -294,21 +292,20 @@ function setupProgressDragEvents() {
       draggingProgressOriginalValue = null;
 
       // 提交进度更新
-      const result = await updateTaskProgress(taskId, clampedPercent);
-
-      // 如果用户取消，恢复原始进度值
-      if (result === false) {
-        progressFill.style.width = `${originalValue}%`;
-        if (progressInput) {
-          progressInput.value = originalValue;
+      updateTaskProgress(taskId, clampedPercent).then((result) => {
+        // 如果用户取消，刷新 UI 恢复原始进度
+        if (result === false) {
+          console.log('[Progress Drag] 用户取消，恢复进度到:', originalValue);
+          loadTasks().catch(err => console.error('[Progress Drag] 刷新任务失败:', err));
         }
-        // 重新加载任务列表以确保 UI 正确显示
-        await loadTasks();
-      }
-
-      // 重置光标
-      document.body.style.cursor = '';
-      if (progressTrack) progressTrack.style.cursor = 'pointer';
+        // 重置光标
+        document.body.style.cursor = '';
+        if (progressTrack) progressTrack.style.cursor = 'pointer';
+      }).catch(err => {
+        console.error('[Progress Drag] 更新进度失败:', err);
+        document.body.style.cursor = '';
+        if (progressTrack) progressTrack.style.cursor = 'pointer';
+      });
     }
   });
 
@@ -328,15 +325,13 @@ function setupProgressDragEvents() {
     }
   });
 
-  document.addEventListener('touchend', async (e) => {
+  document.addEventListener('touchend', (e) => {
     if (draggingProgressTask) {
       const touch = e.changedTouches[0];
-      const { progressTrack, progressFill, progressInput } = draggingProgressElement;
+      const { progressTrack } = draggingProgressElement;
       const rect = progressTrack.getBoundingClientRect();
       const percent = Math.round(((touch.clientX - rect.left) / rect.width) * 100);
       const clampedPercent = Math.max(0, Math.min(100, percent));
-
-      // 保存任务 ID 和原始值
       const taskId = draggingProgressTask;
       const originalValue = draggingProgressOriginalValue;
 
@@ -346,21 +341,20 @@ function setupProgressDragEvents() {
       draggingProgressOriginalValue = null;
 
       // 提交进度更新
-      const result = await updateTaskProgress(taskId, clampedPercent);
-
-      // 如果用户取消，恢复原始进度值
-      if (result === false) {
-        progressFill.style.width = `${originalValue}%`;
-        if (progressInput) {
-          progressInput.value = originalValue;
+      updateTaskProgress(taskId, clampedPercent).then((result) => {
+        // 如果用户取消，刷新 UI 恢复原始进度
+        if (result === false) {
+          console.log('[Progress Drag] 触摸用户取消，恢复进度到:', originalValue);
+          loadTasks().catch(err => console.error('[Progress Drag] 刷新任务失败:', err));
         }
-        // 重新加载任务列表以确保 UI 正确显示
-        await loadTasks();
-      }
-
-      // 重置光标
-      document.body.style.cursor = '';
-      if (progressTrack) progressTrack.style.cursor = 'pointer';
+        // 重置光标
+        document.body.style.cursor = '';
+        if (progressTrack) progressTrack.style.cursor = 'pointer';
+      }).catch(err => {
+        console.error('[Progress Drag] 更新进度失败:', err);
+        document.body.style.cursor = '';
+        if (progressTrack) progressTrack.style.cursor = 'pointer';
+      });
     }
   });
 }
