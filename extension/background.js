@@ -500,9 +500,9 @@ async function deleteZentaoTask(params) {
 
 // 编辑禅道任务
 async function editZentaoTask(params) {
-  const { baseUrl, taskId, execution, name, pri } = params;
+  const { baseUrl, taskId, execution, name, pri, username } = params;
 
-  console.log('[Background] 编辑禅道任务:', { taskId, execution, name, pri });
+  console.log('[Background] 编辑禅道任务:', { taskId, execution, name, pri, username });
 
   // 查找禅道标签页
   const tabs = await chrome.tabs.query({ url: `${baseUrl}/*` });
@@ -514,7 +514,7 @@ async function editZentaoTask(params) {
 
   const results = await chrome.scripting.executeScript({
     target: { tabId: targetTab.id },
-    func: (taskId, execution, name, pri) => {
+    func: (taskId, execution, name, pri, defaultUsername) => {
       // 在 injected script 中生成 UID
       function generateUid() {
         return Math.random().toString(36).substring(2, 14);
@@ -570,7 +570,8 @@ async function editZentaoTask(params) {
           const currentModule = getFormValue('module') || '0';
           const currentType = getFormValue('type') || 'test';
           const currentStatus = getFormValue('status') || 'wait';
-          const currentAssignedTo = getFormValue('assignedTo') || '';
+          // assignedTo: 优先使用解析的值，否则使用当前登录账号
+          const currentAssignedTo = getFormValue('assignedTo') || defaultUsername || '';
           // desc: 如果解析不到则使用新的 name 值
           let currentDesc = getFormValue('desc');
           if (!currentDesc) {
@@ -659,7 +660,7 @@ async function editZentaoTask(params) {
         }
       });
     },
-    args: [taskId, execution, name, pri]
+    args: [taskId, execution, name, pri, username]
   });
 
   return results[0].result;

@@ -3627,8 +3627,9 @@ const ZentaoBrowserClient = {
     }
 
     const baseUrl = this.getBaseUrl();
+    const username = this.config.username || 'admin';
 
-    console.log('[ZentaoBrowser] 准备编辑禅道任务:', { zentaoId, execution, name, pri });
+    console.log('[ZentaoBrowser] 准备编辑禅道任务:', { zentaoId, execution, name, pri, username });
 
     try {
       // 通过 background.js 在禅道页面中执行
@@ -3639,7 +3640,8 @@ const ZentaoBrowserClient = {
           taskId: zentaoId,
           execution,
           name: name || '',
-          pri: pri || 3
+          pri: pri || 3,
+          username
         }, (response) => {
           if (chrome.runtime.lastError) {
             console.error('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
