@@ -1472,10 +1472,18 @@ function createTaskCard(task) {
   const checkbox = card.querySelector('.task-checkbox');
   if (checkbox) {
     checkbox.addEventListener('click', (e) => e.stopPropagation());
-    checkbox.addEventListener('change', (e) => {
+    checkbox.addEventListener('change', async (e) => {
       e.stopPropagation();
       const newProgress = e.target.checked ? 100 : 0;
-      updateTaskProgress(task.id, newProgress);
+      const originalChecked = e.target.checked;
+
+      // 调用更新进度，如果用户取消则恢复复选框状态
+      const result = await updateTaskProgress(task.id, newProgress);
+
+      // updateTaskProgress 返回 false 表示用户取消
+      if (result === false) {
+        e.target.checked = !originalChecked; // 恢复原始状态
+      }
     });
   }
 
@@ -1852,10 +1860,10 @@ async function updateTaskProgress(taskId, progress) {
         1                                 // 默认消耗工时（1小时）
       );
 
-      // 用户取消则不更新
+      // 用户取消则不更新，返回 false
       if (result === null) {
         console.log('[Progress] 用户取消进度更新');
-        return;
+        return false;
       }
 
       progressComment = result.work;
@@ -1928,11 +1936,14 @@ async function updateTaskProgress(taskId, progress) {
     if (result.success) {
       // 只重新渲染任务列表，不重新加载
       await loadTasks();
+      return true;
     } else {
       console.error('更新进度失败:', result.error);
+      return false;
     }
   } catch (err) {
     console.error('更新进度失败:', err);
+    return false;
   }
 }
 
