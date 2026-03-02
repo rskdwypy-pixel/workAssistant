@@ -3482,7 +3482,7 @@ const ZentaoBrowserClient = {
         this.config = result.data;
       }
     } catch (err) {
-      console.error('[ZentaoBrowser] 获取配置失败:', err);
+      console.warn('[ZentaoBrowser] 获取配置失败:', err);
     }
     return this.config;
   },
@@ -3537,7 +3537,7 @@ const ZentaoBrowserClient = {
           password: this.config.password
         }, (response) => {
           if (chrome.runtime.lastError) {
-            console.error('[ZentaoBrowser] 后台通信失败:', chrome.runtime.lastError);
+            console.warn('[ZentaoBrowser] 后台通信失败:', chrome.runtime.lastError);
             Toast.error('内部通信异常');
             resolve(false);
             return;
@@ -3551,14 +3551,14 @@ const ZentaoBrowserClient = {
             console.log('[ZentaoBrowser] 隐形标签页自动登录已同步完成');
             resolve(true);
           } else {
-            console.error('[ZentaoBrowser] 后台注入登录失败:', response?.error);
+            console.warn('[ZentaoBrowser] 后台注入登录失败:', response?.error);
             if (this.config._isManualTest) Toast.error('禅道登录失败: ' + (response?.error || ''));
             resolve(false);
           }
         });
       });
     } catch (err) {
-      console.error('[ZentaoBrowser] 登录异常:', err.message);
+      console.warn('[ZentaoBrowser] 登录异常:', err.message);
       if (this.config._isManualTest) Toast.error('禅道登录异常');
       return false;
     } finally {
@@ -3607,7 +3607,7 @@ const ZentaoBrowserClient = {
         // 直接检查浏览器中的禅道 session cookie（zentaosid）
         chrome.cookies.get({ url: url, name: 'zentaosid' }, (cookie) => {
           if (chrome.runtime.lastError) {
-            console.error('[ZentaoBrowser] 检查 cookie 失败:', chrome.runtime.lastError.message);
+            console.warn('[ZentaoBrowser] 检查 cookie 失败:', chrome.runtime.lastError.message);
             resolve(false);
             return;
           }
@@ -3623,7 +3623,7 @@ const ZentaoBrowserClient = {
           }
         });
       } catch (err) {
-        console.error('[ZentaoBrowser] 验证 session 失败:', err.message);
+        console.warn('[ZentaoBrowser] 验证 session 失败:', err.message);
         resolve(false);
       }
     });
@@ -3677,7 +3677,7 @@ const ZentaoBrowserClient = {
       }
       return false;
     } catch (err) {
-      console.error('[ZentaoBrowser] 刷新 Cookie 失败:', err.message);
+      console.warn('[ZentaoBrowser] 刷新 Cookie 失败:', err.message);
       return false;
     }
   },
@@ -3699,7 +3699,7 @@ const ZentaoBrowserClient = {
         console.log('[ZentaoBrowser] 浏览器会话正常');
       }
     } catch (err) {
-      console.error('[ZentaoBrowser] 会话保活检查失败:', err.message);
+      console.warn('[ZentaoBrowser] 会话保活检查失败:', err.message);
     }
   },
 
@@ -3728,7 +3728,7 @@ const ZentaoBrowserClient = {
         // 获取所有匹配的 cookie（包括主域和子域）
         chrome.cookies.getAll({ domain: zentaoUrl.hostname }, (cookies) => {
           if (chrome.runtime.lastError) {
-            console.error('[ZentaoBrowser] 获取 cookies 失败:', chrome.runtime.lastError.message);
+            console.warn('[ZentaoBrowser] 获取 cookies 失败:', chrome.runtime.lastError.message);
             resolve('');
             return;
           }
@@ -3746,7 +3746,7 @@ const ZentaoBrowserClient = {
           }
         });
       } catch (err) {
-        console.error('[ZentaoBrowser] 获取 cookies 异常:', err.message);
+        console.warn('[ZentaoBrowser] 获取 cookies 异常:', err.message);
         resolve('');
       }
     });
@@ -3767,7 +3767,7 @@ const ZentaoBrowserClient = {
         return match[1];
       }
     } catch (err) {
-      console.error('[ZentaoBrowser] 获取 session token 失败:', err);
+      console.warn('[ZentaoBrowser] 获取 session token 失败:', err);
     }
     return null;
   },
@@ -3786,7 +3786,7 @@ const ZentaoBrowserClient = {
     // createTaskUrl 现在直接存储 execution ID（如 167）
     const executionId = this.config.createTaskUrl || '';
     if (!executionId || executionId === '0') {
-      console.error('[ZentaoBrowser] 未配置 execution ID:', executionId);
+      console.warn('[ZentaoBrowser] 未配置 execution ID:', executionId);
       return { success: false, reason: 'invalid_execution_id' };
     }
     const username = this.config.username || 'admin';
@@ -3805,12 +3805,12 @@ const ZentaoBrowserClient = {
           taskData
         }, (response) => {
           if (chrome.runtime.lastError) {
-            console.error('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
+            console.warn('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
             resolve({ success: false, reason: 'background_error' });
           } else if (response) {
             resolve(response);
           } else {
-            console.error('[ZentaoBrowser] Background 未返回响应');
+            console.warn('[ZentaoBrowser] Background 未返回响应');
             resolve({ success: false, reason: 'no_response' });
           }
         });
@@ -3905,7 +3905,7 @@ const ZentaoBrowserClient = {
       });
 
       if (!response.ok) {
-        console.error('[ZentaoBrowser] 获取任务列表页面失败:', response.status);
+        console.warn('[ZentaoBrowser] 获取任务列表页面失败:', response.status);
         return null;
       }
 
@@ -3916,10 +3916,10 @@ const ZentaoBrowserClient = {
         return match[1];
       }
 
-      console.error('[ZentaoBrowser] HTML 中未找到任务ID');
+      console.warn('[ZentaoBrowser] HTML 中未找到任务ID');
       return null;
     } catch (err) {
-      console.error('[ZentaoBrowser] 提取任务ID异常:', err.message);
+      console.warn('[ZentaoBrowser] 提取任务ID异常:', err.message);
       return null;
     }
   },
@@ -3955,12 +3955,12 @@ const ZentaoBrowserClient = {
           status: zentaoStatus
         }, (response) => {
           if (chrome.runtime.lastError) {
-            console.error('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
+            console.warn('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
             resolve({ success: false, reason: 'background_error' });
           } else if (response) {
             resolve(response);
           } else {
-            console.error('[ZentaoBrowser] Background 未返回响应');
+            console.warn('[ZentaoBrowser] Background 未返回响应');
             resolve({ success: false, reason: 'no_response' });
           }
         });
@@ -3999,12 +3999,12 @@ const ZentaoBrowserClient = {
           leftTime
         }, (response) => {
           if (chrome.runtime.lastError) {
-            console.error('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
+            console.warn('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
             resolve({ success: false, reason: 'background_error' });
           } else if (response) {
             resolve(response);
           } else {
-            console.error('[ZentaoBrowser] Background 未返回响应');
+            console.warn('[ZentaoBrowser] Background 未返回响应');
             resolve({ success: false, reason: 'no_response' });
           }
         });
@@ -4045,12 +4045,12 @@ const ZentaoBrowserClient = {
           zentaoId
         }, (response) => {
           if (chrome.runtime.lastError) {
-            console.error('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
+            console.warn('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
             resolve({ success: false, reason: 'background_error' });
           } else if (response) {
             resolve(response);
           } else {
-            console.error('[ZentaoBrowser] Background 未返回响应');
+            console.warn('[ZentaoBrowser] Background 未返回响应');
             resolve({ success: false, reason: 'no_response' });
           }
         });
@@ -4096,12 +4096,12 @@ const ZentaoBrowserClient = {
           username
         }, (response) => {
           if (chrome.runtime.lastError) {
-            console.error('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
+            console.warn('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
             resolve({ success: false, reason: 'background_error' });
           } else if (response) {
             resolve(response);
           } else {
-            console.error('[ZentaoBrowser] Background 未返回响应');
+            console.warn('[ZentaoBrowser] Background 未返回响应');
             resolve({ success: false, reason: 'no_response' });
           }
         });

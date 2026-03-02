@@ -63,7 +63,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     chrome.tabs.create({ url: loginUrl, active: false }, (tab) => {
       if (chrome.runtime.lastError) {
-        console.error('[Background] 创建标签页失败:', chrome.runtime.lastError);
+        console.warn('[Background] 创建标签页失败:', chrome.runtime.lastError);
         sendResponse({ success: false, error: '创建标签页失败' });
         return;
       }
@@ -114,7 +114,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           }).then(() => {
             console.log('[Background] 脚本注入成功');
           }).catch(err => {
-            console.error('[Background] 脚本注入失败:', err);
+            console.warn('[Background] 脚本注入失败:', err);
           });
           return;
         }
