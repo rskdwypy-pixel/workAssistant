@@ -27,7 +27,24 @@ AI驱动的智能任务管理和日报生成工具。
 
 ## 快速开始
 
-### 方式一：使用启动脚本（推荐）
+### 方式一：安装全局命令（推荐）
+
+运行安装脚本，可在任意位置使用命令：
+
+```bash
+cd /Users/itreenewbee/Pictures/Github/workAssistant
+./install.sh
+```
+
+安装后可用的命令：
+
+| 命令 | 说明 |
+|------|------|
+| `wa` | 启动服务 |
+| `wastop` | 停止服务 |
+| `walog` | 查看实时日志（Ctrl+C 退出） |
+
+### 方式二：使用启动脚本
 
 ```bash
 cd /Users/itreenewbee/Pictures/Github/workAssistant

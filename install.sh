@@ -67,8 +67,14 @@ cat > "$BIN_DIR/wastop" << EOF
 cd "$SCRIPT_DIR" && exec ./stop.sh "\$@"
 EOF
 
+# walog - 查看日志命令
+cat > "$BIN_DIR/walog" << EOF
+#!/bin/bash
+cd "$SCRIPT_DIR" && exec tail -f logs/service.log
+EOF
+
 # 设置执行权限
-chmod +x "$BIN_DIR/wa" "$BIN_DIR/wastop"
+chmod +x "$BIN_DIR/wa" "$BIN_DIR/wastop" "$BIN_DIR/walog"
 
 # 自动重新加载 zsh 配置
 echo ""
@@ -81,7 +87,8 @@ echo ""
 echo "现在你可以在任何位置使用："
 echo ""
 echo -e "  ${GREEN}wa${NC}           # 启动服务"
-echo -e "  ${GREEN}wastop${NC}        # 停止服务"
+echo -e "  ${GREEN}wastop${NC}       # 停止服务"
+echo -e "  ${GREEN}walog${NC}        # 查看日志 (Ctrl+C 退出)"
 echo ""
 echo -e "${YELLOW}提示: 已将此脚本加入到你的编辑器快捷键，可以一键启动/停止服务${NC}"
 echo ""
