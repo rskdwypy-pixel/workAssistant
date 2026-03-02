@@ -161,8 +161,9 @@ async function getHistoryByDate(dateStr) {
  * @param {string} type - daily, weekly, monthly
  * @param {boolean} autoPush - 是否自动推送，默认 false
  * @param {string} date - 指定日期（格式：YYYY-MM-DD），仅用于日报
+ * @param {number} workHours - 今日工时，仅用于日报
  */
-async function generateReport(type, autoPush = false, date = null) { // type = daily, weekly, monthly
+async function generateReport(type, autoPush = false, date = null, workHours = null) { // type = daily, weekly, monthly
   let startMs = 0;
   let summaryDateLabel = new Date().toISOString().split('T')[0];
 
@@ -188,22 +189,35 @@ async function generateReport(type, autoPush = false, date = null) { // type = d
   if (type === 'daily') {
     // 日报：使用前端相同的日期过滤逻辑（getTasksByDate）
     const targetDate = summaryDateLabel;
+    console.log(`[generateReport] 日报日期: ${targetDate}, 总任务数: ${allTasks.length}`);
+
     tasks = allTasks.filter(task => {
       const taskCreatedAtDateStr = new Date(task.createdAt).toISOString().split('T')[0];
       const taskUpdatedAtDateStr = new Date(task.updatedAt || task.createdAt).toISOString().split('T')[0];
-      const targetDateTime = new Date(targetDate).getTime();
 
       // 1. 在当前选中日期创建的所有任务，都显示
-      if (taskCreatedAtDateStr === targetDate) return true;
+      if (taskCreatedAtDateStr === targetDate) {
+        console.log(`[generateReport] 包含任务（今日创建）: ${task.title} [${task.status}]`);
+        return true;
+      }
 
-      // 2. 如果任务是未完成状态（todo或in_progress），并且创建于选中日期之前，则一直顺延携带显示
-      if (task.status !== 'done' && new Date(taskCreatedAtDateStr).getTime() <= targetDateTime) return true;
+      // 2. 如果任务是未完成状态（todo或in_progress），并且创建于选中日期之前或等于，则一直顺延携带显示
+      if (task.status !== 'done' && taskCreatedAtDateStr <= targetDate) {
+        console.log(`[generateReport] 包含任务（未完成顺延）: ${task.title} [${task.status}] 创建于: ${taskCreatedAtDateStr}`);
+        return true;
+      }
 
       // 3. 如果任务是已完成状态，但它的完成(更新)时间是在选中日期，也显示在这天
-      if (task.status === 'done' && taskUpdatedAtDateStr === targetDate) return true;
+      if (task.status === 'done' && taskUpdatedAtDateStr === targetDate) {
+        console.log(`[generateReport] 包含任务（今日完成）: ${task.title} [done]`);
+        return true;
+      }
 
+      console.log(`[generateReport] 排除任务: ${task.title} [${task.status}] 创建于: ${taskCreatedAtDateStr}`);
       return false;
     });
+
+    console.log(`[generateReport] 过滤后任务数: ${tasks.length}`);
   } else {
     // 周报/月报：包含时间段内的任务 + 所有未完成任务
     tasks = allTasks.filter(t => {
@@ -218,7 +232,10 @@ async function generateReport(type, autoPush = false, date = null) { // type = d
   const inProgressTasks = tasks.filter(t => t.status === 'in_progress');
   const doneTasks = tasks.filter(t => t.status === 'done');
 
-  const { data: summary } = await generateSummary(todoTasks, inProgressTasks, doneTasks, type);
+  // 构建工时信息（仅日报）
+  const workTimeInfo = (type === 'daily' && workHours !== null) ? { hours: workHours } : null;
+
+  const { data: summary } = await generateSummary(todoTasks, inProgressTasks, doneTasks, type, workTimeInfo);
 
   const history = await readHistory();
   if (!history.reports) history.reports = history.dailySummaries || [];

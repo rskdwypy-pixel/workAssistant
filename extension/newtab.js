@@ -1244,9 +1244,13 @@ async function handleGenerateReport(type, btnElement, typeName) {
       }
     }
 
-    // 传递选择的日期参数
+    // 传递选择的日期参数和今日工时信息
     const dateParam = selectedDate || new Date().toISOString().split('T')[0];
-    const response = await fetch(`${API_BASE_URL}/api/report/generate/${type}?date=${dateParam}`, { method: 'POST' });
+    const workHours = todayWorkHours > 0 ? todayWorkHours : null;
+    const params = new URLSearchParams({ date: dateParam });
+    if (workHours) params.append('workHours', workHours.toString());
+
+    const response = await fetch(`${API_BASE_URL}/api/report/generate/${type}?${params.toString()}`, { method: 'POST' });
     const result = await response.json();
 
     if (result.success) {

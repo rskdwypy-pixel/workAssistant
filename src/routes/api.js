@@ -259,6 +259,7 @@ router.get('/history/:date', async (req, res) => {
  * POST /api/report/generate/:type - 生成汇报 (daily/weekly/monthly)
  * 支持查询参数 autoPush=true 自动推送
  * 支持查询参数 date=YYYY-MM-DD 指定日期（仅用于日报）
+ * 支持查询参数 workHours=x.x 今日工时（仅用于日报）
  */
 router.post('/report/generate/:type', async (req, res) => {
   try {
@@ -268,9 +269,10 @@ router.post('/report/generate/:type', async (req, res) => {
     }
     const autoPush = req.query.autoPush === 'true';
     const date = req.query.date || null; // 获取日期参数
-    console.log(`[API] 收到请求: 生成${type}报告, autoPush=${autoPush}, date=${date}`);
+    const workHours = req.query.workHours ? parseFloat(req.query.workHours) : null; // 获取工时参数
+    console.log(`[API] 收到请求: 生成${type}报告, autoPush=${autoPush}, date=${date}, workHours=${workHours}`);
     console.log(`[API] 完整URL: ${req.originalUrl}`);
-    const report = await summaryService.generateReport(type, autoPush, date);
+    const report = await summaryService.generateReport(type, autoPush, date, workHours);
     console.log(`[API] 报告生成完成:`, report.id, report.dateLabel);
     res.json({ success: true, data: report });
   } catch (err) {
