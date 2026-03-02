@@ -280,8 +280,7 @@ function getWorkTimePlaceholder() {
     const overtimeHours = (todayWorkHours - DAILY_WORK_HOURS).toFixed(1);
     return `今日已加班 ${overtimeHours}h`;
   } else {
-    const remainingHours = (DAILY_WORK_HOURS - todayWorkHours).toFixed(1);
-    return `今日已工作 ${todayWorkHours.toFixed(1)}h（剩余 ${remainingHours}h）`;
+    return `今日已工作 ${todayWorkHours.toFixed(1)}h`;
   }
 }
 
@@ -306,8 +305,7 @@ function updateTodayWorkTimeDisplay() {
       el.textContent = `今日已加班 ${overtimeHours}h`;
       el.style.color = '#ef4444'; // 红色表示加班
     } else {
-      const remainingHours = (DAILY_WORK_HOURS - todayWorkHours).toFixed(1);
-      el.textContent = `今日已工作 ${todayWorkHours.toFixed(1)}h（剩余 ${remainingHours}h）`;
+      el.textContent = `今日已工作 ${todayWorkHours.toFixed(1)}h`;
       el.style.color = '#10b981'; // 绿色表示正常
     }
   }
@@ -321,8 +319,7 @@ function getTodayWorkTimeReport() {
     const overtimeHours = (todayWorkHours - DAILY_WORK_HOURS).toFixed(1);
     return `今日已工作 ${todayWorkHours.toFixed(1)}h（加班 ${overtimeHours}h）`;
   } else {
-    const remainingHours = (DAILY_WORK_HOURS - todayWorkHours).toFixed(1);
-    return `今日已工作 ${todayWorkHours.toFixed(1)}h（剩余 ${remainingHours}h）`;
+    return `今日已工作 ${todayWorkHours.toFixed(1)}h`;
   }
 }
 
@@ -1247,7 +1244,9 @@ async function handleGenerateReport(type, btnElement, typeName) {
       }
     }
 
-    const response = await fetch(`${API_BASE_URL}/api/report/generate/${type}`, { method: 'POST' });
+    // 传递选择的日期参数
+    const dateParam = selectedDate || new Date().toISOString().split('T')[0];
+    const response = await fetch(`${API_BASE_URL}/api/report/generate/${type}?date=${dateParam}`, { method: 'POST' });
     const result = await response.json();
 
     if (result.success) {

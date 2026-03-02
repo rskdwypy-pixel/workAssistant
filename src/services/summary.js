@@ -160,14 +160,18 @@ async function getHistoryByDate(dateStr) {
  * 手动生成特定类型汇报
  * @param {string} type - daily, weekly, monthly
  * @param {boolean} autoPush - 是否自动推送，默认 false
+ * @param {string} date - 指定日期（格式：YYYY-MM-DD），仅用于日报
  */
-async function generateReport(type, autoPush = false) { // type = daily, weekly, monthly
+async function generateReport(type, autoPush = false, date = null) { // type = daily, weekly, monthly
   let startMs = 0;
   let summaryDateLabel = new Date().toISOString().split('T')[0];
 
   const now = new Date();
   if (type === 'daily') {
-    startMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    // 使用传入的日期，如果没有则使用今天
+    const targetDate = date || summaryDateLabel;
+    summaryDateLabel = targetDate;
+    startMs = new Date(targetDate).getTime();
   } else if (type === 'weekly') {
     const day = now.getDay() || 7;
     startMs = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day + 1).getTime();
@@ -182,13 +186,23 @@ async function generateReport(type, autoPush = false) { // type = daily, weekly,
   // 过滤时间段内的任务
   let tasks;
   if (type === 'daily') {
-    // 日报：包含今日创建/更新的任务 + 所有未完成的任务（从昨天顺延的）
-    tasks = allTasks.filter(t => {
-      const createdTime = new Date(t.createdAt).getTime();
-      const updatedTime = new Date(t.updatedAt || t.createdAt).getTime();
-      const isTodayTask = createdTime >= startMs || updatedTime >= startMs;
-      const isUnfinished = t.status !== 'done';
-      return isTodayTask || isUnfinished;
+    // 日报：使用前端相同的日期过滤逻辑（getTasksByDate）
+    const targetDate = summaryDateLabel;
+    tasks = allTasks.filter(task => {
+      const taskCreatedAtDateStr = new Date(task.createdAt).toISOString().split('T')[0];
+      const taskUpdatedAtDateStr = new Date(task.updatedAt || task.createdAt).toISOString().split('T')[0];
+      const targetDateTime = new Date(targetDate).getTime();
+
+      // 1. 在当前选中日期创建的所有任务，都显示
+      if (taskCreatedAtDateStr === targetDate) return true;
+
+      // 2. 如果任务是未完成状态（todo或in_progress），并且创建于选中日期之前，则一直顺延携带显示
+      if (task.status !== 'done' && new Date(taskCreatedAtDateStr).getTime() <= targetDateTime) return true;
+
+      // 3. 如果任务是已完成状态，但它的完成(更新)时间是在选中日期，也显示在这天
+      if (task.status === 'done' && taskUpdatedAtDateStr === targetDate) return true;
+
+      return false;
     });
   } else {
     // 周报/月报：包含时间段内的任务 + 所有未完成任务
