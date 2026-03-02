@@ -204,17 +204,17 @@ async function sendMorningReminder(tasks) {
   const title = '🌅 早安！今日待办提醒';
   const content = `待办任务: ${todoCount} 项 | 进行中: ${inProgressCount} 项`;
 
-  // 先显示待办，再显示进行中
+  // 先显示待办，再显示进行中，显示所有任务
   const todoTasks = tasks.filter(t => t.status === 'todo');
   const inProgressTasks = tasks.filter(t => t.status === 'in_progress');
 
   const items = [
-    ...todoTasks.slice(0, 5).map(t => `⚪ ${t.title}`),
-    ...inProgressTasks.slice(0, 5).map(t => {
+    ...todoTasks.map(t => `⚪ ${t.title}`),
+    ...inProgressTasks.map(t => {
       const progress = t.progress > 0 ? ` (${t.progress}%)` : '';
       return `🔵 ${t.title}${progress}`;
     })
-  ].slice(0, 10);
+  ];
 
   return await sendNotification(title, content, items);
 }
