@@ -70,6 +70,11 @@ EOF
 # 设置执行权限
 chmod +x "$BIN_DIR/wa" "$BIN_DIR/wastop"
 
+# 自动重新加载 zsh 配置
+echo ""
+echo -e "${YELLOW}重新加载配置...${NC}"
+export PATH="$BIN_DIR:$PATH"
+
 echo ""
 echo -e "${GREEN}✓ 安装成功!${NC}"
 echo ""
@@ -78,5 +83,5 @@ echo ""
 echo -e "  ${GREEN}wa${NC}           # 启动服务"
 echo -e "  ${GREEN}wastop${NC}        # 停止服务"
 echo ""
-echo -e "${YELLOW}注意: 如果 PATH 未生效，请执行: source ~/.zshrc${NC}"
+echo -e "${YELLOW}提示: 已将此脚本加入到你的编辑器快捷键，可以一键启动/停止服务${NC}"
 echo ""
