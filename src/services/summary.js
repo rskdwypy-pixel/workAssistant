@@ -182,11 +182,13 @@ async function generateReport(type, autoPush = false) { // type = daily, weekly,
   // 过滤时间段内的任务
   let tasks;
   if (type === 'daily') {
-    // 日报：只包含今日创建或更新的任务
+    // 日报：包含今日创建/更新的任务 + 所有未完成的任务（从昨天顺延的）
     tasks = allTasks.filter(t => {
       const createdTime = new Date(t.createdAt).getTime();
       const updatedTime = new Date(t.updatedAt || t.createdAt).getTime();
-      return createdTime >= startMs || updatedTime >= startMs;
+      const isTodayTask = createdTime >= startMs || updatedTime >= startMs;
+      const isUnfinished = t.status !== 'done';
+      return isTodayTask || isUnfinished;
     });
   } else {
     // 周报/月报：包含时间段内的任务 + 所有未完成任务

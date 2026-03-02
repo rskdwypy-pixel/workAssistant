@@ -15,6 +15,10 @@ let draggingProgressTask = null; // 正在拖拽的任务 ID
 let draggingProgressElement = null; // 正在拖拽的进度条元素
 let draggingProgressOriginalValue = null; // 拖拽前的原始进度值
 
+// 今日工时追踪
+let todayWorkHours = 0; // 今日已工作时长（小时）
+const DAILY_WORK_HOURS = 8; // 每日标准工时
+
 // ==================== Toast 通知系统 ====================
 const Toast = {
   container: null,
@@ -161,7 +165,10 @@ const ProgressInputDialog = {
     this.workInput.value = '';
     this.consumedInput.value = '';
     this.workInput.placeholder = placeholderWork || '请填写本次工作内容...';
-    this.consumedInput.placeholder = placeholderConsumed || '如: 1.5';
+
+    // 动态设置工时输入框的 placeholder，显示今日工时情况
+    const workTimePlaceholder = getWorkTimePlaceholder();
+    this.consumedInput.placeholder = placeholderConsumed || workTimePlaceholder;
 
     this.dialog.classList.add('active');
 
@@ -239,6 +246,84 @@ function showToast(message, type = 'info', duration = 3000) {
 
 function showConfirm(title, message, okText = '确定', cancelText = '取消') {
   return Confirm.show(title, message, okText, cancelText);
+}
+
+// ==================== 今日工时追踪 ====================
+
+/**
+ * 获取今日工时存储键
+ */
+function getTodayWorkTimeKey() {
+  const today = new Date();
+  return `workTime_${today.getFullYear()}_${today.getMonth() + 1}_${today.getDate()}`;
+}
+
+/**
+ * 初始化今日工时（从本地存储加载）
+ */
+function initTodayWorkTime() {
+  const key = getTodayWorkTimeKey();
+  const saved = localStorage.getItem(key);
+  if (saved !== null) {
+    todayWorkHours = parseFloat(saved);
+  } else {
+    todayWorkHours = 0;
+  }
+  updateTodayWorkTimeDisplay();
+}
+
+/**
+ * 获取工时输入框的 placeholder 文本
+ */
+function getWorkTimePlaceholder() {
+  if (todayWorkHours >= DAILY_WORK_HOURS) {
+    const overtimeHours = (todayWorkHours - DAILY_WORK_HOURS).toFixed(1);
+    return `今日已加班 ${overtimeHours}h`;
+  } else {
+    const remainingHours = (DAILY_WORK_HOURS - todayWorkHours).toFixed(1);
+    return `今日已工作 ${todayWorkHours.toFixed(1)}h（剩余 ${remainingHours}h）`;
+  }
+}
+
+/**
+ * 更新今日工时
+ */
+function updateTodayWorkTime(hours) {
+  todayWorkHours += hours;
+  const key = getTodayWorkTimeKey();
+  localStorage.setItem(key, todayWorkHours.toString());
+  updateTodayWorkTimeDisplay();
+}
+
+/**
+ * 更新页面上的今日工时显示
+ */
+function updateTodayWorkTimeDisplay() {
+  const el = document.getElementById('todayWorkTime');
+  if (el) {
+    if (todayWorkHours >= DAILY_WORK_HOURS) {
+      const overtimeHours = (todayWorkHours - DAILY_WORK_HOURS).toFixed(1);
+      el.textContent = `今日已加班 ${overtimeHours}h`;
+      el.style.color = '#ef4444'; // 红色表示加班
+    } else {
+      const remainingHours = (DAILY_WORK_HOURS - todayWorkHours).toFixed(1);
+      el.textContent = `今日已工作 ${todayWorkHours.toFixed(1)}h（剩余 ${remainingHours}h）`;
+      el.style.color = '#10b981'; // 绿色表示正常
+    }
+  }
+}
+
+/**
+ * 获取今日工时记录话术（用于报告生成）
+ */
+function getTodayWorkTimeReport() {
+  if (todayWorkHours >= DAILY_WORK_HOURS) {
+    const overtimeHours = (todayWorkHours - DAILY_WORK_HOURS).toFixed(1);
+    return `今日已工作 ${todayWorkHours.toFixed(1)}h（加班 ${overtimeHours}h）`;
+  } else {
+    const remainingHours = (DAILY_WORK_HOURS - todayWorkHours).toFixed(1);
+    return `今日已工作 ${todayWorkHours.toFixed(1)}h（剩余 ${remainingHours}h）`;
+  }
 }
 
 // 报告状态：存储最后一次生成的报告ID
@@ -382,6 +467,9 @@ function setupProgressDragEvents() {
 
 // 初始化
 document.addEventListener('DOMContentLoaded', async () => {
+  // 初始化今日工时
+  initTodayWorkTime();
+
   // 初始化 Toast
   Toast.init();
 
@@ -1228,10 +1316,14 @@ function showReportModal(report, type, originBtn, typeName) {
 
   title.textContent = report.dateLabel || report.date || '智能汇报';
 
+  // 获取今日工时记录话术
+  const todayWorkTimeReport = getTodayWorkTimeReport();
+
   body.innerHTML = `
     <div style="margin-bottom: 16px;">
       <h4 style="margin-bottom: 8px;">总览</h4>
-      <p style="color: #666; font-size: 14px;">${escapeHtml(report.summary)}</p>
+      <p style="color: #666; font-size: 14px;">${todayWorkTimeReport}</p>
+      <p style="color: #666; font-size: 14px; margin-top: 8px;">${escapeHtml(report.summary)}</p>
     </div>
     ${report.completed?.length ? `
     <div style="margin-bottom: 16px;">
@@ -2037,6 +2129,11 @@ async function updateTaskProgress(taskId, progress) {
 
       progressComment = result.work;
       consumedTime = result.consumed;
+
+      // 更新今日工时
+      if (consumedTime > 0) {
+        updateTodayWorkTime(consumedTime);
+      }
     }
 
     // 第一步：尝试在浏览器端更新禅道任务状态（如果有 zentaoId）
