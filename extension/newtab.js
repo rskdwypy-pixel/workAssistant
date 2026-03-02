@@ -1319,14 +1319,10 @@ function showReportModal(report, type, originBtn, typeName) {
 
   title.textContent = report.dateLabel || report.date || '智能汇报';
 
-  // 获取今日工时记录话术
-  const todayWorkTimeReport = getTodayWorkTimeReport();
-
   body.innerHTML = `
     <div style="margin-bottom: 16px;">
       <h4 style="margin-bottom: 8px;">总览</h4>
-      <p style="color: #666; font-size: 14px;">${todayWorkTimeReport}</p>
-      <p style="color: #666; font-size: 14px; margin-top: 8px;">${escapeHtml(report.summary)}</p>
+      <p style="color: #666; font-size: 14px;">${escapeHtml(report.summary)}</p>
     </div>
     ${report.completed?.length ? `
     <div style="margin-bottom: 16px;">

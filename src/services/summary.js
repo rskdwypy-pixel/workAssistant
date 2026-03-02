@@ -233,7 +233,7 @@ async function generateReport(type, autoPush = false, date = null, workHours = n
   const doneTasks = tasks.filter(t => t.status === 'done');
 
   // 构建工时信息（仅日报）
-  const workTimeInfo = (type === 'daily' && workHours !== null) ? { hours: workHours } : null;
+  const workTimeInfo = (type === 'daily' && workHours !== null && workHours > 0) ? { hours: workHours } : null;
 
   const { data: summary } = await generateSummary(todoTasks, inProgressTasks, doneTasks, type, workTimeInfo);
 
