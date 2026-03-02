@@ -751,6 +751,41 @@ router.get('/sync/summary', async (req, res) => {
   }
 });
 
+// ==================== 工时相关接口 ====================
+
+/**
+ * POST /api/workHours - 保存今日工时
+ */
+router.post('/workHours', async (req, res) => {
+  try {
+    const { hours } = req.body;
+    if (typeof hours !== 'number' || hours < 0) {
+      return res.status(400).json({ error: '无效的工时数据' });
+    }
+    const { saveTodayWorkHours } = await import('../utils/storage.js');
+    await saveTodayWorkHours(hours);
+    console.log(`[API] 今日工时已保存: ${hours} 小时`);
+    res.json({ success: true, data: { hours } });
+  } catch (err) {
+    console.error('[API] 保存工时失败:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/workHours - 获取今日工时
+ */
+router.get('/workHours', async (req, res) => {
+  try {
+    const { readTodayWorkHours } = await import('../utils/storage.js');
+    const hours = await readTodayWorkHours();
+    res.json({ success: true, data: { hours } });
+  } catch (err) {
+    console.error('[API] 获取工时失败:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==================== 禅道集成接口 ====================
 
 /**

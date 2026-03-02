@@ -207,7 +207,11 @@ async function sendMorningReminder(tasks) {
   const items = tasks
     .filter(t => t.status === 'todo' || t.status === 'in_progress')
     .slice(0, 10)
-    .map(t => `${t.status === 'in_progress' ? '🔵' : '⚪'} ${t.title}`);
+    .map(t => {
+      const icon = t.status === 'in_progress' ? '🔵' : '⚪';
+      const progress = t.status === 'in_progress' && t.progress > 0 ? ` (${t.progress}%)` : '';
+      return `${icon} ${t.title}${progress}`;
+    });
 
   return await sendNotification(title, content, items);
 }

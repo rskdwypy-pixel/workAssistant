@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import { config } from '../config.js';
 import { getTodayTasks } from './taskManager.js';
-import { readHistory, writeHistory } from '../utils/storage.js';
+import { readHistory, writeHistory, readTodayWorkHours } from '../utils/storage.js';
 import { generateSummary } from '../ai/openai.js';
 import { sendEveningSummary } from '../utils/webhook.js';
 import { sendSystemNotification } from './reminder.js';
@@ -46,8 +46,12 @@ async function eveningSummary() {
     const inProgressTasks = tasks.filter(t => t.status === 'in_progress');
     const doneTasks = tasks.filter(t => t.status === 'done');
 
+    // 获取今日工时
+    const todayHours = await readTodayWorkHours();
+    const workTimeInfo = todayHours > 0 ? { hours: todayHours } : null;
+
     // AI生成日报
-    const { data: summary } = await generateSummary(todoTasks, inProgressTasks, doneTasks, 'daily');
+    const { data: summary } = await generateSummary(todoTasks, inProgressTasks, doneTasks, 'daily', workTimeInfo);
 
     // 保存历史
     const history = await readHistory();

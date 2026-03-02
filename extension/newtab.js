@@ -285,13 +285,45 @@ function getWorkTimePlaceholder() {
 }
 
 /**
- * 更新今日工时
+ * 更新今日工时（本地+后端）
  */
-function updateTodayWorkTime(hours) {
+async function updateTodayWorkTime(hours) {
   todayWorkHours += hours;
   const key = getTodayWorkTimeKey();
   localStorage.setItem(key, todayWorkHours.toString());
   updateTodayWorkTimeDisplay();
+
+  // 同步到后端
+  try {
+    await fetch(`${API_BASE}/api/workHours`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hours: todayWorkHours })
+    });
+  } catch (err) {
+    console.log('[WorkTime] 后端同步失败:', err.message);
+  }
+}
+
+/**
+ * 初始化时同步工时到后端
+ */
+async function syncWorkHoursToBackend() {
+  try {
+    const res = await fetch(`${API_BASE}/api/workHours`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.data.hours > 0 && todayWorkHours === 0) {
+        // 后端有工时数据但本地没有，使用后端数据
+        todayWorkHours = data.data.hours;
+        const key = getTodayWorkTimeKey();
+        localStorage.setItem(key, todayWorkHours.toString());
+        updateTodayWorkTimeDisplay();
+      }
+    }
+  } catch (err) {
+    console.log('[WorkTime] 获取后端工时失败:', err.message);
+  }
 }
 
 /**
@@ -466,6 +498,7 @@ function setupProgressDragEvents() {
 document.addEventListener('DOMContentLoaded', async () => {
   // 初始化今日工时
   initTodayWorkTime();
+  syncWorkHoursToBackend(); // 同步后端工时数据
 
   // 初始化 Toast
   Toast.init();

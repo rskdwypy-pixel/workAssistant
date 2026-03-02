@@ -121,6 +121,29 @@ async function writeHistory(data) {
 }
 
 /**
+ * 读取今日工时
+ */
+async function readTodayWorkHours() {
+  const history = await readHistory();
+  const today = new Date().toISOString().split('T')[0];
+  return history.dailyWorkHours?.[today] || 0;
+}
+
+/**
+ * 保存今日工时
+ */
+async function saveTodayWorkHours(hours) {
+  const history = await readHistory();
+  if (!history.dailyWorkHours) {
+    history.dailyWorkHours = {};
+  }
+  const today = new Date().toISOString().split('T')[0];
+  history.dailyWorkHours[today] = hours;
+  await writeHistory(history);
+  return true;
+}
+
+/**
  * 按日期获取任务
  */
 function getTasksByDate(tasks, dateStr) {
@@ -163,6 +186,8 @@ export {
   writeTasks,
   readHistory,
   writeHistory,
+  readTodayWorkHours,
+  saveTodayWorkHours,
   getTasksByDate,
   getTasksByDateRange
 };
