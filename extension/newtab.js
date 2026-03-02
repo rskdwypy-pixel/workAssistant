@@ -1712,11 +1712,10 @@ function createTaskCard(task) {
   card.innerHTML = `
     <div class="task-title" style="display: flex; align-items: flex-start; gap: 8px; width:100%;">
       <input type="checkbox" class="task-checkbox" data-task-id="${task.id}" ${task.status === 'done' ? 'checked' : ''} style="margin-top: 4px; cursor: pointer;">
-      <span style="flex:1;" class="task-title-text" data-task-id="${task.id}">
+      <span style="flex:1; cursor: pointer; padding: 2px 4px; border-radius: 4px; transition: background 0.2s;" class="task-title-text" data-task-id="${task.id}" title="点击编辑标题">
         ${escapeHtml(task.title)}
         ${task.zentaoId ? `<a href="${getZentaoTaskUrl(task.zentaoId)}" target="_blank" class="zentao-link" style="margin-left: 6px; color: #3b82f6; text-decoration: none; font-size: 12px;">#${task.zentaoId}</a>` : ''}
       </span>
-      <button class="task-title-edit-btn" data-task-id="${task.id}" style="background:none; border:none; cursor:pointer; color:#9ca3af; font-size:14px; padding:2px 4px; opacity:0; transition:opacity 0.2s;" title="编辑标题">✏️</button>
       ${priorityHTML}
     </div>
     ${task.status !== 'done' ? `
@@ -1885,21 +1884,20 @@ function createTaskCard(task) {
     });
   }
 
-  // 绑定标题编辑按钮事件
-  const titleEditBtn = card.querySelector('.task-title-edit-btn');
+  // 绑定标题点击编辑事件
   const titleText = card.querySelector('.task-title-text');
-  if (titleEditBtn && titleText) {
-    // 鼠标悬停显示编辑按钮
-    card.addEventListener('mouseenter', () => {
-      titleEditBtn.style.opacity = '1';
-    });
-    card.addEventListener('mouseleave', () => {
-      titleEditBtn.style.opacity = '0';
+  if (titleText) {
+    titleText.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onTitleClick(e);
     });
 
-    titleEditBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      updateTaskTitle(task.id);
+    // 鼠标悬停效果
+    titleText.addEventListener('mouseenter', () => {
+      titleText.style.background = '#f1f5f9';
+    });
+    titleText.addEventListener('mouseleave', () => {
+      titleText.style.background = 'transparent';
     });
   }
 
@@ -2362,18 +2360,76 @@ async function updateTaskPriority(taskId, priority) {
   }
 }
 
-// 更新任务标题
-async function updateTaskTitle(taskId) {
+// 标题内联编辑
+function makeTitleInlineEdit(element, taskId) {
   const task = allTasks.find(t => t.id === taskId);
   if (!task) return;
 
-  // 使用简单的 prompt 获取新标题
-  const newTitle = prompt('编辑任务标题:', task.title);
-  if (newTitle === null || newTitle.trim() === '') {
-    return; // 用户取消或输入为空
-  }
+  const currentTitle = task.title;
 
-  const trimmedTitle = newTitle.trim();
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = currentTitle;
+  input.style.cssText = 'font-size: 14px; padding: 4px 8px; border: 1px solid #3b82f6; border-radius: 4px; outline: none; width: 100%; box-sizing: border-box;';
+
+  // 保存原始元素用于恢复
+  const originalHTML = element.innerHTML;
+  element.innerHTML = '';
+  element.appendChild(input);
+  input.focus();
+  // 光标移到文字尾部
+  input.setSelectionRange(input.value.length, input.value.length);
+
+  const save = async () => {
+    const newTitle = input.value.trim();
+    if (newTitle && newTitle !== currentTitle) {
+      await updateTaskTitle(taskId, newTitle);
+    } else {
+      // 恢复原始内容
+      element.innerHTML = originalHTML;
+      // 重新绑定点击事件
+      element.addEventListener('click', onTitleClick);
+    }
+  };
+
+  const cancel = () => {
+    element.innerHTML = originalHTML;
+    element.addEventListener('click', onTitleClick);
+  };
+
+  // 移除之前的点击事件，避免重复触发
+  element.removeEventListener('click', onTitleClick);
+
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      input.blur();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      input.removeEventListener('blur', save);
+      cancel();
+    }
+  });
+}
+
+// 标题点击事件处理器
+function onTitleClick(e) {
+  // 如果点击的是禅道链接，不触发编辑
+  if (e.target.classList.contains('zentao-link')) return;
+  const taskId = e.currentTarget.dataset.taskId;
+  makeTitleInlineEdit(e.currentTarget, taskId);
+}
+
+// 更新任务标题（接受新标题参数）
+async function updateTaskTitle(taskId, newTitle) {
+  const task = allTasks.find(t => t.id === taskId);
+  if (!task) return;
+
+  const trimmedTitle = newTitle?.trim();
+  if (!trimmedTitle) {
+    return; // 标题为空，不更新
+  }
 
   try {
     // 如果有 zentaoId 和 zentaoExecution，先同步到禅道
@@ -2605,7 +2661,7 @@ function showTaskDetail(task) {
   body.innerHTML = `
     <div style="margin-bottom: 16px;">
       <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
-        <h4 style="margin:0; flex:1;">${escapeHtml(task.title)}</h4>
+        <h4 id="detailTaskTitle" style="margin:0; flex:1; cursor: pointer; padding: 4px 8px; border-radius: 4px; transition: background 0.2s;" title="点击编辑标题" data-task-id="${task.id}">${escapeHtml(task.title)}</h4>
         ${task.status !== 'done' ? `
         <div class="detail-priority-selector" style="position:relative;">
           <button class="detail-priority-btn" data-priority="${priority}"
@@ -2692,6 +2748,21 @@ function showTaskDetail(task) {
       document.getElementById('taskModal').classList.remove('active');
     });
   });
+
+  // 绑定标题点击编辑事件
+  const detailTitle = body.querySelector('#detailTaskTitle');
+  if (detailTitle) {
+    detailTitle.addEventListener('click', (e) => {
+      const taskId = e.currentTarget.dataset.taskId;
+      makeTitleInlineEdit(e.currentTarget, taskId);
+    });
+    detailTitle.addEventListener('mouseenter', () => {
+      detailTitle.style.background = '#f1f5f9';
+    });
+    detailTitle.addEventListener('mouseleave', () => {
+      detailTitle.style.background = 'transparent';
+    });
+  }
 
   modal.classList.add('active');
 }
