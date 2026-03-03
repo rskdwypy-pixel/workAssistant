@@ -474,13 +474,13 @@ function setupProgressDragEvents() {
 
         // 无论成功还是取消，都刷新任务列表以同步 UI
         console.log('[Progress Drag] 刷新任务列表');
-        loadTasks().catch(err => console.error('[Progress Drag] 刷新任务失败:', err));
+        loadTasks().catch(err => console.warn('[Progress Drag] 刷新任务失败:', err));
 
         // 重置光标
         document.body.style.cursor = '';
         if (progressTrack) progressTrack.style.cursor = 'pointer';
       }).catch(err => {
-        console.error('[Progress Drag] 更新进度失败:', err);
+        console.warn('[Progress Drag] 更新进度失败:', err);
         // 恢复UI到原始值
         if (progressFill) progressFill.style.width = `${originalValue}%`;
         if (progressInput) progressInput.value = originalValue;
@@ -530,13 +530,13 @@ function setupProgressDragEvents() {
           if (progressFill) progressFill.style.width = `${originalValue}%`;
           if (progressInput) progressInput.value = originalValue;
           // 刷新任务列表以确保完全同步
-          loadTasks().catch(err => console.error('[Progress Drag] 刷新任务失败:', err));
+          loadTasks().catch(err => console.warn('[Progress Drag] 刷新任务失败:', err));
         }
         // 重置光标
         document.body.style.cursor = '';
         if (progressTrack) progressTrack.style.cursor = 'pointer';
       }).catch(err => {
-        console.error('[Progress Drag] 更新进度失败:', err);
+        console.warn('[Progress Drag] 更新进度失败:', err);
         // 恢复UI到原始值
         if (progressFill) progressFill.style.width = `${originalValue}%`;
         if (progressInput) progressInput.value = originalValue;
@@ -744,7 +744,7 @@ function bindEvents() {
         document.getElementById('promptMonthly').value = result.data.custom.monthly || defaultSummaryPrompt;
       }
     } catch (err) {
-      console.error('获取提示词失败:', err);
+      console.warn('获取提示词失败:', err);
       Toast.error('获取提示词失败');
     }
   });
@@ -803,7 +803,7 @@ function bindEvents() {
         Toast.error(`保存失败: ${result.error}`);
       }
     } catch (err) {
-      console.error('保存提示词失败:', err);
+      console.warn('保存提示词失败:', err);
       Toast.error('保存提示词失败');
     } finally {
       btn.textContent = originalText;
@@ -1005,10 +1005,10 @@ function bindEvents() {
       if (result.success) {
         console.log('[前端] 配置已保存到后端 .env 文件');
       } else {
-        console.error('[前端] 保存配置失败:', result.error);
+        console.warn('[前端] 保存配置失败:', result.error);
       }
     } catch (err) {
-      console.error('同步配置失败:', err);
+      console.warn('同步配置失败:', err);
     }
 
     // 同步禅道配置到后端
@@ -1029,10 +1029,10 @@ function bindEvents() {
       if (result.success) {
         console.log('[前端] 禅道配置已保存');
       } else {
-        console.error('[前端] 禅道配置保存失败:', result.error);
+        console.warn('[前端] 禅道配置保存失败:', result.error);
       }
     } catch (err) {
-      console.error('同步禅道配置失败:', err);
+      console.warn('同步禅道配置失败:', err);
     }
 
     // 更新后端服务地址
@@ -1197,7 +1197,7 @@ async function testScheduledTask(taskType, taskName) {
       Toast.error(`${taskName}执行失败: ${result.error || result.message}`);
     }
   } catch (err) {
-    console.error(`[前端] ${taskName}执行出错:`, err.message);
+    console.warn(`[前端] ${taskName}执行出错:`, err.message);
     Toast.error(`${taskName}执行出错: ${err.message}`);
   } finally {
     btn.textContent = originalText;
@@ -1249,7 +1249,7 @@ async function checkTodayReports() {
       updateReportButton('monthly', monthlyReport, '月报');
     }
   } catch (err) {
-    console.error('检查报告状态失败:', err);
+    console.warn('检查报告状态失败:', err);
   }
 }
 
@@ -1503,7 +1503,8 @@ async function loadCalendar() {
       renderCalendar(result.data);
     }
   } catch (err) {
-    console.error('加载日历失败:', err);
+    Toast.error('加载日历失败');
+    console.warn('加载日历失败:', err);
   }
 }
 
@@ -1608,7 +1609,8 @@ async function loadTasks() {
     }
     await updateTaskStats();
   } catch (err) {
-    console.error('加载任务失败:', err);
+    Toast.error('加载任务失败');
+    console.warn('加载任务失败:', err);
     showEmptyState();
   }
 }
@@ -1627,7 +1629,8 @@ async function loadTasksByDate(dateStr) {
       renderTasks();
     }
   } catch (err) {
-    console.error('加载任务失败:', err);
+    Toast.error('加载任务失败');
+    console.warn('加载任务失败:', err);
   }
 }
 
@@ -1981,7 +1984,7 @@ async function updateTaskStats() {
       document.getElementById('streak').textContent = result.data.streak || 0;
     }
   } catch (err) {
-    console.error('获取统计数据失败:', err);
+    console.warn('获取统计数据失败:', err);
   }
 }
 
@@ -2082,7 +2085,7 @@ async function addTask() {
         if (updateResp.ok) {
           console.log('[AddTask] zentaoId 和 zentaoExecution 已保存到任务:', browserZentaoId, executionId);
         } else {
-          console.error('[AddTask] 保存 zentaoId 失败:', updateResp.status);
+          console.warn('[AddTask] 保存 zentaoId 失败:', updateResp.status);
         }
       }
 
@@ -2172,7 +2175,7 @@ async function addTask() {
   } catch (err) {
     input.value = originalVal; // 失败时恢复原来的输入
     Toast.error('添加失败，请确保后端服务正在运行');
-    console.error('添加任务错误:', err);
+    console.warn('添加任务错误:', err);
   } finally {
     isAddingTask = false;
     input.disabled = false;
@@ -2291,11 +2294,13 @@ async function updateTaskProgress(taskId, progress) {
       console.log('[Progress] 进度更新成功，返回 true');
       return true;
     } else {
-      console.error('更新进度失败:', result.error);
+      Toast.error('更新进度失败');
+      console.warn('更新进度失败:', result.error);
       return false;
     }
   } catch (err) {
-    console.error('更新进度失败:', err);
+    Toast.error('更新进度失败');
+    console.warn('更新进度失败:', err);
     return false;
   }
 }
@@ -2409,10 +2414,11 @@ async function updateTaskPriority(taskId, priority) {
         }
       }
     } else {
-      console.error('更新优先级失败:', result.error);
+      Toast.error('更新优先级失败');
+      console.warn('更新优先级失败:', result.error);
     }
   } catch (err) {
-    console.error('更新优先级失败:', err);
+    console.warn('更新优先级失败:', err);
   }
 }
 
@@ -2518,11 +2524,11 @@ async function updateTaskTitle(taskId, newTitle) {
       Toast.success('标题已更新');
       await loadTasks();
     } else {
-      console.error('更新标题失败:', result.error);
+      console.warn('更新标题失败:', result.error);
       Toast.error('更新失败');
     }
   } catch (err) {
-    console.error('更新标题失败:', err);
+    console.warn('更新标题失败:', err);
     Toast.error('更新失败');
   }
 }
@@ -2634,7 +2640,7 @@ async function deleteSelectedTask() {
     }
   } catch (err) {
     Toast.error('操作失败');
-    console.error('删除任务错误:', err);
+    console.warn('删除任务错误:', err);
   } finally {
     // 清除删除中状态
     deletingTaskIds.delete(taskId);
@@ -2709,7 +2715,7 @@ async function handleTaskAction(taskId, action) {
     await loadCalendar();
   } catch (err) {
     Toast.error('操作失败');
-    console.error('处理任务操作错误:', err);
+    console.warn('处理任务操作错误:', err);
   } finally {
     // 清除删除中状态（仅在删除操作时）
     if (action === 'delete') {
@@ -2736,7 +2742,7 @@ async function handleSearch() {
       renderTasks();
     }
   } catch (err) {
-    console.error('搜索失败:', err);
+    console.warn('搜索失败:', err);
   }
 }
 
@@ -2884,7 +2890,7 @@ async function loadHistoryPreview() {
       }
     }
   } catch (err) {
-    console.error('加载历史失败:', err);
+    console.warn('加载历史失败:', err);
   }
 }
 
@@ -2984,7 +2990,7 @@ function openDatetimeModal(task) {
       await loadTasks();
       modal.classList.remove('active');
     } catch (err) {
-      console.error('更新时间失败:', err);
+      console.warn('更新时间失败:', err);
       alert('更新时间失败');
     } finally {
       document.getElementById('dtModalConfirmBtn').textContent = '确定保存';
@@ -3537,7 +3543,7 @@ async function updateTaskOrder() {
         body: JSON.stringify({ updates })
       });
     } catch (err) {
-      console.error('批量更新排序失败:', err);
+      console.warn('批量更新排序失败:', err);
     }
   }
 }
@@ -3919,7 +3925,7 @@ const ZentaoBrowserClient = {
       });
 
       if (!result.success) {
-        console.error('[ZentaoBrowser] 创建任务失败:', result.reason);
+        console.warn('[ZentaoBrowser] 创建任务失败:', result.reason);
         return result;
       }
 
@@ -3986,7 +3992,7 @@ const ZentaoBrowserClient = {
       console.log('[ZentaoBrowser] 创建任务未返回有效结果', data);
       return { success: false, reason: 'unrecognized_response' };
     } catch (err) {
-      console.error('[ZentaoBrowser] 创建任务异常:', err.message);
+      console.warn('[ZentaoBrowser] 创建任务异常:', err.message);
       return { success: false, reason: err.message };
     }
   },
@@ -4070,7 +4076,7 @@ const ZentaoBrowserClient = {
 
       return result;
     } catch (err) {
-      console.error('[ZentaoBrowser] 更新状态异常:', err.message);
+      console.warn('[ZentaoBrowser] 更新状态异常:', err.message);
       return { success: false, reason: err.message };
     }
   },
@@ -4114,7 +4120,7 @@ const ZentaoBrowserClient = {
 
       return result;
     } catch (err) {
-      console.error('[ZentaoBrowser] 记录工时异常:', err.message);
+      console.warn('[ZentaoBrowser] 记录工时异常:', err.message);
       return { success: false, reason: err.message };
     }
   },
@@ -4160,7 +4166,7 @@ const ZentaoBrowserClient = {
 
       return result;
     } catch (err) {
-      console.error('[ZentaoBrowser] 删除禅道任务异常:', err.message);
+      console.warn('[ZentaoBrowser] 删除禅道任务异常:', err.message);
       return { success: false, reason: err.message };
     }
   },
@@ -4211,7 +4217,7 @@ const ZentaoBrowserClient = {
 
       return result;
     } catch (err) {
-      console.error('[ZentaoBrowser] 编辑禅道任务异常:', err.message);
+      console.warn('[ZentaoBrowser] 编辑禅道任务异常:', err.message);
       return { success: false, reason: err.message };
     }
   }
