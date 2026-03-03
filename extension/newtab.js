@@ -1,5 +1,5 @@
 // API配置
-let API_BASE_URL_URL = 'http://localhost:3721';
+let API_BASE_URL = 'http://localhost:3721';
 
 // 当前状态
 let currentYear, currentMonth;
@@ -302,7 +302,7 @@ function removeTaskWorkTime(taskId) {
     localStorage.setItem(totalKey, todayWorkHours.toString());
     updateTodayWorkTimeDisplay();
     // 同步到后端
-    fetch(`${API_BASE_URL_URL}/api/workHours`, {
+    fetch(`${API_BASE_URL}/api/workHours`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ hours: todayWorkHours })
@@ -592,10 +592,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const config = JSON.parse(savedConfig);
     // 使用后端服务地址（不要与AI API地址混淆）
     if (config.backendUrl) {
-      API_BASE_URL_URL = config.backendUrl;
+      API_BASE_URL = config.backendUrl;
     } else if (config.apiBaseUrl && !config.apiBaseUrl.includes('open.bigmodel.cn')) {
       // 兼容旧配置：只有在不包含AI API地址时才使用
-      API_BASE_URL_URL = config.apiBaseUrl;
+      API_BASE_URL = config.apiBaseUrl;
     }
   }
 
@@ -732,7 +732,7 @@ function bindEvents() {
 
     // 获取当前配置的提示词
     try {
-      const response = await fetch(`${API_BASE_URL_URL}/api/prompts`);
+      const response = await fetch(`${API_BASE_URL}/api/prompts`);
       const result = await response.json();
       if (result.success) {
         defaultSummaryPrompt = result.data.default?.summary || '';
@@ -789,7 +789,7 @@ function bindEvents() {
       if (weeklyVal === defaultSummaryPrompt) weeklyVal = '';
       if (monthlyVal === defaultSummaryPrompt) monthlyVal = '';
 
-      const response = await fetch(`${API_BASE_URL_URL}/api/prompts`, {
+      const response = await fetch(`${API_BASE_URL}/api/prompts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ addTask: addTaskVal, daily: dailyVal, weekly: weeklyVal, monthly: monthlyVal })
@@ -896,7 +896,7 @@ function bindEvents() {
     resultEl.className = 'test-result';
 
     try {
-      const response = await fetch(`${API_BASE_URL_URL}/api/webhook/test`, {
+      const response = await fetch(`${API_BASE_URL}/api/webhook/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url, type })
@@ -986,7 +986,7 @@ function bindEvents() {
 
     // 同步所有配置到后端（会持久化到 .env 文件）
     try {
-      const response = await fetch(`${API_BASE_URL_URL}/api/config`, {
+      const response = await fetch(`${API_BASE_URL}/api/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1012,7 +1012,7 @@ function bindEvents() {
 
     // 同步禅道配置到后端
     try {
-      const response = await fetch(`${API_BASE_URL_URL}/api/zentao/config`, {
+      const response = await fetch(`${API_BASE_URL}/api/zentao/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1035,7 +1035,7 @@ function bindEvents() {
     }
 
     // 更新后端服务地址
-    API_BASE_URL_URL = config.backendUrl || 'http://localhost:3721';
+    API_BASE_URL = config.backendUrl || 'http://localhost:3721';
 
     // 保存同步配置
     if (window.syncUI) {
@@ -1149,7 +1149,7 @@ async function testScheduledTask(taskType, taskName) {
       console.log(`[前端] 读取配置:`, { webhookUrl: config.webhookUrl ? '***' : '未配置', webhookType: config.webhookType });
       if (config.webhookUrl) {
         console.log(`[前端] 同步webhook配置到后端...`);
-        await fetch(`${API_BASE_URL_URL}/api/webhook/config`, {
+        await fetch(`${API_BASE_URL}/api/webhook/config`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1158,7 +1158,7 @@ async function testScheduledTask(taskType, taskName) {
           })
         });
         // 验证 webhook 配置是否正确设置
-        const checkRes = await fetch(`${API_BASE_URL_URL}/api/webhook/config`);
+        const checkRes = await fetch(`${API_BASE_URL}/api/webhook/config`);
         const checkResult = await checkRes.json();
         console.log(`[前端] Webhook配置验证:`, checkResult.data);
       }
@@ -1168,19 +1168,19 @@ async function testScheduledTask(taskType, taskName) {
     if (taskType === 'morning') {
       // 早间提醒
       console.log(`[前端] 调用早间提醒 API`);
-      response = await fetch(`${API_BASE_URL_URL}/api/test/morning`, { method: 'POST' });
+      response = await fetch(`${API_BASE_URL}/api/test/morning`, { method: 'POST' });
     } else if (taskType === 'evening') {
       // 晚间日报
       console.log(`[前端] 调用晚间日报 API`);
-      response = await fetch(`${API_BASE_URL_URL}/api/test/evening`, { method: 'POST' });
+      response = await fetch(`${API_BASE_URL}/api/test/evening`, { method: 'POST' });
     } else if (taskType === 'weekly') {
       // 周报 - 添加 autoPush=true 自动推送
       console.log(`[前端] 调用周报 API，autoPush=true`);
-      response = await fetch(`${API_BASE_URL_URL}/api/report/generate/weekly?autoPush=true`, { method: 'POST' });
+      response = await fetch(`${API_BASE_URL}/api/report/generate/weekly?autoPush=true`, { method: 'POST' });
     } else if (taskType === 'monthly') {
       // 月报 - 添加 autoPush=true 自动推送
       console.log(`[前端] 调用月报 API，autoPush=true`);
-      response = await fetch(`${API_BASE_URL_URL}/api/report/generate/monthly?autoPush=true`, { method: 'POST' });
+      response = await fetch(`${API_BASE_URL}/api/report/generate/monthly?autoPush=true`, { method: 'POST' });
     }
 
     console.log(`[前端] API响应状态:`, response.status);
@@ -1229,7 +1229,7 @@ let currentReportAction = null;
 // 检查今天是否生成过报告
 async function checkTodayReports() {
   try {
-    const response = await fetch(`${API_BASE_URL_URL}/api/history?limit=100`);
+    const response = await fetch(`${API_BASE_URL}/api/history?limit=100`);
     const result = await response.json();
 
     if (result.success) {
@@ -1319,7 +1319,7 @@ async function handleGenerateReport(type, btnElement, typeName) {
     if (savedConfig) {
       const config = JSON.parse(savedConfig);
       if (config.webhookUrl) {
-        await fetch(`${API_BASE_URL_URL}/api/webhook/config`, {
+        await fetch(`${API_BASE_URL}/api/webhook/config`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1336,7 +1336,7 @@ async function handleGenerateReport(type, btnElement, typeName) {
     const params = new URLSearchParams({ date: dateParam });
     if (workHours) params.append('workHours', workHours.toString());
 
-    const response = await fetch(`${API_BASE_URL_URL}/api/report/generate/${type}?${params.toString()}`, { method: 'POST' });
+    const response = await fetch(`${API_BASE_URL}/api/report/generate/${type}?${params.toString()}`, { method: 'POST' });
     const result = await response.json();
 
     if (result.success) {
@@ -1362,7 +1362,7 @@ async function handleGenerateReport(type, btnElement, typeName) {
 // 根据ID打开报告
 async function openReportById(reportId, type, btnElement, typeName) {
   try {
-    const response = await fetch(`${API_BASE_URL_URL}/api/history?limit=100`);
+    const response = await fetch(`${API_BASE_URL}/api/history?limit=100`);
     const result = await response.json();
 
     if (result.success) {
@@ -1454,7 +1454,7 @@ function showReportModal(report, type, originBtn, typeName) {
   newDelBtn.onclick = async () => {
     const confirmed = await showConfirm('删除报告', '确定要删除此报告吗？删除后无法恢复。');
     if (confirmed) {
-      await fetch(`${API_BASE_URL_URL}/api/report/${report.id}`, { method: 'DELETE' });
+      await fetch(`${API_BASE_URL}/api/report/${report.id}`, { method: 'DELETE' });
       modal.classList.remove('active');
       originBtn.textContent = `生成${typeName}`;
       originBtn.dataset.mode = 'generate';
@@ -1474,7 +1474,7 @@ function showReportModal(report, type, originBtn, typeName) {
     newPushBtn.textContent = '推送中...';
     newPushBtn.disabled = true;
     try {
-      const res = await fetch(`${API_BASE_URL_URL}/api/report/${report.id}/push`, { method: 'POST' });
+      const res = await fetch(`${API_BASE_URL}/api/report/${report.id}/push`, { method: 'POST' });
       const resJson = await res.json();
       if (!resJson.success) {
         Toast.error('推送失败:' + resJson.error);
@@ -1495,7 +1495,7 @@ function showReportModal(report, type, originBtn, typeName) {
 // 加载日历数据
 async function loadCalendar() {
   try {
-    const response = await fetch(`${API_BASE_URL_URL}/api/calendar/${currentYear}/${currentMonth}`);
+    const response = await fetch(`${API_BASE_URL}/api/calendar/${currentYear}/${currentMonth}`);
     const result = await response.json();
 
     if (result.success) {
@@ -1598,7 +1598,7 @@ function renderCalendar(data) {
 // 加载任务
 async function loadTasks() {
   try {
-    const response = await fetch(`${API_BASE_URL_URL}/api/tasks?date=${selectedDate}`);
+    const response = await fetch(`${API_BASE_URL}/api/tasks?date=${selectedDate}`);
     const result = await response.json();
 
     if (result.success) {
@@ -1618,7 +1618,7 @@ async function loadTasksByDate(dateStr) {
   document.getElementById('taskBoardTitle').textContent = `📋 ${dateStr} 任务`;
 
   try {
-    const response = await fetch(`${API_BASE_URL_URL}/api/tasks/date/${dateStr}`);
+    const response = await fetch(`${API_BASE_URL}/api/tasks/date/${dateStr}`);
     const result = await response.json();
 
     if (result.success) {
@@ -1972,7 +1972,7 @@ function updateCounts() {
 // 获取并更新统计数据
 async function updateTaskStats() {
   try {
-    const response = await fetch(`${API_BASE_URL_URL}/api/stats`);
+    const response = await fetch(`${API_BASE_URL}/api/stats`);
     const result = await response.json();
     if (result.success) {
       document.getElementById('weekDone').textContent = result.data.weekDone || 0;
@@ -2027,7 +2027,7 @@ async function addTask() {
 
   try {
     // 第一步：调用服务端 API 获取 AI 提取的任务数据
-    const response = await fetch(`${API_BASE_URL_URL}/api/task`, {
+    const response = await fetch(`${API_BASE_URL}/api/task`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2070,7 +2070,7 @@ async function addTask() {
         const executionId = ZentaoBrowserClient.config.createTaskUrl || '';
 
         // 使用通用更新接口更新 zentaoId 和 zentaoExecution
-        const updateResp = await fetch(`${API_BASE_URL_URL}/api/task/${result.data.id}`, {
+        const updateResp = await fetch(`${API_BASE_URL}/api/task/${result.data.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2136,7 +2136,7 @@ async function addTask() {
                 console.log('[AddTask] 禅道工时已记录');
 
                 // 更新本地任务的累计消耗工时
-                await fetch(`${API_BASE_URL_URL}/api/task/${result.data.id}`, {
+                await fetch(`${API_BASE_URL}/api/task/${result.data.id}`, {
                   method: 'PUT',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ totalConsumedTime: consumedTime })
@@ -2261,7 +2261,7 @@ async function updateTaskProgress(taskId, progress) {
           if (effortResult.success) {
             console.log('[Progress] 浏览器端记录禅道工时成功');
             // 更新本地任务的累计消耗工时
-            await fetch(`${API_BASE_URL_URL}/api/task/${taskId}`, {
+            await fetch(`${API_BASE_URL}/api/task/${taskId}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ totalConsumedTime })
@@ -2276,7 +2276,7 @@ async function updateTaskProgress(taskId, progress) {
     }
 
     // 第二步：调用服务端 API 更新进度
-    const response = await fetch(`${API_BASE_URL_URL}/api/task/${taskId}/progress`, {
+    const response = await fetch(`${API_BASE_URL}/api/task/${taskId}/progress`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ progress, progressComment, consumedTime })
@@ -2324,7 +2324,7 @@ async function updateTaskPriority(taskId, priority) {
       }
     }
 
-    const response = await fetch(`${API_BASE_URL_URL}/api/task/${taskId}`, {
+    const response = await fetch(`${API_BASE_URL}/api/task/${taskId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ priority, order: null })
@@ -2505,7 +2505,7 @@ async function updateTaskTitle(taskId, newTitle) {
       }
     }
 
-    const response = await fetch(`${API_BASE_URL_URL}/api/task/${taskId}`, {
+    const response = await fetch(`${API_BASE_URL}/api/task/${taskId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: trimmedTitle })
@@ -2589,7 +2589,7 @@ async function deleteSelectedTask() {
     }
 
     // 先调用后端 API 删除任务
-    const response = await fetch(`${API_BASE_URL_URL}/api/task/${taskId}`, { method: 'DELETE' });
+    const response = await fetch(`${API_BASE_URL}/api/task/${taskId}`, { method: 'DELETE' });
     const result = await response.json();
 
     if (result.success) {
@@ -2644,7 +2644,7 @@ async function handleTaskAction(taskId, action) {
       }
 
       // 先调用后端 API 删除任务
-      const response = await fetch(`${API_BASE_URL_URL}/api/task/${taskId}`, { method: 'DELETE' });
+      const response = await fetch(`${API_BASE_URL}/api/task/${taskId}`, { method: 'DELETE' });
       const result = await response.json();
 
       if (result.success) {
@@ -2670,7 +2670,7 @@ async function handleTaskAction(taskId, action) {
         Toast.error('删除任务失败: ' + (result.error || '未知错误'));
       }
     } else {
-      await fetch(`${API_BASE_URL_URL}/api/task/${taskId}/status`, {
+      await fetch(`${API_BASE_URL}/api/task/${taskId}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: action })
@@ -2696,7 +2696,7 @@ async function handleSearch() {
   }
 
   try {
-    const response = await fetch(`${API_BASE_URL_URL}/api/tasks/search?q=${encodeURIComponent(keyword)}`);
+    const response = await fetch(`${API_BASE_URL}/api/tasks/search?q=${encodeURIComponent(keyword)}`);
     const result = await response.json();
 
     if (result.success) {
@@ -2780,7 +2780,7 @@ function showTaskDetail(task) {
         // 刷新弹窗内容
         setTimeout(() => {
           // 重新获取任务数据
-          fetch(`${API_BASE_URL_URL}/api/tasks`)
+          fetch(`${API_BASE_URL}/api/tasks`)
             .then(r => r.json())
             .then(result => {
               if (result.success) {
@@ -2837,7 +2837,7 @@ function showTaskDetail(task) {
 // 加载历史日报预览
 async function loadHistoryPreview() {
   try {
-    const response = await fetch(`${API_BASE_URL_URL}/api/history?limit=5`);
+    const response = await fetch(`${API_BASE_URL}/api/history?limit=5`);
     const result = await response.json();
 
     if (result.success && result.data.length > 0) {
@@ -2944,7 +2944,7 @@ function openDatetimeModal(task) {
 
     document.getElementById('dtModalConfirmBtn').textContent = '保存中...';
     try {
-      await fetch(`${API_BASE_URL_URL}/api/task/${task.id}`, {
+      await fetch(`${API_BASE_URL}/api/task/${task.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reminderTime })
@@ -3029,7 +3029,7 @@ function loadSettings() {
 // 加载禅道配置状态
 async function loadZentaoConfigStatus() {
   try {
-    const response = await fetch(`${API_BASE_URL_URL}/api/zentao/config`);
+    const response = await fetch(`${API_BASE_URL}/api/zentao/config`);
     if (response.ok) {
       const result = await response.json();
       if (result.success && result.data) {
@@ -3057,7 +3057,7 @@ async function checkServiceStatus() {
   statusDot.title = '检测中...';
 
   try {
-    const response = await fetch(`${API_BASE_URL_URL}/health`);
+    const response = await fetch(`${API_BASE_URL}/health`);
     if (response.ok) {
       statusDot.className = 'status-dot online';
       statusDot.title = '后端服务在线';
@@ -3073,7 +3073,7 @@ async function checkServiceStatus() {
 // 显示历史日报列表
 async function showHistoryModal() {
   try {
-    const response = await fetch(`${API_BASE_URL_URL}/api/history?limit=50`);
+    const response = await fetch(`${API_BASE_URL}/api/history?limit=50`);
     const result = await response.json();
 
     if (result.success) {
@@ -3159,7 +3159,7 @@ function bindHistoryListButtons() {
 // 打开历史报告详情
 async function openHistoryReportDetail(reportId) {
   try {
-    const response = await fetch(`${API_BASE_URL_URL}/api/history?limit=100`);
+    const response = await fetch(`${API_BASE_URL}/api/history?limit=100`);
     const result = await response.json();
 
     if (result.success) {
@@ -3228,7 +3228,7 @@ async function regenerateReport(_oldReportId, type, btnElement) {
   btnElement.disabled = true;
 
   try {
-    const response = await fetch(`${API_BASE_URL_URL}/api/report/generate/${type}`, { method: 'POST' });
+    const response = await fetch(`${API_BASE_URL}/api/report/generate/${type}`, { method: 'POST' });
     const result = await response.json();
 
     if (result.success) {
@@ -3253,7 +3253,7 @@ async function deleteHistoryReport(reportId, btnElement) {
   }
 
   try {
-    await fetch(`${API_BASE_URL_URL}/api/report/${reportId}`, { method: 'DELETE' });
+    await fetch(`${API_BASE_URL}/api/report/${reportId}`, { method: 'DELETE' });
 
     // 从DOM中移除该报告项
     const reportItem = btnElement.closest('.history-report-item');
@@ -3279,7 +3279,7 @@ async function deleteHistoryReport(reportId, btnElement) {
 // 查看历史日报详情（保留向后兼容）
 window.viewHistoryDetail = async function (reportId) {
   try {
-    const response = await fetch(`${API_BASE_URL_URL}/api/history`);
+    const response = await fetch(`${API_BASE_URL}/api/history`);
     const result = await response.json();
 
     if (result.success) {
@@ -3334,7 +3334,7 @@ window.viewHistoryDetail = async function (reportId) {
 // 推送历史日报
 window.pushHistoryReport = async function (reportId) {
   try {
-    const res = await fetch(`${API_BASE_URL_URL}/api/report/${reportId}/push`, { method: 'POST' });
+    const res = await fetch(`${API_BASE_URL}/api/report/${reportId}/push`, { method: 'POST' });
     const resJson = await res.json();
     if (!resJson.success) {
       Toast.error('推送失败: ' + resJson.error);
@@ -3499,7 +3499,7 @@ async function updateTaskOrder() {
 
   if (updates.length > 0) {
     try {
-      await fetch(`${API_BASE_URL_URL}/api/tasks/batch`, {
+      await fetch(`${API_BASE_URL}/api/tasks/batch`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ updates })
@@ -3543,7 +3543,7 @@ const ZentaoBrowserClient = {
    */
   async initConfig() {
     try {
-      const response = await fetch(`${API_BASE_URL_URL}/api/zentao/config`);
+      const response = await fetch(`${API_BASE_URL}/api/zentao/config`);
       const result = await response.json();
       if (result.success) {
         this.config = result.data;
