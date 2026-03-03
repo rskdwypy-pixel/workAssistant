@@ -6,6 +6,7 @@ let currentYear, currentMonth;
 let selectedDate = null;
 let allTasks = [];
 let selectedTaskId = null;  // 当前选中的任务ID（用于键盘删除）
+let deletingTaskIds = new Set();  // 正在删除的任务ID集合（防止重复调用）
 
 // 调试模式状态
 let debugMode = false;
@@ -2577,9 +2578,20 @@ async function deleteSelectedTask() {
   if (!selectedTaskId) return;
 
   const taskId = selectedTaskId;
+
+  // 防止重复调用
+  if (deletingTaskIds.has(taskId)) {
+    console.log('[DeleteTask] 任务正在删除中，跳过重复调用');
+    return;
+  }
+  deletingTaskIds.add(taskId);
+
   const task = allTasks.find(t => t.id === taskId);
 
-  if (!task) return;
+  if (!task) {
+    deletingTaskIds.delete(taskId);
+    return;
+  }
 
   try {
     // 从今日工时中减去该任务今日记录的工时
@@ -2623,6 +2635,9 @@ async function deleteSelectedTask() {
   } catch (err) {
     Toast.error('操作失败');
     console.error('删除任务错误:', err);
+  } finally {
+    // 清除删除中状态
+    deletingTaskIds.delete(taskId);
   }
 }
 
@@ -2630,12 +2645,24 @@ async function deleteSelectedTask() {
 async function handleTaskAction(taskId, action) {
   try {
     if (action === 'delete') {
+      // 防止重复调用
+      if (deletingTaskIds.has(taskId)) {
+        console.log('[HandleTask] 任务正在删除中，跳过重复调用');
+        return;
+      }
+
       const confirmed = await showConfirm('删除任务', '确定要删除这个任务吗？');
       if (!confirmed) return;
 
+      // 标记为正在删除
+      deletingTaskIds.add(taskId);
+
       // 获取任务信息（需要 zentaoId 和 executionId）
       const task = allTasks.find(t => t.id === taskId);
-      if (!task) return;
+      if (!task) {
+        deletingTaskIds.delete(taskId);
+        return;
+      }
 
       // 从今日工时中减去该任务今日记录的工时
       const removedHours = removeTaskWorkTime(taskId);
@@ -2683,6 +2710,11 @@ async function handleTaskAction(taskId, action) {
   } catch (err) {
     Toast.error('操作失败');
     console.error('处理任务操作错误:', err);
+  } finally {
+    // 清除删除中状态（仅在删除操作时）
+    if (action === 'delete') {
+      deletingTaskIds.delete(taskId);
+    }
   }
 }
 
