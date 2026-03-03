@@ -222,6 +222,11 @@ async function executeInZentaoPage(params) {
         }
       };
       chrome.tabs.onUpdated.addListener(listener);
+      // 超时保护
+      setTimeout(() => {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }, 10000);
     });
 
     // 额外等待一下确保页面完全加载
@@ -291,19 +296,42 @@ async function executeInZentaoPage(params) {
   return results[0].result;
 }
 
+// 确保禅道页面存在，如果不存在则创建一个
+async function ensureZentaoTab(baseUrl) {
+  const tabs = await chrome.tabs.query({ url: `${baseUrl}/*` });
+  let targetTab = tabs.find(tab => tab.url.includes('zentao') && !tab.url.includes('user-login'));
+
+  if (!targetTab) {
+    console.log('[Background] 未找到禅道页面，自动打开...');
+    targetTab = await chrome.tabs.create({ url: `${baseUrl}/zentao/`, active: false });
+    // 等待页面加载完成
+    await new Promise(resolve => {
+      const listener = (tabId, changeInfo) => {
+        if (tabId === targetTab.id && changeInfo.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+      // 超时保护
+      setTimeout(() => {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }, 5000);
+    });
+  }
+
+  return targetTab;
+}
+
 // 更新禅道任务状态
 async function updateZentaoTaskStatus(params) {
   const { baseUrl, taskId, status } = params;
 
   console.log('[Background] 更新禅道任务状态:', { taskId, status });
 
-  // 查找禅道标签页
-  const tabs = await chrome.tabs.query({ url: `${baseUrl}/*` });
-  let targetTab = tabs.find(tab => tab.url.includes('zentao') && !tab.url.includes('user-login'));
-
-  if (!targetTab) {
-    return { success: false, reason: '未找到禅道页面，请先打开禅道网站' };
-  }
+  // 确保禅道页面存在
+  const targetTab = await ensureZentaoTab(baseUrl);
 
   const results = await chrome.scripting.executeScript({
     target: { tabId: targetTab.id },
@@ -357,13 +385,8 @@ async function recordZentaoEffort(params) {
 
   console.log('[Background] 记录禅道任务工时:', { taskId, consumedTime, comment });
 
-  // 查找禅道标签页
-  const tabs = await chrome.tabs.query({ url: `${baseUrl}/*` });
-  let targetTab = tabs.find(tab => tab.url.includes('zentao') && !tab.url.includes('user-login'));
-
-  if (!targetTab) {
-    return { success: false, reason: '未找到禅道页面，请先打开禅道网站' };
-  }
+  // 确保禅道页面存在
+  const targetTab = await ensureZentaoTab(baseUrl);
 
   // 获取当前日期
   const now = new Date();
@@ -440,13 +463,8 @@ async function deleteZentaoTask(params) {
 
   console.log('[Background] 删除禅道任务:', { executionId, zentaoId });
 
-  // 查找禅道标签页
-  const tabs = await chrome.tabs.query({ url: `${baseUrl}/*` });
-  let targetTab = tabs.find(tab => tab.url.includes('zentao') && !tab.url.includes('user-login'));
-
-  if (!targetTab) {
-    return { success: false, reason: '未找到禅道页面，请先打开禅道网站' };
-  }
+  // 确保禅道页面存在
+  const targetTab = await ensureZentaoTab(baseUrl);
 
   const results = await chrome.scripting.executeScript({
     target: { tabId: targetTab.id },
@@ -504,13 +522,8 @@ async function editZentaoTask(params) {
 
   console.log('[Background] 编辑禅道任务:', { taskId, execution, name, pri, username });
 
-  // 查找禅道标签页
-  const tabs = await chrome.tabs.query({ url: `${baseUrl}/*` });
-  let targetTab = tabs.find(tab => tab.url.includes('zentao') && !tab.url.includes('user-login'));
-
-  if (!targetTab) {
-    return { success: false, reason: '未找到禅道页面，请先打开禅道网站' };
-  }
+  // 确保禅道页面存在
+  const targetTab = await ensureZentaoTab(baseUrl);
 
   const results = await chrome.scripting.executeScript({
     target: { tabId: targetTab.id },

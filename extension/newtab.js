@@ -198,9 +198,9 @@ const ProgressInputDialog = {
 
       this.okBtn.addEventListener('click', handleOk);
 
-      // 支持回车提交
+      // 支持回车提交（输入法上屏时除外）
       const handleKeyPress = (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
           e.preventDefault();
           handleOk();
         }
@@ -3604,8 +3604,11 @@ const ZentaoBrowserClient = {
           return;
         }
 
+        // 使用禅道首页 URL 来检查 cookie，确保能正确找到 cookie
+        const zentaoUrl = `${url}/zentao/`;
+
         // 直接检查浏览器中的禅道 session cookie（zentaosid）
-        chrome.cookies.get({ url: url, name: 'zentaosid' }, (cookie) => {
+        chrome.cookies.get({ url: zentaoUrl, name: 'zentaosid' }, (cookie) => {
           if (chrome.runtime.lastError) {
             console.warn('[ZentaoBrowser] 检查 cookie 失败:', chrome.runtime.lastError.message);
             resolve(false);
