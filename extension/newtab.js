@@ -259,6 +259,59 @@ function getTodayWorkTimeKey() {
 }
 
 /**
+ * 获取今日任务工时记录的存储键
+ * 用于记录每个任务今日记录的工时，删除任务时可以减去
+ */
+function getTodayTaskWorkTimeKey() {
+  const today = new Date();
+  return `taskWorkTime_${today.getFullYear()}_${today.getMonth() + 1}_${today.getDate()}`;
+}
+
+/**
+ * 记录任务今日工时
+ */
+function recordTaskWorkTime(taskId, hours) {
+  const key = getTodayTaskWorkTimeKey();
+  const record = JSON.parse(localStorage.getItem(key) || '{}');
+  record[taskId] = (record[taskId] || 0) + hours;
+  localStorage.setItem(key, JSON.stringify(record));
+}
+
+/**
+ * 获取任务今日工时
+ */
+function getTaskWorkTime(taskId) {
+  const key = getTodayTaskWorkTimeKey();
+  const record = JSON.parse(localStorage.getItem(key) || '{}');
+  return record[taskId] || 0;
+}
+
+/**
+ * 移除任务今日工时记录（删除任务时调用）
+ */
+function removeTaskWorkTime(taskId) {
+  const key = getTodayTaskWorkTimeKey();
+  const record = JSON.parse(localStorage.getItem(key) || '{}');
+  const hours = record[taskId] || 0;
+  if (hours > 0) {
+    delete record[taskId];
+    localStorage.setItem(key, JSON.stringify(record));
+    // 从今日总工时中减去
+    todayWorkHours = Math.max(0, todayWorkHours - hours);
+    const totalKey = getTodayWorkTimeKey();
+    localStorage.setItem(totalKey, todayWorkHours.toString());
+    updateTodayWorkTimeDisplay();
+    // 同步到后端
+    fetch(`${API_BASE}/api/workHours`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hours: todayWorkHours })
+    }).catch(() => {});
+  }
+  return hours;
+}
+
+/**
  * 初始化今日工时（从本地存储加载）
  */
 function initTodayWorkTime() {
@@ -2163,6 +2216,8 @@ async function updateTaskProgress(taskId, progress) {
       // 更新今日工时
       if (consumedTime > 0) {
         updateTodayWorkTime(consumedTime);
+        // 记录该任务今日工时，用于删除时减去
+        recordTaskWorkTime(taskId, consumedTime);
       }
     }
 
@@ -2527,6 +2582,12 @@ async function deleteSelectedTask() {
   if (!task) return;
 
   try {
+    // 从今日工时中减去该任务今日记录的工时
+    const removedHours = removeTaskWorkTime(taskId);
+    if (removedHours > 0) {
+      console.log(`[DeleteTask] 已从今日工时中减去: ${removedHours}h`);
+    }
+
     // 先调用后端 API 删除任务
     const response = await fetch(`${API_BASE_URL}/api/task/${taskId}`, { method: 'DELETE' });
     const result = await response.json();
@@ -2575,6 +2636,12 @@ async function handleTaskAction(taskId, action) {
       // 获取任务信息（需要 zentaoId 和 executionId）
       const task = allTasks.find(t => t.id === taskId);
       if (!task) return;
+
+      // 从今日工时中减去该任务今日记录的工时
+      const removedHours = removeTaskWorkTime(taskId);
+      if (removedHours > 0) {
+        console.log(`[HandleTask] 已从今日工时中减去: ${removedHours}h`);
+      }
 
       // 先调用后端 API 删除任务
       const response = await fetch(`${API_BASE_URL}/api/task/${taskId}`, { method: 'DELETE' });
