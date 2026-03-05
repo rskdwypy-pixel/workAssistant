@@ -1466,11 +1466,15 @@ function showReportModal(report, type, originBtn, typeName) {
     }
   };
 
+
   newRegenBtn.onclick = () => {
+    // 使用报告的原始日期，而不是当前选中日期
+    if (report.date) {
+      selectedDate = report.date;
+    }
     modal.classList.remove('active');
     handleGenerateReport(type, originBtn, typeName);
   };
-
   newPushBtn.onclick = async () => {
     newPushBtn.textContent = '推送中...';
     newPushBtn.disabled = true;
@@ -3254,7 +3258,7 @@ async function openHistoryReportDetail(reportId) {
 }
 
 // 重新生成报告
-async function regenerateReport(_oldReportId, type, btnElement) {
+async function regenerateReport(oldReportId, type, btnElement) {
   const typeNames = { daily: '日报', weekly: '周报', monthly: '月报' };
   const confirmed = await showConfirm('重新生成报告', `确定要重新生成${typeNames[type]}吗？这将使用相同的时间范围。`, '重新生成', '取消');
   if (!confirmed) {
@@ -3266,7 +3270,25 @@ async function regenerateReport(_oldReportId, type, btnElement) {
   btnElement.disabled = true;
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/report/generate/${type}`, { method: 'POST' });
+    // 先获取原始报告的日期信息
+    const historyRes = await fetch(`${API_BASE_URL}/api/history?limit=100`);
+    const historyResult = await historyRes.json();
+    let dateParam = null;
+    
+    if (historyResult.success) {
+      const oldReport = historyResult.data.find(r => r.id === oldReportId);
+      if (oldReport && oldReport.date) {
+        dateParam = oldReport.date;
+      }
+    }
+
+    // 构建请求参数
+    const params = new URLSearchParams();
+    if (dateParam) {
+      params.append('date', dateParam);
+    }
+    
+    const response = await fetch(`${API_BASE_URL}/api/report/generate/${type}?${params.toString()}`, { method: 'POST' });
     const result = await response.json();
 
     if (result.success) {
