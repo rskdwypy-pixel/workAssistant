@@ -130,17 +130,18 @@ async function readTodayWorkHours() {
 }
 
 /**
- * 保存今日工时
- */
 async function saveTodayWorkHours(hours) {
   const history = await readHistory();
   if (!history.dailyWorkHours) {
     history.dailyWorkHours = {};
   }
   const today = new Date().toISOString().split('T')[0];
-  history.dailyWorkHours[today] = hours;
+  // 累加工时而不是覆盖
+  const currentHours = history.dailyWorkHours[today] || 0;
+  history.dailyWorkHours[today] = currentHours + hours;
   await writeHistory(history);
   return true;
+}
 }
 
 /**
@@ -165,24 +166,14 @@ function getTasksByDate(tasks, dateStr) {
     return false;
   });
 }
-
 /**
  * 按日期范围获取任务
  */
 function getTasksByDateRange(tasks, startDate, endDate) {
-  const start = new Date(startDate).getTime();
-  const end = new Date(endDate).getTime();
-
-  return tasks.filter(task => {
     const taskTime = new Date(task.createdAt).getTime();
     return taskTime >= start && taskTime <= end;
   });
 }
-
-export {
-  readJSON,
-  writeJSON,
-  readTasks,
   writeTasks,
   readHistory,
   writeHistory,
