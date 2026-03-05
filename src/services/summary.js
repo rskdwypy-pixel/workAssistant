@@ -9,6 +9,36 @@ import { v4 as uuidv4 } from 'uuid';
 import { getAllTasks } from './taskManager.js';
 
 let summaryTask = null;
+let weeklyTask = null;
+
+/**
+ * 周五下午周报
+ */
+async function fridayWeeklySummary() {
+  try {
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0=周日, 1=周一, ..., 5=周五
+
+    // 只在周五执行
+    if (dayOfWeek !== 5) {
+      console.log('📅 今天不是周五，跳过周报生成');
+      return;
+    }
+
+    console.log('📊 执行周五周报...');
+
+    // 生成周报并自动推送
+    const report = await generateReport('weekly', true);
+
+    // 发送系统通知
+    const message = `周报已生成，已完成 ${report.stats?.done || 0} 项任务`;
+    await sendSystemNotification('📊 周报已生成', message);
+
+    console.log('✅ 周五周报完成');
+  } catch (err) {
+    console.error('❌ 周五周报失败:', err.message);
+  }
+}
 
 /**
  * 晚间日报
@@ -107,33 +137,52 @@ async function eveningSummary() {
 }
 
 /**
- * 启动定时日报
+ * 启动定时报告
  */
 function startSummary() {
-  if (summaryTask) {
+  // 启动晚间日报定时任务
+  if (!summaryTask) {
+    const { eveningHour } = config.schedule;
+    const cronExpression = `0 ${eveningHour} * * *`; // 每天21点
+
+    summaryTask = cron.schedule(cronExpression, eveningSummary, {
+      scheduled: true,
+      timezone: 'Asia/Shanghai'
+    });
+
+    console.log(`⏰ 定时日报已启动: 每天 ${eveningHour}:00`);
+  } else {
     console.log('⚠️  定时日报已在运行');
-    return;
   }
 
-  const { eveningHour } = config.schedule;
-  const cronExpression = `0 ${eveningHour} * * *`; // 每天21点
+  // 启动周五周报定时任务（每周五 17:00）
+  if (!weeklyTask) {
+    const weeklyCronExpression = '0 17 * * 5'; // 每周五 17:00
 
-  summaryTask = cron.schedule(cronExpression, eveningSummary, {
-    scheduled: true,
-    timezone: 'Asia/Shanghai'
-  });
+    weeklyTask = cron.schedule(weeklyCronExpression, fridayWeeklySummary, {
+      scheduled: true,
+      timezone: 'Asia/Shanghai'
+    });
 
-  console.log(`⏰ 定时日报已启动: 每天 ${eveningHour}:00`);
+    console.log('⏰ 定时周报已启动: 每周五 17:00');
+  } else {
+    console.log('⚠️  定时周报已在运行');
+  }
 }
 
 /**
- * 停止定时日报
+ * 停止定时报告
  */
 function stopSummary() {
   if (summaryTask) {
     summaryTask.stop();
     summaryTask = null;
     console.log('⏰ 定时日报已停止');
+  }
+  if (weeklyTask) {
+    weeklyTask.stop();
+    weeklyTask = null;
+    console.log('⏰ 定时周报已停止');
   }
 }
 

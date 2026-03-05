@@ -2767,6 +2767,30 @@ function showTaskDetail(task) {
   };
   const pColor = priorityColors[priority] || priorityColors[3];
 
+  // 构建进度更新历史HTML
+  let progressUpdatesHtml = '';
+  if (task.progressUpdates && task.progressUpdates.length > 0) {
+    progressUpdatesHtml = `
+      <div style="margin-top: 16px;">
+        <h4 style="margin-bottom: 8px; font-size: 14px; color: #333;">📊 进度更新记录</h4>
+        <div style="max-height: 200px; overflow-y: auto; background: #f9f9f9; border-radius: 6px; padding: 12px;">
+          ${task.progressUpdates.slice().reverse().map((update, idx) => `
+            <div style="padding: 10px; margin-bottom: ${idx < task.progressUpdates.length - 1 ? '8px' : '0'}; background: white; border-radius: 4px; border-left: 3px solid #3b82f6;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 12px; color: #6b7280;">${new Date(update.timestamp).toLocaleString('zh-CN')}</span>
+                <span style="font-size: 13px; font-weight: 600; color: #3b82f6;">
+                  ${update.oldProgress ?? 0}% → ${update.progress}%
+                </span>
+              </div>
+              ${update.workContent ? `<div style="font-size: 13px; color: #333; margin-bottom: 4px; white-space: pre-wrap;">${escapeHtml(update.workContent)}</div>` : ''}
+              ${update.consumedTime ? `<div style="font-size: 12px; color: #10b981;">⏱ 消耗工时: ${update.consumedTime}h</div>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
   body.innerHTML = `
     <div style="margin-bottom: 16px;">
       <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
@@ -2797,6 +2821,7 @@ function showTaskDetail(task) {
       <div><strong>进度:</strong> ${task.progress ?? 0}%</div>
       <div><strong>创建时间:</strong> ${new Date(task.createdAt).toLocaleString('zh-CN')}</div>
     </div>
+    ${progressUpdatesHtml}
     <div style="display: flex; gap: 8px;">
       ${task.status !== 'done' ? `<button class="btn-primary detail-action-btn" data-action="done">标记完成</button>` : ''}
       <button class="btn-secondary detail-action-btn" style="border-color: #e74c3c; color: #e74c3c;" data-action="delete">删除</button>

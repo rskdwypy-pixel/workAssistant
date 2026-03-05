@@ -156,7 +156,12 @@ router.put('/task/:id/progress', async (req, res) => {
       return res.status(400).json({ error: '进度必须在0-100之间' });
     }
 
-    const task = await taskManager.updateTask(id, { progress });
+    // 传递进度、工作内容和工时到 updateTask，以便记录历史
+    const task = await taskManager.updateTask(id, {
+      progress,
+      progressComment,
+      consumedTime
+    });
 
     // 根据进度自动更新状态
     let status = task.status;

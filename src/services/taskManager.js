@@ -295,6 +295,30 @@ async function updateTask(taskId, updates) {
     delete task.order;
   }
 
+  // 记录进度更新历史
+  if (updates.hasOwnProperty('progress') || updates.progressComment || updates.consumedTime) {
+    if (!task.progressUpdates) {
+      task.progressUpdates = [];
+    }
+    const now = new Date().toISOString();
+    const progressValue = updates.hasOwnProperty('progress') ? updates.progress : task.progress;
+    const oldProgress = task.progress ?? 0;
+    // 只有进度发生变化，或有工作内容/工时记录时才添加历史
+    if (progressValue !== oldProgress || updates.progressComment || updates.consumedTime) {
+      task.progressUpdates.push({
+        timestamp: now,
+        progress: progressValue,
+        oldProgress: oldProgress,
+        workContent: updates.progressComment || '',
+        consumedTime: updates.consumedTime || 0
+      });
+      // 限制历史记录数量，最多保留20条
+      if (task.progressUpdates.length > 20) {
+        task.progressUpdates = task.progressUpdates.slice(-20);
+      }
+    }
+  }
+
   Object.assign(task, updates, {
     updatedAt: new Date().toISOString()
   });
