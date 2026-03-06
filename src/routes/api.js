@@ -1034,3 +1034,17 @@ router.post('/zentao/task/create', async (req, res) => {
 
 export default router;
 
+
+/**
+ * POST /api/test/weekly - 测试周报生成（手动触发）
+ */
+router.post('/test/weekly', async (req, res) => {
+  try {
+    const { summaryService } = await import('../services/summary.js');
+    const report = await summaryService.generateReport('weekly', true);
+    res.json({ success: true, data: report, message: '周报已生成并推送' });
+  } catch (err) {
+    console.error('测试周报失败:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
