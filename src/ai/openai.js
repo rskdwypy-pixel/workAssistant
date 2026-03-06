@@ -253,7 +253,10 @@ async function generateSummary(todoTasks, inProgressTasks, doneTasks, type = 'da
       }
     }
     
-    const prompt = promptTemplate
+    // 在提示词开头添加实际的数字信息，确保 AI 使用正确数字
+    const statsInfo = `【统计数据】${timeFrame}共处理任务${totalTasks}项，其中完成工作${doneCount}项。${timeFrame}主要工作内容：${mainContent}。\n\n`;
+    
+    const prompt = statsInfo + promptTemplate
       .replace(/{timeFrame}/g, timeFrame)
       .replace('{总数}', totalTasks.toString())
       .replace('{完成数}', doneCount.toString())
