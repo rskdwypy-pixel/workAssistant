@@ -4831,8 +4831,8 @@ const ProjectFavorites = {
         throw new Error('无法获取禅道会话');
       }
 
-      // 调用禅道 API 获取项目列表
-      const projectsResp = await fetch(`${zentaoUrl}/zentao/project-browse-all-all--------.json`, {
+      // 调用禅道 API 获取项目列表（请求更多数据，每页100条）
+      const projectsResp = await fetch(`${zentaoUrl}/zentao/project-browse-all-all--------0-100-1.json`, {
         headers: {
           'Cookie': cookie
         }
@@ -4863,6 +4863,13 @@ const ProjectFavorites = {
       } else if (projectsData.projects) {
         projects = projectsData.projects;
       }
+
+      // 排序：进行中(done) > 其他
+      projects.sort((a, b) => {
+        if (a.status === 'doing' && b.status !== 'doing') return -1;
+        if (a.status !== 'doing' && b.status === 'doing') return 1;
+        return 0;
+      });
 
       // 格式化项目
       const formattedProjects = projects.map(p => ({
