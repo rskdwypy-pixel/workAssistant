@@ -4805,20 +4805,80 @@ const ProjectFavorites = {
       syncBtn.disabled = true;
       syncBtn.textContent = '同步中...';
 
-      const response = await fetch(`${API_BASE_URL}/api/projects/sync`, {
-        method: 'POST'
-      });
-      const result = await response.json();
+      // 从浏览器获取禅道配置
+      const configResponse = await fetch(`${API_BASE_URL}/api/zentao/config`);
+      const configResult = await configResponse.json();
 
-      if (result.success) {
-        this.projects = result.data;
+      if (!configResult.success || !configResult.data.url) {
+        throw new Error('禅道未配置');
+      }
+
+      const zentaoUrl = configResult.data.url.replace(/\/$/, '');
+
+      // 获取禅道 cookie
+      const zentaoCookie = await this.getZentaoCookie(zentaoUrl);
+      if (!zentaoCookie) {
+        // 尝试通过浏览器自动化登录
+        const loginResult = await this.loginZentao(zentaoUrl, configResult.data.username, configResult.data.password);
+        if (!loginResult.success) {
+          throw new Error('登录失败: ' + (loginResult.error || '未知错误'));
+        }
+      }
+
+      // 再次获取 cookie
+      const cookie = await this.getZentaoCookie(zentaoUrl);
+      if (!cookie) {
+        throw new Error('无法获取禅道会话');
+      }
+
+      // 调用禅道 API 获取项目列表
+      const projectsResp = await fetch(`${zentaoUrl}/zentao/project-browse-all-all--------.json`, {
+        headers: {
+          'Cookie': cookie
+        }
+      });
+      const projectsData = await projectsResp.json();
+
+      // 解析项目列表
+      let projects = [];
+      if (projectsData.data && typeof projectsData.data === 'string') {
+        // 尝试解析嵌套的 JSON
+        try {
+          const nestedData = JSON.parse(projectsData.data);
+          if (nestedData.projects) {
+            projects = nestedData.projects;
+          }
+        } catch (e) {
+          console.error('[ProjectFavorites] 解析项目数据失败:', e);
+        }
+      } else if (projectsData.projects) {
+        projects = projectsData.projects;
+      }
+
+      // 格式化项目
+      const formattedProjects = projects.map(p => ({
+        id: String(p.id),
+        name: p.name || p.title || `项目 ${p.id}`,
+        status: p.status || 'open',
+        type: p.type || 'sprint',
+        begin: p.begin || '',
+        end: p.end || ''
+      }));
+
+      // 保存到后端
+      const saveResp = await fetch(`${API_BASE_URL}/api/projects/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projects: formattedProjects })
+      });
+      const saveResult = await saveResp.json();
+
+      if (saveResult.success) {
+        this.projects = formattedProjects;
         this.renderProjectList();
-        resultSpan.textContent = `已同步 ${result.data.length} 个项目`;
+        resultSpan.textContent = `已同步 ${formattedProjects.length} 个项目`;
         resultSpan.style.color = 'var(--success)';
-        Toast.success(`已同步 ${result.data.length} 个项目`);
-      } else {
-        resultSpan.textContent = '同步失败: ' + result.error;
-        resultSpan.style.color = 'var(--danger)';
+        Toast.success(`已同步 ${formattedProjects.length} 个项目`);
       }
     } catch (err) {
       console.error('[ProjectFavorites] 同步项目失败:', err);
@@ -4828,6 +4888,31 @@ const ProjectFavorites = {
       syncBtn.disabled = false;
       syncBtn.textContent = '🔄 从禅道同步项目';
     }
+  },
+
+  async getZentaoCookie(zentaoUrl) {
+    return new Promise((resolve) => {
+      chrome.cookies.get({ url: `${zentaoUrl}/zentao/`, name: 'zentaosid' }, (cookie) => {
+        if (cookie && cookie.value) {
+          resolve(`zentaosid=${cookie.value}`);
+        } else {
+          resolve(null);
+        }
+      });
+    });
+  },
+
+  async loginZentao(zentaoUrl, username, password) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({
+        action: 'performZenTaoLogin',
+        url: zentaoUrl,
+        username: username,
+        password: password
+      }, (response) => {
+        resolve(response || { success: false, error: '无响应' });
+      });
+    });
   },
 
   renderProjectList() {

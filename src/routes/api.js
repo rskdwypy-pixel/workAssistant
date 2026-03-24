@@ -991,8 +991,9 @@ router.get('/projects/favorites', async (req, res) => {
 router.post('/projects/sync', async (req, res) => {
   try {
     const { syncProjectsFromZentao } = await import('../services/projectManager.js');
-    const projects = await syncProjectsFromZentao();
-    res.json({ success: true, data: projects, message: '项目列表已同步' });
+    const { projects } = req.body; // 可选：从前端传来的项目数据
+    const syncedProjects = await syncProjectsFromZentao(projects);
+    res.json({ success: true, data: syncedProjects, message: '项目列表已同步' });
   } catch (err) {
     console.error('[API] 同步项目列表失败:', err);
     res.status(500).json({ success: false, error: err.message });

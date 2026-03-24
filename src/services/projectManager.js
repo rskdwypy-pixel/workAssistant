@@ -40,8 +40,25 @@ async function getProjects() {
 
 /**
  * 从禅道同步项目列表
+ * @param {Array} projectsFromFrontend - 从前端获取的项目列表（可选）
  */
-async function syncProjectsFromZentao() {
+async function syncProjectsFromZentao(projectsFromFrontend = null) {
+  // 如果从前端传入了项目数据，直接使用
+  if (projectsFromFrontend && Array.isArray(projectsFromFrontend)) {
+    const data = ensureProjectsFile();
+    const existingFavorites = new Set(data.favoriteProjectIds || []);
+
+    data.projects = projectsFromFrontend;
+    data.favoriteProjectIds = Array.from(existingFavorites);
+    data.lastSync = new Date().toISOString();
+
+    writeProjectsFile(data);
+
+    console.log('[ProjectManager] 同步成功，获取到', projectsFromFrontend.length, '个项目');
+    return projectsFromFrontend;
+  }
+
+  // 否则尝试从服务端同步（原有逻辑）
   if (!config.zentao.enabled) {
     throw new Error('禅道未启用');
   }
