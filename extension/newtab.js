@@ -4719,3 +4719,498 @@ const BugMode = {
 document.addEventListener('DOMContentLoaded', () => {
   BugMode.init();
 });
+
+// ==================== Tab 切换 ====================
+
+const TabSwitcher = {
+  currentMode: 'task', // 'task' or 'bug'
+
+  init() {
+    const tabButtons = document.querySelectorAll('.tab-btn');
+    tabButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mode = btn.dataset.mode;
+        this.switchMode(mode);
+      });
+    });
+  },
+
+  switchMode(mode) {
+    this.currentMode = mode;
+
+    // 更新 Tab 按钮
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      if (btn.dataset.mode === mode) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+
+    // 更新内容区域
+    document.querySelectorAll('.mode-content').forEach(content => {
+      if (content.id === `${mode}Mode`) {
+        content.classList.add('active');
+      } else {
+        content.classList.remove('active');
+      }
+    });
+
+    // 加载对应模式的数据
+    if (mode === 'bug') {
+      BugManager.loadBugs();
+    }
+  }
+};
+
+// 在页面加载时初始化 Tab 切换
+document.addEventListener('DOMContentLoaded', () => {
+  TabSwitcher.init();
+});
+
+// ==================== 项目收藏管理 ====================
+
+const ProjectFavorites = {
+  projects: [],
+  favoriteIds: [],
+
+  init() {
+    const syncBtn = document.getElementById('syncProjectsBtn');
+    if (syncBtn) {
+      syncBtn.addEventListener('click', () => this.syncProjects());
+    }
+
+    // 加载收藏列表
+    this.loadFavorites();
+  },
+
+  async loadFavorites() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/projects/favorites`);
+      const result = await response.json();
+      if (result.success) {
+        this.projects = result.data;
+        this.favoriteIds = this.projects.map(p => p.id);
+      }
+    } catch (err) {
+      console.error('[ProjectFavorites] 加载收藏项目失败:', err);
+    }
+  },
+
+  async syncProjects() {
+    const syncBtn = document.getElementById('syncProjectsBtn');
+    const resultSpan = document.getElementById('syncProjectsResult');
+
+    try {
+      syncBtn.disabled = true;
+      syncBtn.textContent = '同步中...';
+
+      const response = await fetch(`${API_BASE_URL}/api/projects/sync`, {
+        method: 'POST'
+      });
+      const result = await response.json();
+
+      if (result.success) {
+        this.projects = result.data;
+        this.renderProjectList();
+        resultSpan.textContent = `已同步 ${result.data.length} 个项目`;
+        resultSpan.style.color = 'var(--success)';
+        Toast.success(`已同步 ${result.data.length} 个项目`);
+      } else {
+        resultSpan.textContent = '同步失败: ' + result.error;
+        resultSpan.style.color = 'var(--danger)';
+      }
+    } catch (err) {
+      console.error('[ProjectFavorites] 同步项目失败:', err);
+      resultSpan.textContent = '同步失败: ' + err.message;
+      resultSpan.style.color = 'var(--danger)';
+    } finally {
+      syncBtn.disabled = false;
+      syncBtn.textContent = '🔄 从禅道同步项目';
+    }
+  },
+
+  renderProjectList() {
+    const listContainer = document.getElementById('projectFavoritesList');
+    if (!listContainer) return;
+
+    // 获取当前收藏的ID列表
+    const response = fetch(`${API_BASE_URL}/api/projects/favorites`)
+      .then(r => r.json())
+      .then(result => {
+        if (result.success) {
+          this.favoriteIds = result.data.map(p => p.id);
+        }
+      });
+
+    let html = '';
+    this.projects.forEach(project => {
+      const isFavorite = this.favoriteIds.includes(project.id);
+      html += `
+        <label class="project-favorite-item">
+          <input type="checkbox" value="${project.id}" ${isFavorite ? 'checked' : ''}>
+          <span class="project-favorite-name">${escapeHtml(project.name)}</span>
+          <span class="project-favorite-status ${project.status === 'closed' ? 'closed' : ''}">
+            ${project.status === 'closed' ? '已关闭' : '进行中'}
+          </span>
+        </label>
+      `;
+    });
+
+    listContainer.innerHTML = html || '<p class="hint">暂无项目</p>';
+
+    // 绑定复选框事件
+    listContainer.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+      checkbox.addEventListener('change', () => this.updateFavorites());
+    });
+  },
+
+  async updateFavorites() {
+    const listContainer = document.getElementById('projectFavoritesList');
+    const checkedIds = Array.from(listContainer.querySelectorAll('input[type="checkbox"]:checked'))
+      .map(cb => cb.value);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/projects/favorites`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectIds: checkedIds })
+      });
+      const result = await response.json();
+
+      if (result.success) {
+        this.favoriteIds = checkedIds;
+        Toast.success('收藏项目已更新');
+      }
+    } catch (err) {
+      console.error('[ProjectFavorites] 更新收藏失败:', err);
+      Toast.error('更新收藏失败');
+    }
+  }
+};
+
+// 在设置弹窗打开时加载项目收藏
+const originalSettingsBtn = document.getElementById('settingsBtn');
+if (originalSettingsBtn) {
+  originalSettingsBtn.addEventListener('click', () => {
+    setTimeout(() => ProjectFavorites.loadFavorites(), 100);
+  });
+}
+
+// ==================== Bug 管理 ====================
+
+const BugManager = {
+  bugs: [],
+  draft: null,
+
+  init() {
+    // 加载草稿
+    this.loadDraft();
+
+    // 添加 Bug 按钮
+    const addBugBtn = document.getElementById('addBugBtn');
+    if (addBugBtn) {
+      addBugBtn.addEventListener('click', () => this.showBugModal());
+    }
+
+    // 关闭 Bug 弹窗
+    const closeBtn = document.getElementById('closeBugModal');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => this.hideBugModal());
+    }
+
+    // 提交 Bug
+    const submitBtn = document.getElementById('submitBugBtn');
+    if (submitBtn) {
+      submitBtn.addEventListener('click', () => this.submitBug());
+    }
+
+    // 自动保存草稿
+    const bugInputs = ['bugTitle', 'bugSeverity', 'bugType', 'bugSteps', 'bugOpenedBuild', 'bugOs', 'bugBrowser'];
+    bugInputs.forEach(id => {
+      const input = document.getElementById(id);
+      if (input) {
+        input.addEventListener('input', () => this.saveDraftDebounced());
+      }
+    });
+
+    // 项目选择改变时保存
+    const bugProject = document.getElementById('bugProject');
+    if (bugProject) {
+      bugProject.addEventListener('change', () => this.saveDraftDebounced());
+    }
+  },
+
+  async loadBugs() {
+    // 从本地或后端加载 Bug 列表
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/bugs`);
+      const result = await response.json();
+      if (result.success) {
+        this.bugs = result.data || [];
+        this.renderBugs();
+      }
+    } catch (err) {
+      console.error('[BugManager] 加载 Bug 列表失败:', err);
+    }
+  },
+
+  renderBugs() {
+    // 渲染 Bug 到各个列
+    const unconfirmedList = document.getElementById('bugUnconfirmedList');
+    const activatedList = document.getElementById('bugActivatedList');
+    const closedList = document.getElementById('bugClosedList');
+
+    if (!unconfirmedList || !activatedList || !closedList) return;
+
+    // 清空列表
+    unconfirmedList.innerHTML = '';
+    activatedList.innerHTML = '';
+    closedList.innerHTML = '';
+
+    // 统计
+    let unconfirmedCount = 0;
+    let activatedCount = 0;
+    let closedCount = 0;
+
+    this.bugs.forEach(bug => {
+      const card = this.createBugCard(bug);
+
+      if (bug.status === 'unconfirmed') {
+        unconfirmedList.appendChild(card);
+        unconfirmedCount++;
+      } else if (bug.status === 'activated') {
+        activatedList.appendChild(card);
+        activatedCount++;
+      } else if (bug.status === 'closed') {
+        closedList.appendChild(card);
+        closedCount++;
+      }
+    });
+
+    // 更新计数
+    document.getElementById('bugUnconfirmedListCount').textContent = unconfirmedCount;
+    document.getElementById('bugActivatedListCount').textContent = activatedCount;
+    document.getElementById('bugClosedListCount').textContent = closedCount;
+    document.getElementById('bugUnconfirmedCount').textContent = unconfirmedCount;
+    document.getElementById('bugActivatedCount').textContent = activatedCount;
+    document.getElementById('bugClosedCount').textContent = closedCount;
+  },
+
+  createBugCard(bug) {
+    const card = document.createElement('div');
+    card.className = 'task-card bug-card';
+    card.dataset.bugId = bug.id;
+
+    const severityClass = `bug-severity-${bug.severity || 3}`;
+    const severityText = ['', '致命', '严重', '一般', '提示'][bug.severity || 3];
+
+    card.innerHTML = `
+      <div class="task-title">
+        <span class="bug-severity ${severityClass}">${severityText}</span>
+        <span class="task-title-text">${escapeHtml(bug.title)}</span>
+      </div>
+      ${bug.projectName ? `<span class="execution-tag">${escapeHtml(bug.projectName)}</span>` : ''}
+      ${bug.type ? `<span class="bug-type">${this.getBugTypeText(bug.type)}</span>` : ''}
+    `;
+
+    return card;
+  },
+
+  getBugTypeText(type) {
+    const types = {
+      codeerror: '代码错误',
+      config: '配置相关',
+      install: '安装部署',
+      security: '安全相关',
+      performance: '性能问题',
+      standard: '标准规范',
+      automation: '测试脚本',
+      designdefect: '设计缺陷',
+      others: '其他'
+    };
+    return types[type] || type;
+  },
+
+  async showBugModal() {
+    const modal = document.getElementById('bugModal');
+    if (!modal) return;
+
+    // 加载项目列表
+    await this.loadProjectOptions();
+
+    // 恢复草稿
+    if (this.draft) {
+      this.restoreDraft();
+    }
+
+    modal.style.display = 'flex';
+  },
+
+  hideBugModal() {
+    const modal = document.getElementById('bugModal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
+  },
+
+  async loadProjectOptions() {
+    const select = document.getElementById('bugProject');
+    if (!select) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/projects/favorites`);
+      const result = await response.json();
+
+      if (result.success && result.data.length > 0) {
+        select.innerHTML = '<option value="">请选择项目</option>';
+        result.data.forEach(project => {
+          const option = document.createElement('option');
+          option.value = project.id;
+          option.textContent = project.name;
+          select.appendChild(option);
+        });
+
+        // 如果草稿有项目选择，恢复它
+        if (this.draft && this.draft.projectId) {
+          select.value = this.draft.projectId;
+        }
+      } else {
+        select.innerHTML = '<option value="">请先在设置中收藏项目</option>';
+      }
+    } catch (err) {
+      console.error('[BugManager] 加载项目失败:', err);
+    }
+  },
+
+  async submitBug() {
+    const projectId = document.getElementById('bugProject').value;
+    const title = document.getElementById('bugTitle').value.trim();
+    const severity = document.getElementById('bugSeverity').value;
+    const type = document.getElementById('bugType').value;
+    const steps = document.getElementById('bugSteps').value.trim();
+    const openedBuild = document.getElementById('bugOpenedBuild').value.trim();
+    const os = document.getElementById('bugOs').value.trim();
+    const browser = document.getElementById('bugBrowser').value.trim();
+
+    // 验证必填项
+    if (!projectId) {
+      Toast.warning('请选择所属项目');
+      return;
+    }
+    if (!title) {
+      Toast.warning('请输入 Bug 标题');
+      return;
+    }
+    if (!steps) {
+      Toast.warning('请输入重现步骤');
+      return;
+    }
+
+    const bugData = {
+      projectId,
+      title,
+      severity: parseInt(severity),
+      type,
+      steps,
+      openedBuild,
+      os,
+      browser
+    };
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/bug`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bugData)
+      });
+      const result = await response.json();
+
+      if (result.success) {
+        Toast.success('Bug 已创建');
+        this.clearDraft();
+        this.hideBugModal();
+        this.loadBugs(); // 重新加载 Bug 列表
+      } else {
+        Toast.error('创建失败: ' + (result.error || '未知错误'));
+      }
+    } catch (err) {
+      console.error('[BugManager] 创建 Bug 失败:', err);
+      Toast.error('创建失败: ' + err.message);
+    }
+  },
+
+  saveDraftDebounced() {
+    clearTimeout(this.draftTimeout);
+    this.draftTimeout = setTimeout(() => this.saveDraft(), 500);
+  },
+
+  saveDraft() {
+    const draft = {
+      projectId: document.getElementById('bugProject').value,
+      title: document.getElementById('bugTitle').value,
+      severity: document.getElementById('bugSeverity').value,
+      type: document.getElementById('bugType').value,
+      steps: document.getElementById('bugSteps').value,
+      openedBuild: document.getElementById('bugOpenedBuild').value,
+      os: document.getElementById('bugOs').value,
+      browser: document.getElementById('bugBrowser').value,
+      savedAt: new Date().toISOString()
+    };
+
+    localStorage.setItem('bug_draft', JSON.stringify(draft));
+    this.draft = draft;
+
+    // 显示保存提示
+    const savedSpan = document.getElementById('bugDraftSaved');
+    if (savedSpan) {
+      savedSpan.style.display = 'inline';
+      setTimeout(() => savedSpan.style.display = 'none', 2000);
+    }
+  },
+
+  loadDraft() {
+    const draftStr = localStorage.getItem('bug_draft');
+    if (draftStr) {
+      try {
+        this.draft = JSON.parse(draftStr);
+      } catch (e) {
+        console.error('[BugManager] 解析草稿失败:', e);
+        this.draft = null;
+      }
+    }
+  },
+
+  restoreDraft() {
+    if (!this.draft) return;
+
+    document.getElementById('bugProject').value = this.draft.projectId || '';
+    document.getElementById('bugTitle').value = this.draft.title || '';
+    document.getElementById('bugSeverity').value = this.draft.severity || '3';
+    document.getElementById('bugType').value = this.draft.type || 'codeerror';
+    document.getElementById('bugSteps').value = this.draft.steps || '';
+    document.getElementById('bugOpenedBuild').value = this.draft.openedBuild || 'trunk';
+    document.getElementById('bugOs').value = this.draft.os || '';
+    document.getElementById('bugBrowser').value = this.draft.browser || '';
+  },
+
+  clearDraft() {
+    localStorage.removeItem('bug_draft');
+    this.draft = null;
+
+    // 清空表单
+    document.getElementById('bugProject').value = '';
+    document.getElementById('bugTitle').value = '';
+    document.getElementById('bugSeverity').value = '3';
+    document.getElementById('bugType').value = 'codeerror';
+    document.getElementById('bugSteps').value = '';
+    document.getElementById('bugOpenedBuild').value = 'trunk';
+    document.getElementById('bugOs').value = '';
+    document.getElementById('bugBrowser').value = '';
+  }
+};
+
+// 在页面加载时初始化 Bug 管理器
+document.addEventListener('DOMContentLoaded', () => {
+  BugManager.init();
+});
