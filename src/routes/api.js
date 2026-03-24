@@ -949,6 +949,170 @@ function cookiesToString(cookies) {
     .join('; ');
 }
 
+// ==================== 项目相关接口 ====================
+
+/**
+ * GET /api/projects - 获取项目列表
+ */
+router.get('/projects', async (req, res) => {
+  try {
+    const { getProjects, getFavoriteProjects } = await import('../services/projectManager.js');
+    const projects = await getProjects();
+    const favorites = await getFavoriteProjects();
+
+    // 标记收藏的项目
+    const projectsWithFavorite = projects.map(p => ({
+      ...p,
+      isFavorite: favorites.some(f => f.id === p.id)
+    }));
+
+    res.json({ success: true, data: projectsWithFavorite });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/projects/favorites - 获取收藏的项目列表
+ */
+router.get('/projects/favorites', async (req, res) => {
+  try {
+    const { getFavoriteProjects } = await import('../services/projectManager.js');
+    const projects = await getFavoriteProjects();
+    res.json({ success: true, data: projects });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/projects/sync - 从禅道同步项目列表
+ */
+router.post('/projects/sync', async (req, res) => {
+  try {
+    const { syncProjectsFromZentao } = await import('../services/projectManager.js');
+    const projects = await syncProjectsFromZentao();
+    res.json({ success: true, data: projects, message: '项目列表已同步' });
+  } catch (err) {
+    console.error('[API] 同步项目列表失败:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/projects/favorites - 设置收藏项目
+ */
+router.post('/projects/favorites', async (req, res) => {
+  try {
+    const { projectIds } = req.body;
+    if (!Array.isArray(projectIds)) {
+      return res.status(400).json({ success: false, error: 'projectIds 必须是数组' });
+    }
+    const { setFavoriteProjects } = await import('../services/projectManager.js');
+    await setFavoriteProjects(projectIds);
+    res.json({ success: true, message: '收藏项目已设置' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/projects/favorites/add - 添加收藏项目
+ */
+router.post('/projects/favorites/add', async (req, res) => {
+  try {
+    const { projectId } = req.body;
+    if (!projectId) {
+      return res.status(400).json({ success: false, error: '缺少 projectId' });
+    }
+    const { addFavoriteProject } = await import('../services/projectManager.js');
+    await addFavoriteProject(projectId);
+    res.json({ success: true, message: '已添加到收藏' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/projects/favorites/remove - 移除收藏项目
+ */
+router.post('/projects/favorites/remove', async (req, res) => {
+  try {
+    const { projectId } = req.body;
+    if (!projectId) {
+      return res.status(400).json({ success: false, error: '缺少 projectId' });
+    }
+    const { removeFavoriteProject } = await import('../services/projectManager.js');
+    await removeFavoriteProject(projectId);
+    res.json({ success: true, message: '已从收藏移除' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/ai/match-project - AI 匹配项目
+ */
+router.post('/ai/match-project', async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content) {
+      return res.status(400).json({ success: false, error: '缺少 content' });
+    }
+
+    // 获取收藏项目
+    const { getFavoriteProjects } = await import('../services/projectManager.js');
+    const favoriteProjects = await getFavoriteProjects();
+
+    if (favoriteProjects.length === 0) {
+      return res.json({ success: true, data: null, message: '没有收藏的项目' });
+    }
+
+    // 构建 AI 提示词
+    const projectsList = favoriteProjects.map(p => `- ${p.id}: ${p.name}`).join('\n');
+
+    const prompt = `你是项目分类助手。根据任务内容，判断其归属于哪个项目。
+
+【可用项目列表】
+${projectsList}
+
+【分析规则】
+1. 根据项目名称判断任务归属
+2. 返回置信度（0-1）
+3. 如果无法确定，返回 null
+
+用户输入：${content}
+
+请只返回JSON：
+{
+  "projectId": "项目ID或null",
+  "projectName": "项目名称",
+  "confidence": 0.95,
+  "reason": "判断原因"
+}`;
+
+    // 调用 AI
+    const { generateResponse } = await import('../ai/openai.js');
+    const aiResponse = await generateResponse(prompt);
+
+    // 解析 AI 响应
+    let matchResult = null;
+    try {
+      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        matchResult = JSON.parse(jsonMatch[0]);
+      }
+    } catch (e) {
+      console.error('[API] 解析 AI 响应失败:', e);
+    }
+
+    res.json({ success: true, data: matchResult });
+  } catch (err) {
+    console.error('[API] AI 匹配项目失败:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 /**
  * GET /api/executions - 获取执行列表
  */
