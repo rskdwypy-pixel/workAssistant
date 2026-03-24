@@ -1113,6 +1113,94 @@ ${projectsList}
   }
 });
 
+// ==================== Bug 相关接口 ====================
+
+/**
+ * GET /api/bugs - 获取 Bug 列表
+ */
+router.get('/bugs', async (req, res) => {
+  try {
+    const { getBugs } = await import('../services/bugManager.js');
+    const filters = {
+      status: req.query.status,
+      executionId: req.query.executionId
+    };
+    const bugs = await getBugs(filters);
+    res.json({ success: true, data: bugs });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/bug - 创建 Bug
+ */
+router.post('/bug', async (req, res) => {
+  try {
+    const { createBugWithSync } = await import('../services/bugManager.js');
+    const bugData = req.body;
+
+    // 获取项目信息以获取执行ID
+    if (bugData.projectId) {
+      const { getProjectById } = await import('../services/projectManager.js');
+      const project = await getProjectById(bugData.projectId);
+      if (project) {
+        bugData.executionId = project.id;
+        bugData.executionName = project.name;
+      }
+    }
+
+    const bug = await createBugWithSync(bugData);
+    res.json({ success: true, data: bug, message: 'Bug 已创建' });
+  } catch (err) {
+    console.error('[API] 创建 Bug 失败:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * PUT /api/bug/:id - 更新 Bug
+ */
+router.put('/bug/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { updateBugStatus } = await import('../services/bugManager.js');
+    const { status } = req.body;
+
+    const bug = await updateBugStatus(id, status);
+    res.json({ success: true, data: bug, message: 'Bug 已更新' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/bug/:id - 删除 Bug
+ */
+router.delete('/bug/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { deleteBug } = await import('../services/bugManager.js');
+    await deleteBug(id);
+    res.json({ success: true, message: 'Bug 已删除' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/bugs/stats - 获取 Bug 统计
+ */
+router.get('/bugs/stats', async (req, res) => {
+  try {
+    const { getBugStats } = await import('../services/bugManager.js');
+    const stats = await getBugStats();
+    res.json({ success: true, data: stats });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 /**
  * GET /api/executions - 获取执行列表
  */

@@ -156,12 +156,233 @@ function taskStatusToBugStatus(taskStatus) {
   return statusMap[taskStatus] || 'unconfirmed';
 }
 
+/**
+ * 创建禅道 Bug
+ */
+async function createZentaoBug(bugData) {
+  const { config } = await import('../config.js');
+
+  if (!config.zentao.enabled) {
+    throw new Error('禅道未启用');
+  }
+
+  try {
+    // 获取 cookie
+    const { getZentaoCookies, cookiesToString } = await import('./zentaoService.js');
+    const cookies = await getZentaoCookies();
+    const cookieHeader = cookiesToString(cookies);
+
+    // 获取项目的默认产品 ID（如果有）
+    let productId = bugData.productId || '1';
+    let executionId = bugData.executionId || '';
+
+    // 如果提供了 projectId，获取该项目的执行信息
+    if (bugData.projectId) {
+      const { getProjectById } = await import('./projectManager.js');
+      const project = await getProjectById(bugData.projectId);
+      if (project && project.executionId) {
+        executionId = project.executionId;
+      }
+    }
+
+    // 构建 Bug 创建请求
+    const formData = new FormData();
+    formData.append('product', productId);
+    formData.append('branch', '0');
+    formData.append('execution', executionId);
+    formData.append('module', '0');
+    formData.append('title', bugData.title);
+    formData.append('severity', String(bugData.severity || 3));
+    formData.append('type', bugData.type || 'codeerror');
+    formData.append('openedBuild[]', bugData.openedBuild || 'trunk');
+    formData.append('steps', bugData.steps || '');
+    formData.append('os', bugData.os || '');
+    formData.append('browser', bugData.browser || '');
+    formData.append('status', 'active');
+
+    const endpoint = `${config.zentao.url}/zentao/bug-create-${productId}-.json`;
+
+    console.log('[BugManager] 创建禅道 Bug:', bugData.title);
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Cookie': cookieHeader,
+      },
+      body: formData,
+    });
+
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      console.error('[BugManager] HTTP 错误:', response.status, responseText.substring(0, 200));
+      return {
+        success: false,
+        message: `HTTP ${response.status}`
+      };
+    }
+
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (e) {
+      console.error('[BugManager] 响应解析失败:', responseText.substring(0, 200));
+      return {
+        success: false,
+        message: '响应解析失败'
+      };
+    }
+
+    // 检查返回结果
+    if (data.result === 'success' || data.status === 'success') {
+      const bugId = data.id || data.bug?.id || data.data?.id;
+      console.log('[BugManager] Bug 创建成功, ID:', bugId);
+      return {
+        success: true,
+        bugId: bugId,
+        message: 'Bug 已同步到禅道'
+      };
+    }
+
+    // 检查是否是定位到 Bug 列表的成功响应
+    if (data.locate && data.locate.includes('bug-view')) {
+      const match = data.locate.match(/bug-view-(\d+)/);
+      if (match) {
+        const bugId = parseInt(match[1]);
+        console.log('[BugManager] Bug 创建成功, ID:', bugId);
+        return {
+          success: true,
+          bugId: bugId,
+          message: 'Bug 已同步到禅道'
+        };
+      }
+    }
+
+    const errorMessage = data.message || data.error || '未知错误';
+    console.error('[BugManager] 禅道返回错误:', errorMessage);
+    return {
+      success: false,
+      message: errorMessage
+    };
+  } catch (err) {
+    console.error('[BugManager] 创建 Bug 异常:', err.message);
+    return {
+      success: false,
+      message: err.message
+    };
+  }
+}
+
+/**
+ * 更新禅道 Bug 状态
+ */
+async function updateZentaoBugStatus(bugId, status) {
+  const { config } = await import('../config.js');
+
+  if (!config.zentao.enabled) {
+    throw new Error('禅道未启用');
+  }
+
+  try {
+    const { getZentaoCookies, cookiesToString } = await import('./zentaoService.js');
+    const cookies = await getZentaoCookies();
+    const cookieHeader = cookiesToString(cookies);
+
+    // 状态映射到操作
+    const statusActionMap = {
+      'confirmed': 'confirm',
+      'active': 'activate',
+      'activated': 'activate',
+      'resolved': 'resolve',
+      'closed': 'close'
+    };
+
+    const action = statusActionMap[status];
+    if (!action) {
+      return {
+        success: false,
+        message: `不支持的状态: ${status}`
+      };
+    }
+
+    const endpoint = `${config.zentao.url}/zentao/bug-${action}-${bugId}.json`;
+
+    console.log('[BugManager] 更新 Bug 状态:', bugId, '->', status);
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Cookie': cookieHeader,
+      },
+    });
+
+    const data = await response.json();
+
+    if (data.result === 'success' || data.status === 'success') {
+      return {
+        success: true,
+        message: '状态已更新'
+      };
+    }
+
+    return {
+      success: false,
+      message: data.message || '更新失败'
+    };
+  } catch (err) {
+    console.error('[BugManager] 更新 Bug 状态失败:', err.message);
+    return {
+      success: false,
+      message: err.message
+    };
+  }
+}
+
+/**
+ * 创建 Bug（本地+禅道）
+ */
+async function createBugWithSync(bugData) {
+  // 先创建本地 Bug
+  const localBug = await createBug(bugData);
+
+  // 尝试同步到禅道
+  try {
+    const zentaoResult = await createZentaoBug({
+      ...bugData,
+      executionId: localBug.executionId
+    });
+
+    if (zentaoResult.success && zentaoResult.bugId) {
+      // 更新本地 Bug 的 zentaoId
+      const data = await readTasks();
+      const tasks = data.tasks || [];
+      const bug = tasks.find(t => t.id === localBug.id);
+      if (bug) {
+        bug.zentaoId = zentaoResult.bugId;
+        await writeTasks({ tasks });
+      }
+    }
+  } catch (err) {
+    console.error('[BugManager] 同步到禅道失败:', err);
+    // 本地创建成功，但禅道同步失败，不影响本地使用
+  }
+
+  return localBug;
+}
+
 export {
   createBug,
+  createBugWithSync,
   getBugs,
   updateBugStatus,
   deleteBug,
   getBugStats,
   bugToTaskStatus,
-  taskStatusToBugStatus
+  taskStatusToBugStatus,
+  createZentaoBug,
+  updateZentaoBugStatus
 };
