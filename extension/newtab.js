@@ -1773,10 +1773,16 @@ function createTaskCard(task) {
   card.innerHTML = `
     <div class="task-title" style="display: flex; align-items: flex-start; gap: 8px; width:100%;">
       <input type="checkbox" class="task-checkbox" data-task-id="${task.id}" ${task.status === 'done' ? 'checked' : ''} style="margin-top: 4px; cursor: pointer;">
-      <span style="flex:1; cursor: pointer; padding: 2px 4px; border-radius: 4px; transition: background 0.2s;" class="task-title-text" data-task-id="${task.id}" title="点击编辑标题">
-        ${escapeHtml(task.title)}
-        ${task.zentaoId ? `<a href="${getZentaoTaskUrl(task.zentaoId)}" target="_blank" class="zentao-link" style="margin-left: 6px; color: #3b82f6; text-decoration: none; font-size: 12px;">#${task.zentaoId}</a>` : ''}
-      </span>
+      <div style="flex:1;">
+        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+          <span class="task-title-text" data-task-id="${task.id}" title="点击编辑标题"
+            style="cursor: pointer; padding: 2px 4px; border-radius: 4px; transition: background 0.2s;">
+            ${escapeHtml(task.title)}
+          </span>
+          ${task.zentaoId ? `<a href="${getZentaoTaskUrl(task.zentaoId)}" target="_blank" class="zentao-link" style="color: #3b82f6; text-decoration: none; font-size: 12px;">#${task.zentaoId}</a>` : ''}
+        </div>
+        ${task.executionName ? `<span class="execution-tag" style="margin-top: 4px;">${escapeHtml(task.executionName)}</span>` : ''}
+      </div>
       ${priorityHTML}
     </div>
     ${task.status !== 'done' ? `
@@ -4433,4 +4439,170 @@ const ExecutionSelector = {
 // 在页面加载时初始化执行选择器
 document.addEventListener('DOMContentLoaded', () => {
   ExecutionSelector.init();
+});
+
+// ==================== 云标签筛选 ====================
+
+const TagCloud = {
+  isOpen: false,
+  activeExecutionId: null,
+  executionCounts: {},
+
+  /**
+   * 初始化云标签
+   */
+  init() {
+    const toggle = document.getElementById('tagCloudToggle');
+    const refreshBtn = document.getElementById('refreshTagsBtn');
+    const tagCloud = document.getElementById('tagCloud');
+
+    if (!tagCloud) return;
+
+    // 切换按钮事件
+    if (toggle) {
+      toggle.addEventListener('click', () => this.toggle());
+    }
+
+    // 刷新按钮事件
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', () => this.refresh());
+    }
+
+    // 初始化时加载执行列表和计数
+    this.updateExecutionCounts();
+    this.renderTags();
+  },
+
+  /**
+   * 切换云标签显示/隐藏
+   */
+  toggle() {
+    const tagCloud = document.getElementById('tagCloud');
+    if (!tagCloud) return;
+
+    this.isOpen = !this.isOpen;
+    if (this.isOpen) {
+      tagCloud.classList.remove('collapsed');
+    } else {
+      tagCloud.classList.add('collapsed');
+    }
+  },
+
+  /**
+   * 更新执行计数
+   */
+  updateExecutionCounts() {
+    // 获取所有任务并统计每个执行的任务数量
+    const taskCards = document.querySelectorAll('.task-card');
+    this.executionCounts = { all: taskCards.length };
+
+    taskCards.forEach(card => {
+      const taskId = card.dataset.taskId;
+      // 从全局任务列表中获取任务
+      const task = window.allTasks?.find(t => t.id === taskId);
+      if (task && task.executionId) {
+        this.executionCounts[task.executionId] = (this.executionCounts[task.executionId] || 0) + 1;
+      }
+    });
+  },
+
+  /**
+   * 渲染标签列表
+   */
+  async renderTags() {
+    const tagList = document.getElementById('tagList');
+    if (!tagList) return;
+
+    // 获取执行列表
+    const executions = ExecutionSelector.executions;
+
+    let html = '';
+
+    // 添加"全部"选项
+    const allCount = this.executionCounts.all || 0;
+    html += `
+      <div class="tag-item ${!this.activeExecutionId ? 'active' : ''}" data-execution-id="">
+        <span class="tag-item-name">全部任务</span>
+        <span class="tag-item-count">${allCount}</span>
+      </div>
+    `;
+
+    // 添加执行选项
+    for (const exec of executions) {
+      const count = this.executionCounts[exec.id] || 0;
+      html += `
+        <div class="tag-item ${this.activeExecutionId === exec.id ? 'active' : ''}" data-execution-id="${exec.id}">
+          <span class="tag-item-name">${escapeHtml(exec.name)}</span>
+          <span class="tag-item-count">${count}</span>
+        </div>
+      `;
+    }
+
+    tagList.innerHTML = html;
+
+    // 绑定点击事件
+    tagList.querySelectorAll('.tag-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const executionId = item.dataset.executionId;
+        this.filterByExecution(executionId);
+      });
+    });
+  },
+
+  /**
+   * 按执行筛选任务
+   */
+  filterByExecution(executionId) {
+    this.activeExecutionId = executionId || null;
+
+    // 更新标签高亮
+    const tagList = document.getElementById('tagList');
+    if (tagList) {
+      tagList.querySelectorAll('.tag-item').forEach(item => {
+        if (item.dataset.executionId === (executionId || '')) {
+          item.classList.add('active');
+        } else {
+          item.classList.remove('active');
+        }
+      });
+    }
+
+    // 筛选任务卡片
+    const taskCards = document.querySelectorAll('.task-card');
+    taskCards.forEach(card => {
+      const taskId = card.dataset.taskId;
+      const task = window.allTasks?.find(t => t.id === taskId);
+
+      if (!executionId) {
+        // 显示全部
+        card.style.display = '';
+      } else if (task && task.executionId === executionId) {
+        card.style.display = '';
+      } else {
+        card.style.display = 'none';
+      }
+    });
+  },
+
+  /**
+   * 清除筛选
+   */
+  clearFilter() {
+    this.filterByExecution('');
+  },
+
+  /**
+   * 刷新云标签
+   */
+  async refresh() {
+    await ExecutionSelector.refreshExecutions();
+    this.updateExecutionCounts();
+    this.renderTags();
+    Toast.success('标签已刷新');
+  }
+};
+
+// 在页面加载时初始化云标签
+document.addEventListener('DOMContentLoaded', () => {
+  TagCloud.init();
 });
