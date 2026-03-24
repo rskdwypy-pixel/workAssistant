@@ -4839,17 +4839,26 @@ const ProjectFavorites = {
       });
       const projectsData = await projectsResp.json();
 
-      // 解析项目列表
+      console.log('[ProjectFavorites] 禅道响应:', projectsData);
+
+      // 解析项目列表 - 禅道返回的数据结构是 { status: 'success', data: JSON字符串 }
       let projects = [];
-      if (projectsData.data && typeof projectsData.data === 'string') {
-        // 尝试解析嵌套的 JSON
+      if (projectsData.status === 'success' && projectsData.data) {
+        // data 是一个 JSON 字符串，需要再次解析
         try {
           const nestedData = JSON.parse(projectsData.data);
-          if (nestedData.projects) {
+          // 从嵌套数据中提取项目列表
+          if (nestedData.projectStats && typeof nestedData.projectStats === 'object') {
+            // projectStats 是一个对象，key 是项目ID
+            projects = Object.values(nestedData.projectStats);
+          } else if (nestedData.projects) {
             projects = nestedData.projects;
+          } else if (Array.isArray(nestedData)) {
+            projects = nestedData;
           }
         } catch (e) {
           console.error('[ProjectFavorites] 解析项目数据失败:', e);
+          console.error('[ProjectFavorites] 原始数据:', projectsData.data);
         }
       } else if (projectsData.projects) {
         projects = projectsData.projects;
