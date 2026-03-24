@@ -5298,4 +5298,13 @@ const BugManager = {
 // 在页面加载时初始化 Bug 管理器
 document.addEventListener('DOMContentLoaded', () => {
   BugManager.init();
+  ProjectFavorites.init();
+  TabSwitcher.init();
 });
+
+// 如果 DOM 已经加载完成，立即初始化
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  BugManager.init();
+  ProjectFavorites.init();
+  TabSwitcher.init();
+}
