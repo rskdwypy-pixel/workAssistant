@@ -4606,3 +4606,116 @@ const TagCloud = {
 document.addEventListener('DOMContentLoaded', () => {
   TagCloud.init();
 });
+
+// ==================== Bug 模式切换 ====================
+
+const BugMode = {
+  isBugMode: false,
+
+  // 任务模式标题
+  taskModeTitles: {
+    todo: '🔴 待办',
+    inProgress: '🟢 进行中',
+    done: '⚪ 已完成'
+  },
+
+  // Bug 模式标题
+  bugModeTitles: {
+    todo: '🟡 未确认',
+    inProgress: '🔵 激活',
+    done: '⚪ 已关闭'
+  },
+
+  /**
+   * 初始化 Bug 模式
+   */
+  init() {
+    const flipBtn = document.getElementById('flipModeBtn');
+    if (!flipBtn) return;
+
+    flipBtn.addEventListener('click', () => this.toggle());
+
+    // 检查保存的模式
+    const savedMode = localStorage.getItem('bugMode');
+    if (savedMode === 'true') {
+      this.enable();
+    }
+  },
+
+  /**
+   * 切换模式
+   */
+  toggle() {
+    if (this.isBugMode) {
+      this.disable();
+    } else {
+      this.enable();
+    }
+  },
+
+  /**
+   * 启用 Bug 模式
+   */
+  enable() {
+    this.isBugMode = true;
+    document.body.classList.add('bug-mode');
+    const flipBtn = document.getElementById('flipModeBtn');
+    if (flipBtn) {
+      flipBtn.classList.add('bug-mode');
+      flipBtn.innerHTML = '📋';
+      flipBtn.title = '切换到任务模式';
+    }
+    this.updateUI();
+    localStorage.setItem('bugMode', 'true');
+    Toast.info('已切换到 Bug 模式');
+  },
+
+  /**
+   * 禁用 Bug 模式
+   */
+  disable() {
+    this.isBugMode = false;
+    document.body.classList.remove('bug-mode');
+    const flipBtn = document.getElementById('flipModeBtn');
+    if (flipBtn) {
+      flipBtn.classList.remove('bug-mode');
+      flipBtn.innerHTML = '🐛';
+      flipBtn.title = '切换到Bug模式';
+    }
+    this.updateUI();
+    localStorage.setItem('bugMode', 'false');
+    Toast.info('已切换到任务模式');
+  },
+
+  /**
+   * 更新 UI
+   */
+  updateUI() {
+    // 更新列标题
+    const titles = this.isBugMode ? this.bugModeTitles : this.taskModeTitles;
+
+    // 查找并更新列标题
+    const columnHeaders = document.querySelectorAll('.column-header h3');
+    if (columnHeaders.length >= 3) {
+      columnHeaders[0].textContent = titles.todo;
+      columnHeaders[1].textContent = titles.inProgress;
+      columnHeaders[2].textContent = titles.done;
+    }
+
+    // 更新任务看板标题
+    const boardTitle = document.getElementById('taskBoardTitle');
+    if (boardTitle) {
+      boardTitle.textContent = this.isBugMode ? '📋 今日 Bug' : '📋 今日任务';
+    }
+
+    // 重新加载任务列表（如果需要）
+    if (typeof loadTasks === 'function') {
+      loadTasks();
+    }
+  }
+};
+
+// 在页面加载时初始化 Bug 模式
+document.addEventListener('DOMContentLoaded', () => {
+  BugMode.init();
+});
