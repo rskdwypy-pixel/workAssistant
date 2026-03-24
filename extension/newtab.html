@@ -187,8 +187,16 @@
 
     <!-- 主内容区 -->
     <main class="main-content">
-      <!-- 任务看板 -->
-      <section class="task-board">
+      <!-- Tab 切换 -->
+      <div class="mode-tabs">
+        <button class="tab-btn active" data-mode="task">📋 任务</button>
+        <button class="tab-btn" data-mode="bug">🐛 Bug</button>
+      </div>
+
+      <!-- 任务模式 -->
+      <div class="mode-content active" id="taskMode">
+        <!-- 任务看板 -->
+        <section class="task-board">
         <div class="task-board-header">
           <div class="task-board-left">
             <h2 id="taskBoardTitle">📋 今日任务</h2>
@@ -252,8 +260,147 @@
           </div>
         </div>
       </section>
+      </div>
+
+      <!-- Bug 模式 -->
+      <div class="mode-content" id="bugMode">
+        <!-- Bug 看板 -->
+        <section class="task-board">
+          <div class="task-board-header">
+            <div class="task-board-left">
+              <h2 id="bugBoardTitle">🐛 今日 Bug</h2>
+              <div class="task-board-stats">
+                <div class="stat-item">
+                  <span class="stat-label">未确认</span>
+                  <span class="stat-value" id="bugUnconfirmedCount">0</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">激活</span>
+                  <span class="stat-value" id="bugActivatedCount">0</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">已关闭</span>
+                  <span class="stat-value" id="bugClosedCount">0</span>
+                </div>
+              </div>
+            </div>
+            <div class="task-board-center">
+              <input type="text" id="bugSearchInput" placeholder="搜索 Bug..." class="header-search">
+            </div>
+            <div class="task-board-right">
+              <button id="addBugBtn" class="header-btn">➕ 添加 Bug</button>
+              <button id="settingsBtn" class="header-btn">⚙️ 设置</button>
+            </div>
+          </div>
+
+          <div class="task-columns">
+            <!-- 未确认列 -->
+            <div class="task-column">
+              <div class="column-header">
+                <h3>🟡 未确认</h3>
+                <span class="column-count" id="bugUnconfirmedListCount">0</span>
+              </div>
+              <div class="task-list" id="bugUnconfirmedList">
+                <!-- Bug 卡片将由JS动态生成 -->
+              </div>
+            </div>
+
+            <!-- 激活列 -->
+            <div class="task-column">
+              <div class="column-header">
+                <h3>🔵 激活</h3>
+                <span class="column-count" id="bugActivatedListCount">0</span>
+              </div>
+              <div class="task-list" id="bugActivatedList">
+                <!-- Bug 卡片将由JS动态生成 -->
+              </div>
+            </div>
+
+            <!-- 已关闭列 -->
+            <div class="task-column">
+              <div class="column-header">
+                <h3>⚪ 已关闭</h3>
+                <span class="column-count" id="bugClosedListCount">0</span>
+              </div>
+              <div class="task-list" id="bugClosedList">
+                <!-- Bug 卡片将由JS动态生成 -->
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
     </main>
   </div>
+
+  <!-- Bug 创建弹窗 -->
+  <div id="bugModal" class="modal">
+    <div class="modal-content" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3>🐛 添加 Bug</h3>
+        <button class="close-btn" id="closeBugModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">所属项目 *</label>
+          <select id="bugProject" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+            <option value="">请选择项目</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">Bug 标题 *</label>
+          <input type="text" id="bugTitle" class="form-control" placeholder="简要描述 Bug" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+        </div>
+        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="flex: 1;">
+            <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">严重程度</label>
+            <select id="bugSeverity" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+              <option value="1">1 - 致命</option>
+              <option value="2">2 - 严重</option>
+              <option value="3" selected>3 - 一般</option>
+              <option value="4">4 - 提示</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">Bug 类型</label>
+            <select id="bugType" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+              <option value="codeerror" selected>代码错误</option>
+              <option value="config">配置相关</option>
+              <option value="install">安装部署</option>
+              <option value="security">安全相关</option>
+              <option value="performance">性能问题</option>
+              <option value="standard">标准规范</option>
+              <option value="automation">测试脚本</option>
+              <option value="designdefect">设计缺陷</option>
+              <option value="others">其他</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">重现步骤 *</label>
+          <textarea id="bugSteps" rows="6" class="form-control" placeholder="[步骤]&#10;1. ...&#10;&#10;[结果]&#10;...&#10;&#10;[期望]&#10;..." style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical;"></textarea>
+        </div>
+        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="flex: 1;">
+            <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">影响版本</label>
+            <input type="text" id="bugOpenedBuild" value="trunk" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">操作系统</label>
+            <input type="text" id="bugOs" class="form-control" placeholder="如: Windows 10" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">浏览器</label>
+            <input type="text" id="bugBrowser" class="form-control" placeholder="如: Chrome 120" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+          </div>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span id="bugDraftSaved" style="font-size: 12px; color: var(--text-muted); display: none;">草稿已自动保存</span>
+          <button id="submitBugBtn" class="btn-primary">提交 Bug</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
 
   <!-- 任务详情弹窗 -->
   <div id="taskModal" class="modal">
@@ -424,6 +571,18 @@
             <button id="testZentao" class="btn-secondary">🧪 测试连接</button>
           </div>
           <span id="zentaoTestResult" class="test-result"></span>
+        </div>
+
+        <!-- 项目收藏配置 -->
+        <div class="settings-section">
+          <h4>⭐ 常用项目（AI 将优先匹配这些项目）</h4>
+          <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+            <button id="syncProjectsBtn" class="btn-secondary">🔄 从禅道同步项目</button>
+            <span id="syncProjectsResult" class="test-result"></span>
+          </div>
+          <div id="projectFavoritesList" class="project-favorites-list">
+            <p class="hint">点击「从禅道同步项目」加载项目列表</p>
+          </div>
         </div>
 
 
