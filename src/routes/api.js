@@ -950,6 +950,50 @@ function cookiesToString(cookies) {
 }
 
 /**
+ * GET /api/executions - 获取执行列表
+ */
+router.get('/executions', async (req, res) => {
+  try {
+    const { getExecutions } = await import('../services/executionManager.js');
+    const executions = await getExecutions();
+    res.json({ success: true, data: executions });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/executions/sync - 从禅道同步执行列表
+ */
+router.post('/executions/sync', async (req, res) => {
+  try {
+    const { syncExecutionsFromZentao } = await import('../services/executionManager.js');
+    const executions = await syncExecutionsFromZentao();
+    res.json({ success: true, data: executions, message: '执行列表已同步' });
+  } catch (err) {
+    console.error('[API] 同步执行列表失败:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/executions/default - 设置默认执行
+ */
+router.post('/executions/default', async (req, res) => {
+  try {
+    const { executionId } = req.body;
+    if (!executionId) {
+      return res.status(400).json({ success: false, error: '缺少执行ID' });
+    }
+    const { setDefaultExecution } = await import('../services/executionManager.js');
+    await setDefaultExecution(executionId);
+    res.json({ success: true, message: '默认执行已设置' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
  * POST /api/zentao/task/create - 代理创建禅道任务
  */
 router.post('/zentao/task/create', async (req, res) => {

@@ -371,6 +371,96 @@ function clearCookies() {
 }
 
 /**
+ * 获取所有执行列表
+ * @returns {Promise<Array>} 执行列表
+ */
+async function getExecutions() {
+  try {
+    const cookies = await getZentaoCookies();
+
+    // 获取所有执行列表
+    const endpoint = `${config.zentao.url}/zentao/project-execution-all------1-100-1.json`;
+
+    console.log('[ZentaoService] 获取执行列表');
+
+    const resp = await fetch(endpoint, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Cookie': cookiesToString(cookies),
+      },
+    });
+
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+
+    const data = await resp.json();
+
+    // 禅道返回的数据结构可能是 data.executions 或直接是 executions
+    let executions = data?.data?.executions || data?.executions || [];
+
+    // 格式化执行列表
+    return executions.map(ex => ({
+      id: String(ex.id),
+      name: ex.name || ex.title || `执行 ${ex.id}`,
+      projectId: ex.project || ex.projectId,
+      projectName: ex.projectName || '',
+      status: ex.status || 'doing',
+      begin: ex.begin || '',
+      end: ex.end || ''
+    }));
+  } catch (err) {
+    console.error('[ZentaoService] 获取执行列表失败:', err.message);
+    return [];
+  }
+}
+
+/**
+ * 根据项目ID获取执行列表
+ * @param {number} projectId - 项目ID
+ * @returns {Promise<Array>} 执行列表
+ */
+async function getExecutionsByProject(projectId) {
+  try {
+    const cookies = await getZentaoCookies();
+
+    const endpoint = `${config.zentao.url}/zentao/project-ajaxGetExecutions-${projectId}----.json`;
+
+    console.log('[ZentaoService] 获取项目执行列表:', projectId);
+
+    const resp = await fetch(endpoint, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Cookie': cookiesToString(cookies),
+      },
+    });
+
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+
+    const data = await resp.json();
+    let executions = data?.data || [];
+
+    return executions.map(ex => ({
+      id: String(ex.id),
+      name: ex.name || ex.title || `执行 ${ex.id}`,
+      projectId: String(projectId),
+      status: ex.status || 'doing',
+      begin: ex.begin || '',
+      end: ex.end || ''
+    }));
+  } catch (err) {
+    console.error('[ZentaoService] 获取项目执行列表失败:', err.message);
+    return [];
+  }
+}
+
+/**
  * 检查禅道是否已配置
  * @returns {boolean}
  */
@@ -388,6 +478,8 @@ export {
   createTask,
   getTasks,
   updateTaskStatus,
+  getExecutions,
+  getExecutionsByProject,
   clearCookies,
   isConfigured
 };
