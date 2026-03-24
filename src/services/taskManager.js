@@ -272,10 +272,17 @@ async function updateTaskStatus(taskId, status) {
     throw new Error('任务不存在');
   }
 
+  const oldStatus = task.status;
   task.status = status;
   task.updatedAt = new Date().toISOString();
 
   await writeTasks(data);
+
+  // 同步到禅道
+  if (task.zentaoId && status !== oldStatus) {
+    await syncTaskToZentao(task, { status });
+  }
+
   return task;
 }
 
@@ -336,7 +343,45 @@ async function updateTask(taskId, updates) {
   });
 
   await writeTasks(data);
+
+  // 同步到禅道
+  await syncTaskToZentao(task, updates);
+
   return task;
+}
+
+/**
+ * 同步任务到禅道
+ */
+async function syncTaskToZentao(task, updates) {
+  if (!task.zentaoId) {
+    return; // 没有关联禅道任务，跳过同步
+  }
+
+  try {
+    const { updateTaskStatus: updateZentaoStatus } = await import('./zentaoService.js');
+
+    // 同步状态变化
+    if (updates.status && updates.status !== task.status) {
+      const statusMap = {
+        'todo': 'wait',
+        'in_progress': 'doing',
+        'done': 'done'
+      };
+      const zentaoStatus = statusMap[updates.status];
+      if (zentaoStatus) {
+        await updateZentaoStatus(task.zentaoId, zentaoStatus);
+        console.log('[TaskManager] 状态已同步到禅道:', task.zentaoId, '->', zentaoStatus);
+      }
+    }
+
+    // 同步进度变化（禅道不直接支持进度，通过工时记录）
+    // TODO: 实现工时记录同步
+
+  } catch (err) {
+    console.error('[TaskManager] 同步到禅道失败:', err);
+    // 同步失败不影响本地更新
+  }
 }
 
 /**
