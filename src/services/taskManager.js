@@ -201,6 +201,14 @@ async function addOrUpdateTask(content, options = {}) {
   if (parsedProgress > 0 && parsedProgress < 100) parsedStatus = 'in_progress';
   if (parsedProgress === 100) parsedStatus = 'done';
 
+  // 获取执行信息
+  let executionName = null;
+  if (options.executionId) {
+    const { getExecutionById } = await import('./executionManager.js');
+    const execution = await getExecutionById(options.executionId);
+    executionName = execution?.name || `执行 ${options.executionId}`;
+  }
+
   const newTask = {
     title: analysis.data.title || content.slice(0, 20),
     status: parsedStatus,
@@ -209,7 +217,9 @@ async function addOrUpdateTask(content, options = {}) {
     reminderTime: analysis.data.reminderTime || null,
     reminder3hTriggered: analysis.data.reminderTime ? (new Date(analysis.data.reminderTime).getTime() - Date.now() <= 3 * 3600000) : false,
     reminderExactTriggered: false,
-    progress: parsedProgress
+    progress: parsedProgress,
+    executionId: options.executionId || null,
+    executionName: executionName
   };
 
   // 查找相似任务
@@ -224,6 +234,8 @@ async function addOrUpdateTask(content, options = {}) {
       reminderTime: newTask.reminderTime || similarTask.reminderTime,
       zentaoId: options.zentaoId || similarTask.zentaoId,  // 优先使用传入的，否则保留原值
       zentaoExecution: options.zentaoExecution || similarTask.zentaoExecution,  // 优先使用传入的，否则保留原值
+      executionId: options.executionId || similarTask.executionId,
+      executionName: executionName || similarTask.executionName,
       updatedAt: new Date().toISOString()
     });
 
@@ -237,7 +249,7 @@ async function addOrUpdateTask(content, options = {}) {
     content: content,
     ...newTask,
     zentaoId: options.zentaoId || null,        // 支持传入浏览器端已创建的 zentaoId
-    zentaoExecution: options.zentaoExecution || null,  // 禅道执行 ID
+    zentaoExecution: options.zentaoExecution || options.executionId || null,  // 禅道执行 ID，兼容旧字段
     totalConsumedTime: 0,  // 累计消耗工时（用于计算剩余工时）
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()

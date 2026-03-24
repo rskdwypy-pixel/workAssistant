@@ -2034,12 +2034,16 @@ async function addTask() {
   let browserZentaoId = null;
 
   try {
+    // 获取选择的执行ID
+    const selectedExecutionId = ExecutionSelector.getSelectedExecution();
+
     // 第一步：调用服务端 API 获取 AI 提取的任务数据
     const response = await fetch(`${API_BASE_URL}/api/task`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        content
+        content,
+        executionId: selectedExecutionId
       })
     });
 
@@ -4269,3 +4273,164 @@ const ZentaoBrowserClient = {
     }
   }
 };
+
+// ==================== 执行选择器管理 ====================
+
+const ExecutionSelector = {
+  executions: [],
+  currentExecutionId: null,
+
+  /**
+   * 初始化执行选择器
+   */
+  async init() {
+    const selectorWrapper = document.getElementById('executionSelectorWrapper');
+    const refreshBtn = document.getElementById('refreshExecutionsBtn');
+    const select = document.getElementById('executionSelect');
+
+    if (!selectorWrapper) return;
+
+    // 刷新按钮事件
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', () => this.refreshExecutions());
+    }
+
+    // 加载执行列表
+    await this.loadExecutions();
+
+    // 检查禅道是否已配置，如果已配置则显示选择器
+    const config = await this.getZentaoConfig();
+    if (config && config.enabled) {
+      selectorWrapper.style.display = 'block';
+    }
+  },
+
+  /**
+   * 从后端获取禅道配置
+   */
+  async getZentaoConfig() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/zentao/config`);
+      const result = await response.json();
+      return result.success ? result.data : null;
+    } catch (err) {
+      console.error('[ExecutionSelector] 获取禅道配置失败:', err);
+      return null;
+    }
+  },
+
+  /**
+   * 加载执行列表
+   */
+  async loadExecutions() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/executions`);
+      const result = await response.json();
+
+      if (result.success && result.data) {
+        this.executions = result.data;
+        this.populateSelect();
+      }
+    } catch (err) {
+      console.error('[ExecutionSelector] 加载执行列表失败:', err);
+    }
+  },
+
+  /**
+   * 从禅道同步执行列表
+   */
+  async refreshExecutions() {
+    const refreshBtn = document.getElementById('refreshExecutionsBtn');
+    const select = document.getElementById('executionSelect');
+    const aiIndicator = document.getElementById('aiIndicator');
+
+    try {
+      // 显示加载状态
+      if (refreshBtn) {
+        refreshBtn.disabled = true;
+        refreshBtn.style.opacity = '0.5';
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/executions/sync`, {
+        method: 'POST'
+      });
+      const result = await response.json();
+
+      if (result.success && result.data) {
+        this.executions = result.data;
+        this.populateSelect();
+        Toast.success(`已同步 ${result.data.length} 个执行`);
+      } else {
+        Toast.error('同步失败: ' + (result.error || '未知错误'));
+      }
+    } catch (err) {
+      console.error('[ExecutionSelector] 同步执行列表失败:', err);
+      Toast.error('同步失败: ' + err.message);
+    } finally {
+      if (refreshBtn) {
+        refreshBtn.disabled = false;
+        refreshBtn.style.opacity = '1';
+      }
+    }
+  },
+
+  /**
+   * 填充执行选择器
+   */
+  populateSelect() {
+    const select = document.getElementById('executionSelect');
+    if (!select) return;
+
+    // 保存当前选择
+    const currentValue = select.value;
+
+    // 清空选项
+    select.innerHTML = '';
+
+    // 添加"自动选择"选项
+    const autoOption = document.createElement('option');
+    autoOption.value = '';
+    autoOption.textContent = '自动选择 (AI分析)';
+    select.appendChild(autoOption);
+
+    // 添加执行选项
+    this.executions.forEach(exec => {
+      const option = document.createElement('option');
+      option.value = exec.id;
+      option.textContent = exec.name || `执行 ${exec.id}`;
+      if (exec.isDefault) {
+        option.textContent += ' (默认)';
+      }
+      select.appendChild(option);
+    });
+
+    // 恢复选择
+    if (currentValue) {
+      select.value = currentValue;
+    }
+  },
+
+  /**
+   * 获取当前选择的执行ID
+   */
+  getSelectedExecution() {
+    const select = document.getElementById('executionSelect');
+    if (!select) return null;
+    return select.value || null;
+  },
+
+  /**
+   * 设置执行ID
+   */
+  setExecution(executionId) {
+    const select = document.getElementById('executionSelect');
+    if (select && executionId) {
+      select.value = executionId;
+    }
+  }
+};
+
+// 在页面加载时初始化执行选择器
+document.addEventListener('DOMContentLoaded', () => {
+  ExecutionSelector.init();
+});
