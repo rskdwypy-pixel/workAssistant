@@ -2042,6 +2042,19 @@ async function addTask() {
   try {
     // 获取选择的执行ID
     const selectedExecutionId = ExecutionSelector.getSelectedExecution();
+    console.log('[AddTask] ========== 开始添加任务 ==========');
+    console.log('[AddTask] 任务内容:', content);
+    console.log('[AddTask] 用户选择的执行ID:', selectedExecutionId, selectedExecutionId ? '(手动选择)' : '(AI自动选择)');
+
+    // 如果是 AI 自动选择，显示可用的收藏执行列表
+    if (!selectedExecutionId) {
+      console.log('[AddTask] --- AI 推断项目过程 ---');
+      console.log('[AddTask] 可用的收藏执行列表:');
+      ExecutionSelector.favoriteExecutions.forEach((exec, index) => {
+        console.log(`[AddTask]   ${index + 1}. ID: ${exec.id} | ${exec.name} | 项目: ${exec.projectName || '未设置'}`);
+      });
+      console.log('[AddTask] --------------------------');
+    }
 
     // 第一步：调用服务端 API 获取 AI 提取的任务数据
     const response = await fetch(`${API_BASE_URL}/api/task`, {
@@ -2058,24 +2071,69 @@ async function addTask() {
     if (result.success) {
       // AI 提取的任务标题
       const aiTitle = result.data?.title || result.data?.content || content;
-      console.log('[AddTask] AI 提取的标题:', aiTitle);
+      console.log('[AddTask] ✓ AI 提取的标题:', aiTitle);
 
-      // 第二步：尝试在浏览器端创建禅道任务（使用 AI 提取的标题）
+      // 打印 AI 推断结果
+      const aiExecutionId = result.data?.executionId;
+      const aiExecutionName = result.data?.executionName;
+
+      // 获取执行类型（判断是否为看板）
+      let executionType = null;
+      if (aiExecutionId) {
+        executionType = ExecutionFavorites.getExecutionType(aiExecutionId);
+        console.log('[AddTask] 执行类型:', aiExecutionId, '=>', executionType);
+      }
+
+      if (!selectedExecutionId) {
+        // AI 自动选择模式
+        if (aiExecutionId) {
+          console.log('[AddTask] ✓✓✓ AI 推断成功 ✓✓✓');
+          console.log('[AddTask] 推断的执行ID:', aiExecutionId);
+          console.log('[AddTask] 推断的执行名称:', aiExecutionName || '未知');
+        } else {
+          console.log('[AddTask] ✗✗✗ AI 推断失败 ✗✗✗');
+          console.log('[AddTask] 原因: 无法从任务内容推断出所属项目');
+          console.log('[AddTask] 解决: 将使用默认执行');
+        }
+      }
+
+      // 详细打印后端返回的数据，便于调试
+      console.log('[AddTask] 后端返回的完整数据:', {
+        id: result.data?.id,
+        title: result.data?.title,
+        executionId: result.data?.executionId,
+        executionName: result.data?.executionName,
+        zentaoExecution: result.data?.zentaoExecution
+      });
+
+      // 第二步：尝试在浏览器端创建禅道任务（使用 AI 提取的标题和执行 ID）
       try {
         await ZentaoBrowserClient.initConfig();
         if (ZentaoBrowserClient.isConfigured()) {
           console.log('[AddTask] 尝试使用浏览器端创建禅道任务...');
+          console.log('[AddTask] AI 分析的执行 ID:', aiExecutionId, '类型:', typeof aiExecutionId);
+
           const zentaoResult = await ZentaoBrowserClient.createTask({
             title: aiTitle,
             content: content,
-            dueDate: null
+            dueDate: null,
+            executionId: aiExecutionId,  // 传入 AI 分析的执行 ID
+            executionType: executionType  // 传入执行类型
           });
 
-          if (zentaoResult.success && zentaoResult.taskId) {
-            browserZentaoId = zentaoResult.taskId;
-            console.log('[AddTask] 浏览器端创建禅道任务成功:', browserZentaoId);
+          console.log('[AddTask] 禅道创建结果:', zentaoResult);
+
+          // 看板返回 cardId，普通任务返回 taskId
+          const zentaoObjectId = zentaoResult.taskId || zentaoResult.cardId;
+          if (zentaoResult.success && zentaoObjectId) {
+            browserZentaoId = zentaoObjectId;
+            console.log('[AddTask] 浏览器端创建成功:', executionType === 'kanban' ? '看板卡片' : '禅道任务', 'ID:', browserZentaoId);
+          } else if (zentaoResult.success && !zentaoObjectId) {
+            console.log('[AddTask] 创建成功但没有返回ID， responseData:', zentaoResult.responseData);
+            // 对于看板，可能创建成功但没有返回ID，可以跳过关联
+            console.log('[AddTask] 跳过禅道ID关联（看板卡片可能不返回ID）');
           } else {
-            console.log('[AddTask] 浏览器端创建禅道任务失败:', zentaoResult.reason);
+            console.log('[AddTask] 浏览器端创建失败:', zentaoResult.reason);
           }
         }
       } catch (err) {
@@ -2084,20 +2142,22 @@ async function addTask() {
 
       // 更新任务的 zentaoId（如果禅道端创建成功）
       if (browserZentaoId) {
-        // 获取 executionId 用于后续编辑操作
-        const executionId = ZentaoBrowserClient.config.createTaskUrl || '';
+        // 使用 AI 分析后的执行 ID，如果没有则使用全局配置
+        const executionId = aiExecutionId || ZentaoBrowserClient.config.createTaskUrl || '';
+        console.log('[AddTask] 使用的执行 ID:', executionId);
 
-        // 使用通用更新接口更新 zentaoId 和 zentaoExecution
+        // 使用通用更新接口更新 zentaoId、zentaoExecution 和 executionType
         const updateResp = await fetch(`${API_BASE_URL}/api/task/${result.data.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             zentaoId: browserZentaoId,
-            zentaoExecution: executionId
+            zentaoExecution: executionId,
+            executionType: executionType  // 存储执行类型，避免后续更新时需要再次查找
           })
         });
         if (updateResp.ok) {
-          console.log('[AddTask] zentaoId 和 zentaoExecution 已保存到任务:', browserZentaoId, executionId);
+          console.log('[AddTask] zentaoId、zentaoExecution 和 executionType 已保存到任务:', browserZentaoId, executionId, executionType);
         } else {
           console.warn('[AddTask] 保存 zentaoId 失败:', updateResp.status);
         }
@@ -2107,6 +2167,19 @@ async function addTask() {
       const taskProgress = result.data?.progress || 0;
       if (browserZentaoId && taskProgress > 0) {
         console.log('[AddTask] 任务有初始进度，准备同步到禅道:', taskProgress + '%');
+
+        // 获取执行ID和看板ID
+        const executionId = result.data?.executionId || ZentaoBrowserClient.config.createTaskUrl || '';
+        let kanbanId = null;
+        let executionType = null;
+        if (executionId) {
+          const execution = ExecutionSelector.executions.find(e => e.id === executionId) ||
+                            ExecutionSelector.favoriteExecutions.find(e => e.id === executionId);
+          if (execution) {
+            kanbanId = execution.kanbanId || execution.id;
+            executionType = execution.type;
+          }
+        }
 
         // 准备默认值（当用户两个都没填时使用）
         const defaultWork = taskProgress === 100 ? '任务完成' : `初始进度 ${taskProgress}%`;
@@ -2144,12 +2217,15 @@ async function addTask() {
           else if (taskProgress === 100) status = 'done';
 
           try {
-            await ZentaoBrowserClient.updateTaskStatus(browserZentaoId, status, taskProgress);
+            await ZentaoBrowserClient.updateTaskStatus(browserZentaoId, status, taskProgress, {
+              executionType,
+              kanbanId
+            });
             console.log('[AddTask] 禅道任务状态已更新为:', status);
 
             // 记录工时到禅道
             if (consumedTime > 0 || progressComment) {
-              const effortResult = await ZentaoBrowserClient.recordEffort(browserZentaoId, progressComment, consumedTime, leftTime);
+              const effortResult = await ZentaoBrowserClient.recordEffort(browserZentaoId, progressComment, consumedTime, leftTime, kanbanId, taskProgress);
               if (effortResult.success) {
                 console.log('[AddTask] 禅道工时已记录');
 
@@ -2247,7 +2323,28 @@ async function updateTaskProgress(taskId, progress) {
         if (progress > 0 && progress < 100) status = 'in_progress';
         else if (progress === 100) status = 'done';
 
-        const zentaoResult = await ZentaoBrowserClient.updateTaskStatus(task.zentaoId, status, progress);
+        // 获取执行类型（判断是否为看板）
+        // 优先使用任务中已存储的 executionType，如果没有则查找
+        let executionType = task.executionType;
+        let kanbanId = null;
+
+        if (!executionType && task.executionId) {
+          // 从 ExecutionFavorites 获取执行类型
+          executionType = ExecutionFavorites.getExecutionType(task.executionId);
+          console.log('[Progress] 从缓存获取执行类型:', task.executionId, '=>', executionType);
+        }
+
+        // 对于看板类型，kanbanId 就是 executionId
+        if (executionType === 'kanban') {
+          kanbanId = task.executionId;
+        }
+
+        console.log('[Progress] 执行类型:', executionType, '看板ID:', kanbanId);
+
+        const zentaoResult = await ZentaoBrowserClient.updateTaskStatus(task.zentaoId, status, progress, {
+          executionType,
+          kanbanId
+        });
         if (zentaoResult.success) {
           console.log('[Progress] 浏览器端更新禅道状态成功');
         } else {
@@ -2274,8 +2371,9 @@ async function updateTaskProgress(taskId, progress) {
             leftTime = totalConsumedTime * 2;
           }
           console.log(`[Progress] 累计消耗: ${previousTotalConsumed}h + ${consumedTime}h = ${totalConsumedTime}h, 进度=${progress}%, 计算剩余=${leftTime}h`);
+          console.log('[Progress] 调用 recordEffort，参数:', { zentaoId: task.zentaoId, kanbanId, comment: progressComment });
 
-          const effortResult = await ZentaoBrowserClient.recordEffort(task.zentaoId, progressComment, consumedTime, leftTime);
+          const effortResult = await ZentaoBrowserClient.recordEffort(task.zentaoId, progressComment, consumedTime, leftTime, kanbanId, progress);
           if (effortResult.success) {
             console.log('[Progress] 浏览器端记录禅道工时成功');
             // 更新本地任务的累计消耗工时
@@ -3939,6 +4037,9 @@ const ZentaoBrowserClient = {
 
   /**
    * 创建任务
+   * @param {Object} taskData - 任务数据
+   * @param {string} [taskData.executionId] - 可选的执行 ID，如果不传则使用全局配置
+   * @param {string} [taskData.executionType] - 执行类型 (kanban/sprint/stage)，可选
    */
   async createTask(taskData) {
     await this.initConfig();
@@ -3948,16 +4049,99 @@ const ZentaoBrowserClient = {
       return { success: false, reason: 'not_configured' };
     }
 
-    // createTaskUrl 现在直接存储 execution ID（如 167）
-    const executionId = this.config.createTaskUrl || '';
+    // 优先使用传入的执行 ID，否则使用全局配置
+    const executionId = taskData.executionId || this.config.createTaskUrl || '';
+    console.log('[ZentaoBrowser] 创建任务使用的执行 ID:', {
+      fromTaskData: taskData.executionId,
+      fromConfig: this.config.createTaskUrl,
+      final: executionId
+    });
     if (!executionId || executionId === '0') {
       console.warn('[ZentaoBrowser] 未配置 execution ID:', executionId);
       return { success: false, reason: 'invalid_execution_id' };
     }
+
+    // 检查执行类型，如果是看板则使用看板API
+    let executionType = taskData.executionType;
+
+    // 如果 taskData 中没有执行类型，尝试从缓存的执行列表中获取
+    if (!executionType) {
+      executionType = ExecutionFavorites.getExecutionType(executionId);
+      console.log('[ZentaoBrowser] 从缓存获取执行类型:', executionId, '=>', executionType);
+    }
+
+    let useKanbanAPI = executionType === 'kanban';
+
+    // 自动检测执行类型：如果本地类型不是看板，尝试获取看板视图来判断
+    // 这样可以解决本地数据中 type 字段不准确的问题
+    if (!useKanbanAPI) {
+      console.log('[ZentaoBrowser] 本地类型不是看板(', executionType, ')，尝试自动检测...');
+      const quickCheck = await this.quickCheckKanban(executionId);
+      if (quickCheck.isKanban) {
+        console.log('[ZentaoBrowser] ✓ 检测到看板类型，使用看板API');
+        useKanbanAPI = true;
+      } else {
+        console.log('[ZentaoBrowser] × 不是看板类型，使用普通任务API，原因:', quickCheck.reason);
+      }
+    }
+
+    // 如果是看板类型，尝试获取看板视图信息
+    if (useKanbanAPI) {
+      console.log('[ZentaoBrowser] 使用看板API创建卡片');
+
+      // 看板需要额外的参数：regionId, groupId, columnId
+      // 这些必须是数字ID，需要先从看板视图中获取
+      let regionId = taskData.regionId;
+      let groupId = taskData.groupId;
+      let columnId = taskData.columnId;
+
+      // 如果没有提供这些参数，先获取看板视图来获取正确的参数
+      if (!regionId || !groupId || !columnId || columnId === 'backlog') {
+        console.log('[ZentaoBrowser] 看板参数不完整，从看板页面HTML解析...');
+
+        // 使用HTML解析方式获取看板参数
+        const htmlParams = await this.getKanbanParamsFromHtml(executionId, 'task', 'wait');
+
+        if (htmlParams) {
+          regionId = htmlParams.regionId;
+          groupId = htmlParams.laneId;   // laneId 对应 groupId
+          columnId = htmlParams.columnId;
+          console.log('[ZentaoBrowser] 从HTML解析成功获取到参数:', { regionId, groupId, columnId });
+        } else {
+          console.warn('[ZentaoBrowser] HTML解析失败，使用默认值');
+          regionId = regionId || '20';
+          groupId = groupId || '117';
+          columnId = columnId || '1047';
+        }
+      }
+
+      console.log('[ZentaoBrowser] 最终使用的看板参数:', { regionId, groupId, columnId });
+
+      // 使用 task-create 接口创建看板任务
+      const kanbanResult = await this.createKanbanTask({
+        executionId,
+        regionId,
+        laneId: groupId,  // groupId 对应 laneID
+        columnId,
+        taskData
+      });
+
+      console.log('[ZentaoBrowser] 看板任务创建结果:', kanbanResult);
+
+      // 看板创建失败，直接返回错误，不降级到普通任务
+      if (!kanbanResult.success) {
+        return { success: false, reason: kanbanResult.reason || '看板任务创建失败' };
+      }
+
+      // 返回看板任务结果
+      return kanbanResult;
+    }
+
+    // 普通任务（阶段/迭代）使用原有API
     const username = this.config.username || 'admin';
     const baseUrl = this.getBaseUrl();
 
-    console.log('[ZentaoBrowser] 准备创建任务:', taskData.title);
+    console.log('[ZentaoBrowser] 准备创建任务:', taskData.title, '执行 ID:', executionId);
 
     try {
       // 通过 background.js 在禅道页面中执行请求
@@ -4019,18 +4203,35 @@ const ZentaoBrowserClient = {
 
         // 如果是 .json 接口，locate 有时会带参数，也可能是重定向 URL
         let taskId = null;
-        const locateMatch = data.locate.match(/task[-_]view[-_]?(\d+)/) ||
-          data.locate.match(/execution-task[-_][^/-]+-(\d+)/) ||
-          data.locate.match(/taskID=(\d+)/); // 有些带参数的 locate
 
-        if (locateMatch) {
-          taskId = locateMatch[1];
-          console.log('[ZentaoBrowser] 从 locate 提取到任务ID:', taskId);
+        // 尝试多种正则模式提取任务ID
+        const patterns = [
+          /task[-_]view[-_]?(\d+)/,   // task-view-123
+          /taskID=(\d+)/,             // taskID=123
+          /tasks.*?id=(\d+)/,         // tasks?id=123
+          /taskId[=:](\d+)/,          // taskId:123 或 taskId=123
+          /["']id["']:\s*(\d+)/       // "id": 123 (从JSON中提取)
+        ];
+
+        // 注意：execution-task-{id}-xxx 中的 id 是执行ID，不是任务ID，不能直接使用
+        // 如果 locate 是执行任务列表页，需要从页面中提取第一个任务ID
+
+        for (const pattern of patterns) {
+          const match = data.locate.match(pattern);
+          if (match) {
+            taskId = match[1];
+            console.log('[ZentaoBrowser] ✓ 从 locate 提取到任务ID:', taskId, '模式:', pattern.source);
+            break;
+          }
+        }
+
+        if (taskId) {
           return { success: true, taskId };
         }
 
         // 尝试解析 JSON 如果服务端直接返回 id（极少数情况）
         if (data.id) {
+          console.log('[ZentaoBrowser] ✓ 从响应中获取到任务ID:', data.id);
           return { success: true, taskId: data.id };
         }
 
@@ -4038,6 +4239,7 @@ const ZentaoBrowserClient = {
         console.log('[ZentaoBrowser] 尝试从页面提取任务ID');
         taskId = await this.extractTaskIdFromHtml(data.locate);
         if (taskId) {
+          console.log('[ZentaoBrowser] ✓ 从页面提取到任务ID:', taskId);
           return { success: true, taskId };
         }
       } else if (data && data.message) {
@@ -4075,13 +4277,37 @@ const ZentaoBrowserClient = {
       }
 
       const html = await response.text();
-      const match = html.match(/<tr\s+data-id=['"](\d+)['"]/);
 
-      if (match && match[1]) {
-        return match[1];
+      // 尝试多种正则模式提取任务ID
+      const patterns = [
+        /<tr\s+data-id=['"](\d+)['"]/,           // data-id="123"
+        /value=['"](\d+)['"].*?title=['"][^>]*>/,  // <option value="123" title="...">
+        /<a\s+href=['"][^'"]*task[-_]view[-_](\d+)/, // task-view-123
+        /\/task[-_]view[-_]?(\d+)/,               // /task-view-123
+        /['"]taskId['"]:\s*(\d+)/,               // "taskId": 123
+        /['"]id['"]:\s*['"]?(\d+)['"]?/          // "id": "123" 或 id: 123
+      ];
+
+      for (const pattern of patterns) {
+        const match = html.match(pattern);
+        if (match && match[1]) {
+          console.log('[ZentaoBrowser] ✓ 从 HTML 提取到任务ID:', match[1], '模式:', pattern.source);
+          return match[1];
+        }
       }
 
-      console.warn('[ZentaoBrowser] HTML 中未找到任务ID');
+      console.warn('[ZentaoBrowser] ✗ HTML 中未找到任务ID，尝试获取最新任务');
+
+      // 后备方案：尝试获取该执行下的最新任务
+      const executionId = locatePath.match(/execution-task-(\d+)-/)?.[1];
+      if (executionId) {
+        const latestTaskId = await this.getLatestTaskId(executionId);
+        if (latestTaskId) {
+          console.log('[ZentaoBrowser] ✓ 获取到最新任务ID:', latestTaskId);
+          return latestTaskId;
+        }
+      }
+
       return null;
     } catch (err) {
       console.warn('[ZentaoBrowser] 提取任务ID异常:', err.message);
@@ -4090,15 +4316,71 @@ const ZentaoBrowserClient = {
   },
 
   /**
-   * 更新任务状态
+   * 获取指定执行下的最新任务ID
    */
-  async updateTaskStatus(taskId, status, progress) {
+  async getLatestTaskId(executionId) {
+    try {
+      const baseUrl = this.getBaseUrl();
+      const cookieHeader = await this.getCookies();
+      const headers = { 'Cookie': cookieHeader };
+
+      // 访问执行的任务列表页面
+      const listUrl = `${baseUrl}/zentao/execution-task-${executionId}-unclosed-0-order_desc.html`;
+      const response = await fetch(listUrl, { headers });
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const html = await response.text();
+
+      // 尝试从页面提取第一个任务ID
+      const patterns = [
+        /<tr\s+data-id=['"](\d+)['"]/,
+        /value=['"](\d+)['"].*?title=['"][^>]*>/,
+      ];
+
+      for (const pattern of patterns) {
+        const match = html.match(pattern);
+        if (match && match[1]) {
+          return match[1];
+        }
+      }
+
+      return null;
+    } catch (err) {
+      console.log('[ZentaoBrowser] 获取最新任务ID失败:', err.message);
+      return null;
+    }
+  },
+
+  /**
+   * 更新任务状态
+   * @param {string} taskId - 任务ID
+   * @param {string} status - 状态 (todo/in_progress/done)
+   * @param {number} progress - 进度 (0-100)
+   * @param {Object} options - 可选参数
+   * @param {string} options.executionType - 执行类型 (kanban/sprint/stage)
+   * @param {string} options.kanbanId - 看板ID（如果是看板类型）
+   */
+  async updateTaskStatus(taskId, status, progress, options = {}) {
     await this.initConfig();
 
     if (!this.isConfigured()) {
       return { success: false, reason: 'not_configured' };
     }
 
+    // 如果是看板类型，使用看板API
+    if (options.executionType === 'kanban') {
+      console.log('[ZentaoBrowser] 更新看板卡片状态:', { taskId, status, kanbanId: options.kanbanId });
+      return await this.updateKanbanCardStatus({
+        cardId: taskId,
+        kanbanId: options.kanbanId || taskId,  // 看板ID通常就是执行ID
+        status
+      });
+    }
+
+    // 普通任务（阶段/迭代）使用原有API
     const statusMap = {
       'done': 'closed',
       'in_progress': 'doing',
@@ -4141,7 +4423,7 @@ const ZentaoBrowserClient = {
   /**
    * 记录工时 (Effort)
    */
-  async recordEffort(taskId, comment, consumedTime, leftTime = 0) {
+  async recordEffort(taskId, comment, consumedTime, leftTime = 0, kanbanId = null, progress = null) {
     await this.initConfig();
 
     if (!this.isConfigured()) {
@@ -4150,7 +4432,7 @@ const ZentaoBrowserClient = {
 
     const baseUrl = this.getBaseUrl();
 
-    console.log(`[ZentaoBrowser] 记录工时 (Task ID: ${taskId}): consumed=${consumedTime}, comment=${comment}`);
+    console.log(`[ZentaoBrowser] 记录工时 (Task ID: ${taskId}): consumed=${consumedTime}, comment=${comment}, kanbanId=${kanbanId}, progress=${progress}`);
 
     try {
       // 通过 background.js 在禅道页面中执行
@@ -4161,7 +4443,9 @@ const ZentaoBrowserClient = {
           taskId,
           comment,
           consumedTime,
-          leftTime
+          leftTime,
+          kanbanId,
+          progress
         }, (response) => {
           if (chrome.runtime.lastError) {
             console.warn('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
@@ -4277,6 +4561,309 @@ const ZentaoBrowserClient = {
       console.warn('[ZentaoBrowser] 编辑禅道任务异常:', err.message);
       return { success: false, reason: err.message };
     }
+  },
+
+  /**
+   * 创建看板卡片
+   * @param {Object} options - 创建选项
+   * @param {string} options.kanbanId - 看板ID
+   * @param {string} options.regionId - 区域ID
+   * @param {string} options.groupId - 分组ID
+   * @param {string} options.columnId - 列ID
+   * @param {Object} options.taskData - 任务数据
+   */
+  async createKanbanCard({ kanbanId, regionId, groupId, columnId, taskData }) {
+    await this.initConfig();
+
+    if (!this.isConfigured()) {
+      return { success: false, reason: 'not_configured' };
+    }
+
+    const baseUrl = this.getBaseUrl();
+
+    console.log('[ZentaoBrowser] 准备创建看板卡片:', { kanbanId, regionId, groupId, columnId, taskData });
+
+    try {
+      const result = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+          action: 'createKanbanCard',
+          baseUrl,
+          kanbanId,
+          regionId,
+          groupId,
+          columnId,
+          taskData
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.warn('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
+            resolve({ success: false, reason: 'background_error' });
+          } else if (response) {
+            console.log('[ZentaoBrowser] Background 返回完整结果:', response);
+            resolve(response);
+          } else {
+            console.warn('[ZentaoBrowser] Background 未返回响应');
+            resolve({ success: false, reason: 'no_response' });
+          }
+        });
+      });
+
+      // 如果创建成功，添加看板URL用于跳转
+      if (result.success) {
+        result.kanbanUrl = `${baseUrl}/zentao/kanban-view-${kanbanId}.html`;
+      }
+
+      return result;
+    } catch (err) {
+      console.warn('[ZentaoBrowser] 创建看板卡片异常:', err.message);
+      return { success: false, reason: err.message };
+    }
+  },
+
+  /**
+   * 使用 task-create 接口创建看板任务
+   * @param {Object} options - 创建选项
+   * @param {string} options.executionId - 执行ID
+   * @param {string} options.regionId - 区域ID
+   * @param {string} options.laneId - 泳道ID
+   * @param {string} options.columnId - 列ID
+   * @param {Object} options.taskData - 任务数据
+   */
+  async createKanbanTask({ executionId, regionId, laneId, columnId, taskData }) {
+    await this.initConfig();
+
+    if (!this.isConfigured()) {
+      return { success: false, reason: 'not_configured' };
+    }
+
+    const baseUrl = this.getBaseUrl();
+    const username = this.config.username || '';
+
+    // 默认指派给自己
+    if (username && !taskData.assignedTo) {
+      taskData.assignedTo = username;
+    }
+
+    console.log('[ZentaoBrowser] 准备创建看板任务 (task-create接口):', {
+      executionId, regionId, laneId, columnId, taskData, assignedTo: taskData.assignedTo
+    });
+
+    try {
+      const result = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+          action: 'createKanbanTask',
+          baseUrl,
+          executionId,
+          regionId,
+          laneId,
+          columnId,
+          taskData
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.warn('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
+            resolve({ success: false, reason: 'background_error' });
+          } else if (response) {
+            console.log('[ZentaoBrowser] Background 返回完整结果:', response);
+            resolve(response);
+          } else {
+            console.warn('[ZentaoBrowser] Background 未返回响应');
+            resolve({ success: false, reason: 'no_response' });
+          }
+        });
+      });
+
+      // 如果创建成功，添加看板URL用于跳转
+      if (result.success) {
+        result.kanbanUrl = `${baseUrl}/zentao/kanban-view-${executionId}.html`;
+      }
+
+      return result;
+    } catch (err) {
+      console.warn('[ZentaoBrowser] 创建看板任务异常:', err.message);
+      return { success: false, reason: err.message };
+    }
+  },
+
+  /**
+   * 更新看板卡片状态
+   * @param {Object} options - 更新选项
+   * @param {string} options.cardId - 卡片ID
+   * @param {string} options.kanbanId - 看板ID
+   * @param {string} options.status - 状态 (todo/in_progress/done)
+   */
+  async updateKanbanCardStatus({ cardId, kanbanId, status }) {
+    await this.initConfig();
+
+    if (!this.isConfigured()) {
+      return { success: false, reason: 'not_configured' };
+    }
+
+    const baseUrl = this.getBaseUrl();
+
+    console.log('[ZentaoBrowser] 准备更新看板卡片状态:', { cardId, kanbanId, status });
+
+    try {
+      const result = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+          action: 'updateKanbanCardStatus',
+          baseUrl,
+          cardId,
+          kanbanId,
+          status
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.warn('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
+            resolve({ success: false, reason: 'background_error' });
+          } else if (response) {
+            resolve(response);
+          } else {
+            console.warn('[ZentaoBrowser] Background 未返回响应');
+            resolve({ success: false, reason: 'no_response' });
+          }
+        });
+      });
+
+      return result;
+    } catch (err) {
+      console.warn('[ZentaoBrowser] 更新看板卡片状态异常:', err.message);
+      return { success: false, reason: err.message };
+    }
+  },
+
+  /**
+   * 快速检测执行是否为看板类型
+   * 通过尝试获取看板视图来判断，如果返回有效的看板数据则是看板类型
+   * @param {string} executionId - 执行ID
+   * @returns {Promise<Object>} { isKanban: boolean, reason?: string }
+   */
+  async quickCheckKanban(executionId) {
+    try {
+      await this.initConfig();
+      if (!this.isConfigured()) {
+        return { isKanban: false, reason: 'not_configured' };
+      }
+
+      const baseUrl = this.getBaseUrl();
+      const result = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+          action: 'quickCheckKanban',
+          baseUrl,
+          executionId
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            resolve({ isKanban: false, reason: 'background_error' });
+          } else {
+            resolve(response);
+          }
+        });
+      });
+
+      return result || { isKanban: false, reason: 'no_response' };
+    } catch (err) {
+      console.warn('[ZentaoBrowser] 快速检测看板异常:', err.message);
+      return { isKanban: false, reason: err.message };
+    }
+  },
+
+  /**
+   * 获取看板视图
+   * @param {string} kanbanId - 看板ID
+   * @returns {Promise<Object>} 看板视图数据
+   */
+  async getKanbanView(kanbanId) {
+    await this.initConfig();
+
+    if (!this.isConfigured()) {
+      return { success: false, reason: 'not_configured' };
+    }
+
+    const baseUrl = this.getBaseUrl();
+    console.log('[ZentaoBrowser] 获取看板视图:', kanbanId);
+
+    try {
+      // 使用 background.js 在禅道页面中执行请求
+      const result = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+          action: 'getKanbanView',
+          baseUrl,
+          kanbanId
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.warn('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
+            resolve({ success: false, reason: 'background_error' });
+          } else if (response) {
+            resolve(response);
+          } else {
+            console.warn('[ZentaoBrowser] Background 未返回响应');
+            resolve({ success: false, reason: 'no_response' });
+          }
+        });
+      });
+
+      console.log('[ZentaoBrowser] 看板视图数据:', result);
+      return result;
+    } catch (err) {
+      console.warn('[ZentaoBrowser] 获取看板视图异常:', err.message);
+      return null;
+    }
+  },
+
+  /**
+   * 从看板页面HTML中解析 regionId、laneId、columnId
+   * @param {number|string} executionId - 执行ID
+   * @param {string} [laneType='task'] - 泳道类型 ('task'=任务, 'story'=研发需求, 'bug'=Bug)
+   * @param {string} [columnType='wait'] - 列类型 ('wait'=未开始, 'developing'=研发中 等)
+   * @returns {Promise<{regionId?: string, laneId?: string, columnId?: string} | null>}
+   */
+  async getKanbanParamsFromHtml(executionId, laneType = 'task', columnType = 'wait') {
+    await this.initConfig();
+
+    if (!this.isConfigured()) {
+      console.warn('[ZentaoBrowser] 禅道未配置');
+      return null;
+    }
+
+    const baseUrl = this.getBaseUrl();
+    const kanbanUrl = `${baseUrl}/zentao/execution-kanban-${executionId}.html`;
+
+    console.log('[ZentaoBrowser] 从看板页面DOM获取参数:', { executionId, laneType, columnType, url: kanbanUrl });
+
+    try {
+      // 使用 background.js 在禅道页面中执行请求
+      const result = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+          action: 'fetchKanbanPage',
+          url: kanbanUrl
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.warn('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
+            resolve(null);
+          } else {
+            resolve(response);
+          }
+        });
+      });
+
+      if (!result || !result.success) {
+        console.warn('[ZentaoBrowser] 获取看板参数失败:', result?.reason);
+        if (result?.debug) {
+          console.log('[ZentaoBrowser] 调试信息:', result.debug);
+        }
+        return null;
+      }
+
+      // 新的格式直接返回解析好的参数
+      const { regionId, laneId, columnId } = result;
+      console.log('[ZentaoBrowser] 解析成功:', { regionId, laneId, columnId });
+
+      return {
+        regionId: String(regionId),
+        laneId: String(laneId),
+        columnId: String(columnId)
+      };
+    } catch (err) {
+      console.error('[ZentaoBrowser] 解析看板参数失败:', err.message);
+      return null;
+    }
   }
 };
 
@@ -4284,6 +4871,7 @@ const ZentaoBrowserClient = {
 
 const ExecutionSelector = {
   executions: [],
+  favoriteExecutions: [],
   currentExecutionId: null,
 
   /**
@@ -4326,17 +4914,32 @@ const ExecutionSelector = {
   },
 
   /**
-   * 加载执行列表
+   * 加载执行列表（只加载收藏的执行用于选择器）
    */
   async loadExecutions() {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/executions`);
-      const result = await response.json();
+      // 同时获取所有执行和收藏的执行
+      const [allResp, favResp] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/executions`),
+        fetch(`${API_BASE_URL}/api/executions/favorites`)
+      ]);
 
-      if (result.success && result.data) {
-        this.executions = result.data;
-        this.populateSelect();
+      const allResult = await allResp.json();
+      const favResult = await favResp.json();
+
+      if (allResult.success && allResult.data) {
+        this.executions = allResult.data;
       }
+      if (favResult.success && favResult.data) {
+        this.favoriteExecutions = favResult.data;
+        console.log('[ExecutionSelector] ========== 收藏的执行列表 ==========');
+        console.log('[ExecutionSelector] 收藏数量:', this.favoriteExecutions.length, '个');
+        this.favoriteExecutions.forEach((exec, index) => {
+          console.log(`[ExecutionSelector] ${index + 1}. ID: ${exec.id} | 名称: ${exec.name} | 项目: ${exec.projectName || '未设置'}`);
+        });
+        console.log('[ExecutionSelector] ======================================');
+      }
+      this.populateSelect();
     } catch (err) {
       console.error('[ExecutionSelector] 加载执行列表失败:', err);
     }
@@ -4344,6 +4947,7 @@ const ExecutionSelector = {
 
   /**
    * 从禅道同步执行列表
+   * 使用和设置中相同的同步逻辑，保留用户收藏的执行
    */
   async refreshExecutions() {
     const refreshBtn = document.getElementById('refreshExecutionsBtn');
@@ -4357,18 +4961,18 @@ const ExecutionSelector = {
         refreshBtn.style.opacity = '0.5';
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/executions/sync`, {
-        method: 'POST'
-      });
-      const result = await response.json();
+      // 使用 ExecutionFavorites 的同步方法（和设置中的同步保持一致）
+      await ExecutionFavorites.syncExecutions();
 
-      if (result.success && result.data) {
-        this.executions = result.data;
-        this.populateSelect();
-        Toast.success(`已同步 ${result.data.length} 个执行`);
-      } else {
-        Toast.error('同步失败: ' + (result.error || '未知错误'));
+      // 同步后重新加载执行列表
+      await this.loadExecutions();
+
+      // 恢复之前的选择
+      const currentValue = select?.value;
+      if (currentValue && currentValue !== 'no-favorites') {
+        select.value = currentValue;
       }
+
     } catch (err) {
       console.error('[ExecutionSelector] 同步执行列表失败:', err);
       Toast.error('同步失败: ' + err.message);
@@ -4381,7 +4985,7 @@ const ExecutionSelector = {
   },
 
   /**
-   * 填充执行选择器
+   * 填充执行选择器（只显示收藏的执行）
    */
   populateSelect() {
     const select = document.getElementById('executionSelect');
@@ -4393,26 +4997,41 @@ const ExecutionSelector = {
     // 清空选项
     select.innerHTML = '';
 
-    // 添加"自动选择"选项
+    // 添加"自动选择"选项（默认选中）
     const autoOption = document.createElement('option');
     autoOption.value = '';
     autoOption.textContent = '自动选择 (AI分析)';
     select.appendChild(autoOption);
 
-    // 添加执行选项
-    this.executions.forEach(exec => {
-      const option = document.createElement('option');
-      option.value = exec.id;
-      option.textContent = exec.name || `执行 ${exec.id}`;
-      if (exec.isDefault) {
-        option.textContent += ' (默认)';
-      }
-      select.appendChild(option);
-    });
+    // 只显示收藏的执行
+    if (this.favoriteExecutions.length === 0) {
+      // 没有收藏的执行时显示提示
+      const hintOption = document.createElement('option');
+      hintOption.value = 'no-favorites';
+      hintOption.textContent = '请先在设置中收藏执行';
+      hintOption.disabled = true;
+      hintOption.style.color = '#999';
+      select.appendChild(hintOption);
+    } else {
+      // 添加收藏的执行，格式：项目名称 - 执行名称
+      this.favoriteExecutions.forEach(exec => {
+        const option = document.createElement('option');
+        option.value = exec.id;
+        const projectPrefix = exec.projectName || '未分类';
+        option.textContent = `${projectPrefix} - ${exec.name}`;
+        if (exec.isDefault) {
+          option.textContent += ' (默认)';
+        }
+        select.appendChild(option);
+      });
+    }
 
-    // 恢复选择
-    if (currentValue) {
+    // 恢复选择或默认选中"自动选择"
+    if (currentValue && currentValue !== 'no-favorites' && this.favoriteExecutions.some(e => e.id === currentValue)) {
       select.value = currentValue;
+    } else {
+      // 默认选中"自动选择"
+      select.value = '';
     }
   },
 
@@ -4422,7 +5041,10 @@ const ExecutionSelector = {
   getSelectedExecution() {
     const select = document.getElementById('executionSelect');
     if (!select) return null;
-    return select.value || null;
+    const value = select.value;
+    // 排除提示选项
+    if (value === 'no-favorites') return null;
+    return value || null;
   },
 
   /**
@@ -4768,44 +5390,83 @@ document.addEventListener('DOMContentLoaded', () => {
   TabSwitcher.init();
 });
 
-// ==================== 项目收藏管理 ====================
+// ==================== 执行收藏管理 ====================
 
-const ProjectFavorites = {
-  projects: [],
+const ExecutionFavorites = {
+  executions: [],
   favoriteIds: [],
+  showClosed: false,  // 默认不显示已关闭的执行
 
   init() {
-    const syncBtn = document.getElementById('syncProjectsBtn');
+    const syncBtn = document.getElementById('syncExecutionsBtn');
     if (syncBtn) {
-      syncBtn.addEventListener('click', () => this.syncProjects());
+      syncBtn.addEventListener('click', () => this.syncExecutions());
+    }
+
+    // 绑定"显示已关闭执行"复选框事件
+    const showClosedCheckbox = document.getElementById('showClosedExecutions');
+    if (showClosedCheckbox) {
+      showClosedCheckbox.addEventListener('change', (e) => {
+        this.showClosed = e.target.checked;
+        this.renderExecutionList();
+      });
     }
 
     // 加载收藏列表
     this.loadFavorites();
   },
 
+  /**
+   * 根据执行ID获取执行类型
+   * @param {string} executionId - 执行ID
+   * @returns {string|null} 执行类型 (kanban/sprint/stage) 或 null
+   */
+  getExecutionType(executionId) {
+    if (!executionId || !this.executions || this.executions.length === 0) {
+      return null;
+    }
+    const exec = this.executions.find(e => String(e.id) === String(executionId));
+    return exec ? exec.type : null;
+  },
+
   async loadFavorites() {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/projects/favorites`);
-      const result = await response.json();
-      if (result.success) {
-        this.projects = result.data;
-        this.favoriteIds = this.projects.map(p => p.id);
+      // 加载完整的执行列表
+      const execResponse = await fetch(`${API_BASE_URL}/api/executions`);
+      const execResult = await execResponse.json();
+      if (execResult.success && execResult.data) {
+        this.executions = execResult.data;
+        console.log('[ExecutionFavorites] 加载执行列表成功，数量:', this.executions.length);
+        console.log('[ExecutionFavorites] 执行类型分布:', this.executions.reduce((acc, ex) => {
+          acc[ex.type] = (acc[ex.type] || 0) + 1;
+          return acc;
+        }, {}));
       }
+
+      // 加载收藏的ID列表
+      const favResponse = await fetch(`${API_BASE_URL}/api/executions/favorites`);
+      const favResult = await favResponse.json();
+      if (favResult.success) {
+        this.favoriteIds = favResult.data.map(e => e.id);
+      }
+
+      // 渲染列表
+      this.renderExecutionList();
     } catch (err) {
-      console.error('[ProjectFavorites] 加载收藏项目失败:', err);
+      console.error('[ExecutionFavorites] 加载收藏执行失败:', err);
     }
   },
 
-  async syncProjects() {
-    const syncBtn = document.getElementById('syncProjectsBtn');
-    const resultSpan = document.getElementById('syncProjectsResult');
+  async syncExecutions() {
+    const syncBtn = document.getElementById('syncExecutionsBtn');
+    const resultSpan = document.getElementById('syncExecutionsResult');
 
     try {
       syncBtn.disabled = true;
       syncBtn.textContent = '同步中...';
+      resultSpan.textContent = '';
 
-      // 从浏览器获取禅道配置
+      // 从后端获取禅道配置
       const configResponse = await fetch(`${API_BASE_URL}/api/zentao/config`);
       const configResult = await configResponse.json();
 
@@ -4815,94 +5476,256 @@ const ProjectFavorites = {
 
       const zentaoUrl = configResult.data.url.replace(/\/$/, '');
 
-      // 获取禅道 cookie
-      const zentaoCookie = await this.getZentaoCookie(zentaoUrl);
-      if (!zentaoCookie) {
-        // 尝试通过浏览器自动化登录
-        const loginResult = await this.loginZentao(zentaoUrl, configResult.data.username, configResult.data.password);
-        if (!loginResult.success) {
-          throw new Error('登录失败: ' + (loginResult.error || '未知错误'));
-        }
-      }
-
-      // 再次获取 cookie
+      // 使用浏览器 cookie 调用禅道 API 获取执行列表
       const cookie = await this.getZentaoCookie(zentaoUrl);
       if (!cookie) {
-        throw new Error('无法获取禅道会话');
+        throw new Error('无法获取禅道会话，请先在浏览器中登录禅道');
       }
 
-      // 调用禅道 API 获取项目列表（请求更多数据，每页100条）
-      const projectsResp = await fetch(`${zentaoUrl}/zentao/project-browse-all-all--------0-100-1.json`, {
-        headers: {
-          'Cookie': cookie
-        }
-      });
-      const projectsData = await projectsResp.json();
-
-      console.log('[ProjectFavorites] 禅道响应:', projectsData);
-
-      // 解析项目列表 - 禅道返回的数据结构是 { status: 'success', data: JSON字符串 }
+      // 调用禅道 API 获取执行列表
+      // 先获取项目列表
       let projects = [];
-      if (projectsData.status === 'success' && projectsData.data) {
-        // data 是一个 JSON 字符串，需要再次解析
-        try {
-          const nestedData = JSON.parse(projectsData.data);
-          // 从嵌套数据中提取项目列表
-          if (nestedData.projectStats && typeof nestedData.projectStats === 'object') {
-            // projectStats 是一个对象，key 是项目ID
-            projects = Object.values(nestedData.projectStats);
-          } else if (nestedData.projects) {
-            projects = nestedData.projects;
-          } else if (Array.isArray(nestedData)) {
-            projects = nestedData;
+      try {
+        const projResp = await fetch(`${zentaoUrl}/zentao/project-browse-all-all--------.json`, {
+          headers: { 'Cookie': cookie }
+        });
+        console.log('[ExecutionFavorites] 项目列表响应状态:', projResp.status);
+        if (projResp.ok) {
+          const projData = await projResp.json();
+          console.log('[ExecutionFavorites] 项目列表原始数据:', projData);
+          // 禅道返回的数据在 data 字段中，且是 JSON 字符串
+          if (projData && projData.status === 'success' && projData.data) {
+            try {
+              const nested = JSON.parse(projData.data);
+              console.log('[ExecutionFavorites] 解析后的数据键:', Object.keys(nested));
+              if (Array.isArray(nested.projects)) {
+                projects = nested.projects;
+                console.log('[ExecutionFavorites] 获取到项目列表 (nested.projects):', projects.length);
+              } else if (nested.projectStats && typeof nested.projectStats === 'object') {
+                // projectStats 是一个对象 {id: projectInfo}
+                projects = Object.values(nested.projectStats);
+                console.log('[ExecutionFavorites] 获取到项目列表 (projectStats):', projects.length);
+              } else if (Array.isArray(nested)) {
+                projects = nested;
+                console.log('[ExecutionFavorites] 获取到项目列表 (nested):', projects.length);
+              } else {
+                console.log('[ExecutionFavorites] 数据结构不匹配，projects:', nested.projects, 'nested:', nested);
+              }
+            } catch (parseErr) {
+              console.error('[ExecutionFavorites] 解析项目数据失败:', parseErr);
+            }
+          } else if (projData && Array.isArray(projData.projects)) {
+            projects = projData.projects;
+            console.log('[ExecutionFavorites] 获取到项目列表 (直接):', projects.length);
           }
-        } catch (e) {
-          console.error('[ProjectFavorites] 解析项目数据失败:', e);
-          console.error('[ProjectFavorites] 原始数据:', projectsData.data);
         }
-      } else if (projectsData.projects) {
-        projects = projectsData.projects;
+      } catch (e) {
+        console.error('[ExecutionFavorites] 获取项目列表失败:', e.message);
       }
 
-      // 排序：进行中(done) > 其他
-      projects.sort((a, b) => {
-        if (a.status === 'doing' && b.status !== 'doing') return -1;
-        if (a.status !== 'doing' && b.status === 'doing') return 1;
-        return 0;
+      if (projects.length === 0) {
+        throw new Error('未获取到项目列表');
+      }
+
+      console.log('[ExecutionFavorites] 开始遍历', projects.length, '个项目获取执行...');
+
+      // 按项目分组存储执行
+      const executionsByProject = {};
+
+      // 先获取全局执行列表
+      let allExecutionsData = null;
+      try {
+        // 使用之前成功的 execution-browse API
+        const resp = await fetch(`${zentaoUrl}/zentao/execution-browse-all-all--------0-200-1.json`, {
+          headers: { 'Cookie': cookie }
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data && data.status === 'success' && data.data) {
+            const nested = JSON.parse(data.data);
+            console.log('[ExecutionFavorites] execution-browse 数据键:', Object.keys(nested));
+
+            // 尝试获取执行列表
+            if (nested.executions && typeof nested.executions === 'object') {
+              allExecutionsData = Object.entries(nested.executions).map(([id, name]) => ({
+                id,
+                name: name || `执行 ${id}`
+              }));
+            } else if (nested.executionStats && typeof nested.executionStats === 'object') {
+              allExecutionsData = Object.entries(nested.executionStats).map(([id, name]) => ({
+                id,
+                name: name || `执行 ${id}`
+              }));
+            } else if (Array.isArray(nested.executionStats)) {
+              allExecutionsData = nested.executionStats;
+            } else if (Array.isArray(nested.executions)) {
+              allExecutionsData = nested.executions;
+            }
+            console.log('[ExecutionFavorites] 获取到全局执行列表:', allExecutionsData?.length);
+          }
+        }
+      } catch (e) {
+        console.log('[ExecutionFavorites] 获取全局执行列表失败:', e.message);
+      }
+
+      if (!allExecutionsData || allExecutionsData.length === 0) {
+        throw new Error('未找到执行数据');
+      }
+
+      // 创建项目 ID 到项目名称的映射
+      const projectMap = {};
+      projects.forEach(p => {
+        projectMap[p.id] = p.name || p.title;
+      });
+      console.log('[ExecutionFavorites] 项目映射:', projectMap);
+
+      // 对每个执行获取详情（包括项目信息）
+      const batchSize = 10;
+      for (let i = 0; i < allExecutionsData.length; i += batchSize) {
+        const batch = allExecutionsData.slice(i, i + batchSize);
+        const details = await Promise.all(batch.map(async (exec) => {
+          try {
+            const detailResp = await fetch(`${zentaoUrl}/zentao/execution-view-${exec.id}.json`, {
+              headers: { 'Cookie': cookie }
+            });
+            if (detailResp.ok) {
+              const detailData = await detailResp.json();
+              if (detailData && detailData.status === 'success' && detailData.data) {
+                const nested = JSON.parse(detailData.data);
+                // 打印前几个执行的详情
+                if (allExecutionsData.indexOf(exec) < 3) {
+                  console.log(`[ExecutionFavorites] 执行 ${exec.id} 详情数据键:`, Object.keys(nested));
+                  console.log(`[ExecutionFavorites] 执行 ${exec.id} nested.execution.type:`, nested.execution?.type);
+                  console.log(`[ExecutionFavorites] 执行 ${exec.id} nested.type:`, nested.type);
+                }
+                // 正确处理 project 对象
+                let projectName = '';
+                let projectId = '';
+                if (nested.project && typeof nested.project === 'object') {
+                  projectId = nested.project.id || '';
+                  projectName = projectId ? (projectMap[projectId] || nested.project.name || '') : '';
+                } else if (typeof nested.project === 'string') {
+                  projectName = nested.project;
+                }
+                if (!projectName && nested.projectID && projectMap[nested.projectID]) {
+                  projectName = projectMap[nested.projectID];
+                  projectId = nested.projectID;
+                }
+                // 关键：执行类型在 nested.execution.type 中，不是 nested.type
+                const executionType = nested.execution?.type || 'execution';
+                return {
+                  id: exec.id,
+                  name: exec.name,
+                  projectName: projectName,
+                  projectId: projectId,
+                  status: nested.execution?.status || 'open',
+                  // 执行类型: kanban, sprint, stage
+                  type: executionType
+                };
+              }
+            }
+          } catch (e) {
+            console.log(`[ExecutionFavorites] 执行 ${exec.id} 详情获取失败:`, e.message);
+          }
+          return null;
+        }));
+
+        details.forEach(detail => {
+          if (detail && detail.projectName) {
+            if (!executionsByProject[detail.projectName]) {
+              executionsByProject[detail.projectName] = {
+                project: null,
+                executions: []
+              };
+            }
+            executionsByProject[detail.projectName].executions.push(detail);
+          }
+        });
+
+        console.log('[ExecutionFavorites] 已处理', Math.min(i + batchSize, allExecutionsData.length), '/', allExecutionsData.length);
+      }
+
+      console.log('[ExecutionFavorites] 共有', Object.keys(executionsByProject).length, '个项目有执行');
+
+      if (Object.keys(executionsByProject).length === 0) {
+        throw new Error('未找到执行数据，请尝试手动在禅道中打开执行列表页面');
+      }
+
+      // 将数据转换为扁平数组格式
+      executions = [];
+      Object.entries(executionsByProject).forEach(([projectName, data]) => {
+        data.executions.forEach(exec => {
+          if (exec) { // 确保 exec 不为 null
+            executions.push({
+              id: String(exec.id),
+              name: exec.name || exec.title || `执行 ${exec.id}`,
+              projectName: projectName,
+              projectId: exec.projectId || data.project?.id || '',
+              status: exec.status || 'open',
+              // 关键：保留执行类型字段
+              type: exec.type || 'execution'
+            });
+          }
+        });
       });
 
-      // 格式化项目
-      const formattedProjects = projects.map(p => ({
-        id: String(p.id),
-        name: p.name || p.title || `项目 ${p.id}`,
-        status: p.status || 'open',
-        type: p.type || 'sprint',
-        begin: p.begin || '',
-        end: p.end || ''
-      }));
+      console.log('[ExecutionFavorites] 最终执行列表长度:', executions.length);
+      console.log('[ExecutionFavorites] 执行类型分布:', executions.reduce((acc, ex) => {
+        acc[ex.type] = (acc[ex.type] || 0) + 1;
+        return acc;
+      }, {}));
+
+      // 格式化执行数据（已包含项目信息和类型）
+      const formattedExecutions = executions.map(ex => {
+        // 直接使用从 API 获取的准确 type 字段
+        const executionType = ex.type || 'execution';
+
+        return {
+          id: ex.id,
+          name: ex.name,
+          projectName: ex.projectName,
+          projectId: ex.projectId,
+          productName: ex.productName || '',
+          status: ex.status || 'open',
+          type: executionType,  // 使用从 API 获取的执行类型: kanban, sprint, stage
+          kanbanId: executionType === 'kanban' ? ex.id : null,  // 看板ID
+          isDefault: ex.id === String(configResult.data.executionId)
+        };
+      });
 
       // 保存到后端
-      const saveResp = await fetch(`${API_BASE_URL}/api/projects/sync`, {
+      console.log('[ExecutionFavorites] 准备保存到后端，执行数量:', formattedExecutions.length);
+      console.log('[ExecutionFavorites] 执行类型分布:', formattedExecutions.reduce((acc, ex) => {
+        acc[ex.type] = (acc[ex.type] || 0) + 1;
+        return acc;
+      }, {}));
+
+      const saveResp = await fetch(`${API_BASE_URL}/api/executions/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projects: formattedProjects })
+        body: JSON.stringify({ executions: formattedExecutions })
       });
       const saveResult = await saveResp.json();
 
+      console.log('[ExecutionFavorites] 后端保存结果:', saveResult);
+
       if (saveResult.success) {
-        this.projects = formattedProjects;
-        this.renderProjectList();
-        resultSpan.textContent = `已同步 ${formattedProjects.length} 个项目`;
+        this.executions = formattedExecutions;
+        this.renderExecutionList();
+        resultSpan.textContent = `已同步 ${formattedExecutions.length} 个执行`;
         resultSpan.style.color = 'var(--success)';
-        Toast.success(`已同步 ${formattedProjects.length} 个项目`);
+        Toast.success(`已同步 ${formattedExecutions.length} 个执行`);
+      } else {
+        throw new Error(saveResult.error || '保存失败');
       }
     } catch (err) {
-      console.error('[ProjectFavorites] 同步项目失败:', err);
+      console.error('[ExecutionFavorites] 同步执行失败:', err);
       resultSpan.textContent = '同步失败: ' + err.message;
       resultSpan.style.color = 'var(--danger)';
+      Toast.error('同步失败: ' + err.message);
     } finally {
       syncBtn.disabled = false;
-      syncBtn.textContent = '🔄 从禅道同步项目';
+      syncBtn.textContent = '🔄 从禅道同步执行';
     }
   },
 
@@ -4918,47 +5741,99 @@ const ProjectFavorites = {
     });
   },
 
-  async loginZentao(zentaoUrl, username, password) {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage({
-        action: 'performZenTaoLogin',
-        url: zentaoUrl,
-        username: username,
-        password: password
-      }, (response) => {
-        resolve(response || { success: false, error: '无响应' });
-      });
-    });
-  },
-
-  renderProjectList() {
-    const listContainer = document.getElementById('projectFavoritesList');
+  renderExecutionList() {
+    const listContainer = document.getElementById('executionFavoritesList');
     if (!listContainer) return;
 
-    // 获取当前收藏的ID列表
-    const response = fetch(`${API_BASE_URL}/api/projects/favorites`)
-      .then(r => r.json())
-      .then(result => {
-        if (result.success) {
-          this.favoriteIds = result.data.map(p => p.id);
+    console.log('[ExecutionFavorites] renderExecutionList, 执行数量:', this.executions.length);
+    console.log('[ExecutionFavorites] 前3个执行的type:', this.executions.slice(0, 3).map(e => ({ id: e.id, name: e.name, type: e.type })));
+
+    if (this.executions.length === 0) {
+      listContainer.innerHTML = '<p class="hint">暂无执行</p>';
+      return;
+    }
+
+    // 按项目分组，只显示有项目信息的执行
+    const grouped = {};
+    this.executions.forEach(exec => {
+      // 只处理有项目信息的执行
+      if (exec.projectName && exec.projectName !== '未分类') {
+        if (!grouped[exec.projectName]) {
+          grouped[exec.projectName] = [];
         }
-      });
+        grouped[exec.projectName].push(exec);
+      }
+    });
+
+    if (Object.keys(grouped).length === 0) {
+      listContainer.innerHTML = '<p class="hint">暂无执行（或执行项目信息未加载）</p>';
+      return;
+    }
 
     let html = '';
-    this.projects.forEach(project => {
-      const isFavorite = this.favoriteIds.includes(project.id);
+    // 按项目名称排序
+    const sortedProjects = Object.keys(grouped).sort();
+
+    sortedProjects.forEach(projectName => {
+      let projectExecs = grouped[projectName];
+
+      // 如果不显示已关闭的执行，过滤掉已关闭的
+      if (!this.showClosed) {
+        projectExecs = projectExecs.filter(exec => exec.status !== 'closed');
+      }
+
+      // 如果项目下没有执行（都已关闭），跳过该项目
+      if (projectExecs.length === 0) {
+        return;
+      }
+
       html += `
-        <label class="project-favorite-item">
-          <input type="checkbox" value="${project.id}" ${isFavorite ? 'checked' : ''}>
-          <span class="project-favorite-name">${escapeHtml(project.name)}</span>
-          <span class="project-favorite-status ${project.status === 'closed' ? 'closed' : ''}">
-            ${project.status === 'closed' ? '已关闭' : '进行中'}
-          </span>
-        </label>
+        <div class="execution-group">
+          <div class="execution-group-header">
+            <span class="execution-group-name">${escapeHtml(projectName)}</span>
+            <span class="execution-group-count">${projectExecs.length}</span>
+          </div>
+          <div class="execution-group-items">
+      `;
+
+      projectExecs.forEach(exec => {
+        const isFavorite = this.favoriteIds.includes(exec.id);
+        const statusClass = exec.status === 'closed' ? 'closed' : '';
+        const statusText = exec.status === 'closed' ? '已关闭' : '进行中';
+
+        // 执行类型标签
+        const typeLabels = {
+          'kanban': '<span class="execution-type-label execution-type-kanban">看板</span>',
+          'sprint': '<span class="execution-type-label execution-type-sprint">迭代</span>',
+          'stage': '<span class="execution-type-label execution-type-stage">阶段</span>'
+        };
+        const typeLabel = typeLabels[exec.type] || '';
+
+        html += `
+          <label class="project-favorite-item ${exec.status === 'closed' ? 'item-closed' : ''}">
+            <input type="checkbox" value="${exec.id}" ${isFavorite ? 'checked' : ''}>
+            <div class="execution-favorite-info">
+              <span class="project-favorite-name">${escapeHtml(exec.name)}</span>
+              ${typeLabel}
+            </div>
+            <span class="project-favorite-status ${statusClass}">${statusText}</span>
+          </label>
+        `;
+      });
+
+      html += `
+          </div>
+        </div>
       `;
     });
 
-    listContainer.innerHTML = html || '<p class="hint">暂无项目</p>';
+    // 如果没有任何项目显示
+    if (html === '') {
+      listContainer.innerHTML = '<p class="hint">暂无执行（所有执行已关闭）</p>';
+      return;
+    }
+
+    listContainer.innerHTML = html;
 
     // 绑定复选框事件
     listContainer.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
@@ -4967,34 +5842,36 @@ const ProjectFavorites = {
   },
 
   async updateFavorites() {
-    const listContainer = document.getElementById('projectFavoritesList');
+    const listContainer = document.getElementById('executionFavoritesList');
     const checkedIds = Array.from(listContainer.querySelectorAll('input[type="checkbox"]:checked'))
       .map(cb => cb.value);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/projects/favorites`, {
+      const response = await fetch(`${API_BASE_URL}/api/executions/favorites`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectIds: checkedIds })
+        body: JSON.stringify({ executionIds: checkedIds })
       });
       const result = await response.json();
 
       if (result.success) {
         this.favoriteIds = checkedIds;
-        Toast.success('收藏项目已更新');
+        Toast.success('收藏执行已更新');
+        // 刷新执行选择器
+        ExecutionSelector.loadExecutions();
       }
     } catch (err) {
-      console.error('[ProjectFavorites] 更新收藏失败:', err);
+      console.error('[ExecutionFavorites] 更新收藏失败:', err);
       Toast.error('更新收藏失败');
     }
   }
 };
 
-// 在设置弹窗打开时加载项目收藏
+// 在设置弹窗打开时加载执行收藏
 const originalSettingsBtn = document.getElementById('settingsBtn');
 if (originalSettingsBtn) {
   originalSettingsBtn.addEventListener('click', () => {
-    setTimeout(() => ProjectFavorites.loadFavorites(), 100);
+    setTimeout(() => ExecutionFavorites.loadFavorites(), 100);
   });
 }
 
@@ -5311,16 +6188,241 @@ const BugManager = {
   }
 };
 
+// ==================== 测试函数 ====================
+
+/**
+ * 测试看板视图 API
+ * 在控制台调用: testKanbanView(149) 或 testKanbanView(148)
+ */
+window.testKanbanView = async function(kanbanId) {
+  console.log('==================== 测试看板视图 API ====================');
+  console.log('[Test] 请求看板 ID:', kanbanId);
+
+  try {
+    // 直接从后端获取禅道配置
+    const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
+    const configResult = await configResp.json();
+
+    if (!configResult.success || !configResult.data || !configResult.data.url) {
+      console.error('[Test] 禅道未配置');
+      return;
+    }
+
+    const config = configResult.data;
+    const baseUrl = config.url.replace(/\/$/, '');
+    const viewUrl = `${baseUrl}/zentao/kanban-view-${kanbanId}.json`;
+
+    console.log('[Test] 禅道 URL:', baseUrl);
+    console.log('[Test] 请求 URL:', viewUrl);
+
+    const response = await fetch(viewUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    });
+
+    console.log('[Test] 响应状态:', response.status, response.statusText);
+
+    if (!response.ok) {
+      console.error('[Test] HTTP 请求失败:', response.status);
+      return;
+    }
+
+    const text = await response.text();
+    console.log('[Test] 响应原始长度:', text.length, '字符');
+    console.log('[Test] 响应前500字符:', text.substring(0, 500));
+
+    // 尝试解析 JSON
+    try {
+      const data = JSON.parse(text);
+      console.log('[Test] ✓ JSON 解析成功');
+      console.log('[Test] 顶层键:', Object.keys(data));
+      console.log('[Test] data.type:', data.type);
+      console.log('[Test] data.status:', data.status);
+
+      // 打印 data.data 的结构和类型
+      if (data.data) {
+        console.log('[Test] data.data 类型:', typeof data.data);
+        console.log('[Test] data.data 键:', Object.keys(data.data));
+
+        // 如果 data.data 是字符串，尝试解析
+        if (typeof data.data === 'string') {
+          try {
+            const parsedData = JSON.parse(data.data);
+            console.log('[Test] data.data 解析后的键:', Object.keys(parsedData));
+            console.log('[Test] data.data 解析后的完整数据:', parsedData);
+          } catch (e) {
+            console.log('[Test] data.data 解析失败:', e.message);
+          }
+        } else {
+          console.log('[Test] data.data 完整数据:', data.data);
+        }
+      }
+
+      // 查找任务数据
+      function findTasks(obj, path = 'data') {
+        if (!obj || typeof obj !== 'object') return;
+
+        // 检查是否包含 items 或 tasks 数组
+        for (let key in obj) {
+          const value = obj[key];
+          const currentPath = `${path}.${key}`;
+
+          if (key === 'items' && Array.isArray(value)) {
+            console.log(`[Test] 找到 items 数组在 ${currentPath}, 长度:`, value.length);
+            value.forEach((item, idx) => {
+              console.log(`[Test]   [${idx}] id: ${item.id}, name: ${item.name}, status: ${item.status || '(无状态)'}`);
+            });
+          } else if (key === 'tasks' && Array.isArray(value)) {
+            console.log(`[Test] 找到 tasks 数组在 ${currentPath}, 长度:`, value.length);
+          } else if (typeof value === 'object' && value !== null) {
+            findTasks(value, currentPath);
+          }
+        }
+      }
+
+      findTasks(data);
+      return data;
+    } catch (e) {
+      console.error('[Test] ✗ JSON 解析失败:', e.message);
+      console.log('[Test] 原始响应:', text);
+    }
+  } catch (err) {
+    console.error('[Test] ✗ 请求失败:', err.message);
+  }
+
+  console.log('==================== 测试结束 ====================');
+};
+
+// 测试获取看板参数（通过直接打开禅道标签页）
+// 用法: testGetKanbanParamsSimple(148)
+window.testGetKanbanParamsSimple = async function(executionId = 148) {
+  console.log('==================== 测试获取看板参数（简化版）====================');
+
+  try {
+    // 获取禅道配置
+    const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
+    const configResult = await configResp.json();
+
+    if (!configResult.success || !configResult.data || !configResult.data.url) {
+      console.error('[Test] 禅道未配置');
+      return;
+    }
+
+    const config = configResult.data;
+    const baseUrl = config.url.replace(/\/$/, '');
+    const kanbanUrl = `${baseUrl}/zentao/execution-kanban-${executionId}.html`;
+
+    console.log('[Test] 将打开禅道标签页:', kanbanUrl);
+    console.log('[Test] 请在新打开的标签页控制台中运行以下代码获取参数:');
+    console.log('');
+    console.log('```');
+    console.log('// 获取 regionId');
+    console.log('const regionId = document.querySelector(".region")?.getAttribute("data-id");');
+    console.log('console.log("regionId:", regionId);');
+    console.log('');
+    console.log('// 获取 laneId (任务)');
+    console.log('const lanes = document.querySelectorAll(".kanban-lane");');
+    console.log('let laneId; for (const lane of lanes) { const name = lane.querySelector(".kanban-lane-name"); if (name?.getAttribute("title") === "任务") { laneId = lane.getAttribute("data-id"); break; } }');
+    console.log('console.log("laneId:", laneId);');
+    console.log('');
+    console.log('// 获取 columnId (未开始)');
+    console.log('const columnId = document.querySelector(".kanban-col[data-type=\\"wait\\"]")?.getAttribute("data-id");');
+    console.log('console.log("columnId:", columnId);');
+    console.log('```');
+    console.log('');
+    console.log('[Test] 正在打开禅道标签页...');
+
+    // 直接打开新标签页
+    const newTab = await new Promise(resolve => {
+      chrome.tabs.create({ url: kanbanUrl, active: true }, (tab) => {
+        resolve(tab);
+      });
+    });
+
+    console.log('[Test] ✓ 标签页已打开，ID:', newTab.id);
+    console.log('[Test] 请切换到新标签页，在控制台中运行上面的代码');
+  } catch (err) {
+    console.error('[Test] ✗ 异常:', err.message);
+  }
+
+  console.log('==================== 测试结束 ====================');
+};
+
+// 测试获取看板参数（regionId, laneId, columnId）
+// 用法: testGetKanbanParams(148) 或 testGetKanbanParams(148, 'task', 'wait')
+window.testGetKanbanParams = async function(executionId, laneType = 'task', columnType = 'wait') {
+  console.log('==================== 测试获取看板参数 ====================');
+  console.log('[Test] 执行 ID:', executionId, '泳道类型:', laneType, '列类型:', columnType);
+
+  try {
+    // 直接从后端获取禅道配置
+    const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
+    const configResult = await configResp.json();
+
+    if (!configResult.success || !configResult.data || !configResult.data.url) {
+      console.error('[Test] 禅道未配置');
+      return;
+    }
+
+    const config = configResult.data;
+    const baseUrl = config.url.replace(/\/$/, '');
+    const kanbanUrl = `${baseUrl}/zentao/execution-kanban-${executionId}.html`;
+
+    console.log('[Test] 禅道 URL:', baseUrl);
+    console.log('[Test] 看板 URL:', kanbanUrl);
+    console.log('[Test] ========== 使用 fetchKanbanPage 获取参数 ==========');
+
+    // 直接使用 fetchKanbanPage action
+    const result = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({
+        action: 'fetchKanbanPage',
+        url: kanbanUrl
+      }, (response) => {
+        console.log('[Test] 收到响应:', response);
+        if (chrome.runtime.lastError) {
+          console.warn('[Test] Background 通信失败:', chrome.runtime.lastError.message);
+          resolve(null);
+        } else {
+          resolve(response);
+        }
+      });
+    });
+
+    if (result && result.success) {
+      console.log('[Test] ✓ 成功获取参数:');
+      console.log('  - regionId:', result.regionId);
+      console.log('  - laneId:', result.laneId);
+      console.log('  - columnId:', result.columnId);
+      console.log('');
+      console.log('[Test] 创建任务时使用:');
+      console.log(`  { regionId: '${result.regionId}', laneId: '${result.laneId}', columnId: '${result.columnId}' }`);
+    } else {
+      console.log('[Test] ✗ 获取失败');
+      console.log('  - 原因:', result?.reason);
+      if (result?.debug) {
+        console.log('  - 调试信息:', result.debug);
+      }
+    }
+  } catch (err) {
+    console.error('[Test] ✗ 异常:', err.message);
+  }
+
+  console.log('==================== 测试结束 ====================');
+};
+
 // 在页面加载时初始化 Bug 管理器
 document.addEventListener('DOMContentLoaded', () => {
   BugManager.init();
-  ProjectFavorites.init();
+  ExecutionFavorites.init();
   TabSwitcher.init();
 });
 
 // 如果 DOM 已经加载完成，立即初始化
 if (document.readyState === 'complete' || document.readyState === 'interactive') {
   BugManager.init();
-  ProjectFavorites.init();
+  ExecutionFavorites.init();
   TabSwitcher.init();
 }

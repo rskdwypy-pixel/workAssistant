@@ -132,8 +132,7 @@
             </button>
           </div>
           <select id="executionSelect" class="execution-select">
-            <option value="">自动选择 (AI分析)</option>
-            <option value="167" selected>执行 167 (默认)</option>
+            <option value="" selected>自动选择 (AI分析)</option>
             <!-- 动态填充 -->
           </select>
           <span class="ai-indicator" id="aiIndicator" style="display: none;">AI</span>
@@ -573,15 +572,19 @@
           <span id="zentaoTestResult" class="test-result"></span>
         </div>
 
-        <!-- 项目收藏配置 -->
+        <!-- 执行收藏配置 -->
         <div class="settings-section">
-          <h4>⭐ 常用项目（AI 将优先匹配这些项目）</h4>
+          <h4>⭐ 常用执行（AI 将优先匹配这些执行）</h4>
           <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-            <button id="syncProjectsBtn" class="btn-secondary">🔄 从禅道同步项目</button>
-            <span id="syncProjectsResult" class="test-result"></span>
+            <button id="syncExecutionsBtn" class="btn-secondary">🔄 从禅道同步执行</button>
+            <span id="syncExecutionsResult" class="test-result"></span>
           </div>
-          <div id="projectFavoritesList" class="project-favorites-list">
-            <p class="hint">点击「从禅道同步项目」加载项目列表</p>
+          <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+            <input type="checkbox" id="showClosedExecutions" style="cursor: pointer;">
+            <label for="showClosedExecutions" style="cursor: pointer; font-size: 13px;">显示已关闭的执行</label>
+          </div>
+          <div id="executionFavoritesList" class="project-favorites-list">
+            <p class="hint">点击「从禅道同步执行」加载执行列表</p>
           </div>
         </div>
 
@@ -668,8 +671,6 @@
         </div>
       </div>
     </div>
-  </div>
-  </div>
   </div>
 
   <!-- 设置时间模态框 -->

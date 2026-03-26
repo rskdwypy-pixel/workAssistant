@@ -1821,6 +1821,87 @@ body {
   background: var(--text-muted);
 }
 
+/* 已关闭执行项样式 */
+.project-favorite-item.item-closed {
+  opacity: 0.6;
+}
+
+.project-favorite-item.item-closed .project-favorite-name {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+/* 执行类型标签 */
+.execution-type-label {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  display: inline-block;
+  margin-left: 6px;
+}
+
+.execution-type-kanban {
+  background: #6366f1;
+  color: white;
+}
+
+.execution-type-sprint {
+  background: #10b981;
+  color: white;
+}
+
+.execution-type-stage {
+  background: #f59e0b;
+  color: white;
+}
+
+/* 执行收藏信息容器 */
+.execution-favorite-info {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+}
+
+.execution-project-name {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* 执行分组样式 */
+.execution-group {
+  margin-bottom: 12px;
+}
+
+.execution-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-sm);
+  margin-bottom: 4px;
+}
+
+.execution-group-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.execution-group-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-base);
+  padding: 2px 6px;
+  border-radius: 10px;
+}
+
+.execution-group-items {
+  padding-left: 8px;
+}
+
 /* ==================== Tab 切换 ==================== */
 .mode-tabs {
   display: flex;

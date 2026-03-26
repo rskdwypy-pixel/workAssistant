@@ -280,7 +280,7 @@ async function updateTaskStatus(taskId, status) {
 
   // 同步到禅道
   if (task.zentaoId && status !== oldStatus) {
-    await syncTaskToZentao(task, { status });
+    await syncTaskToZentao(task, { status }, oldStatus);
   }
 
   return task;
@@ -338,49 +338,131 @@ async function updateTask(taskId, updates) {
     }
   }
 
+  // 保存更新前的旧状态，用于同步时比较
+  const oldStatus = task.status;
+
   Object.assign(task, updates, {
     updatedAt: new Date().toISOString()
   });
 
   await writeTasks(data);
 
-  // 同步到禅道
-  await syncTaskToZentao(task, updates);
+  // 同步到禅道（传入旧状态用于比较）
+  await syncTaskToZentao(task, updates, oldStatus);
 
   return task;
 }
 
 /**
  * 同步任务到禅道
+ * 根据执行类型（看板/阶段/迭代）调用不同的API
+ * 注意：看板类型执行中的任务，实际上是普通任务（通过 task-create 创建），
+ *       只是以看板视图展示。因此应使用 task-* API，而非 kanban-* API。
+ *       kanban-* API 是用于独立看板模块的卡片，不适用于执行看板中的任务。
  */
-async function syncTaskToZentao(task, updates) {
+async function syncTaskToZentao(task, updates, oldStatus) {
   if (!task.zentaoId) {
     return; // 没有关联禅道任务，跳过同步
   }
 
   try {
-    const { updateTaskStatus: updateZentaoStatus } = await import('./zentaoService.js');
+    // 获取执行信息以判断执行类型
+    let executionType = null;
+    let kanbanId = null;
 
-    // 同步状态变化
-    if (updates.status && updates.status !== task.status) {
-      const statusMap = {
-        'todo': 'wait',
-        'in_progress': 'doing',
-        'done': 'done'
-      };
-      const zentaoStatus = statusMap[updates.status];
-      if (zentaoStatus) {
-        await updateZentaoStatus(task.zentaoId, zentaoStatus);
-        console.log('[TaskManager] 状态已同步到禅道:', task.zentaoId, '->', zentaoStatus);
+    // 优先使用任务上存储的 executionType
+    if (task.executionType) {
+      executionType = task.executionType;
+      kanbanId = task.executionId;
+    } else if (task.executionId) {
+      const { getExecutionById } = await import('./executionManager.js');
+      const execution = await getExecutionById(task.executionId);
+      if (execution) {
+        executionType = execution.type;
+        kanbanId = execution.kanbanId || execution.id;
       }
     }
 
-    // 同步进度变化（禅道不直接支持进度，通过工时记录）
-    // TODO: 实现工时记录同步
+    console.log('[TaskManager] 同步到禅道:', {
+      zentaoId: task.zentaoId,
+      executionId: task.executionId,
+      executionType,
+      kanbanId,
+      updatesKeys: Object.keys(updates)
+    });
+
+    // 看板类型执行中的任务本质上也是普通任务，统一使用 task-* API
+    // （kanban-editCard 等 API 是用于独立看板模块的卡片，不适用于执行看板中的任务）
+    await syncTaskToExecution(task, updates, oldStatus);
 
   } catch (err) {
     console.error('[TaskManager] 同步到禅道失败:', err);
     // 同步失败不影响本地更新
+  }
+}
+
+/**
+ * 同步任务到看板（已废弃，保留用于参考）
+ * 注意：看板执行中的任务现在统一使用 syncTaskToExecution，
+ *       因为它们是通过 task-create 创建的普通任务。
+ * @deprecated 使用 syncTaskToExecution 代替
+ */
+async function syncTaskToKanban(task, updates, kanbanId) {
+  // 看板执行中的任务本质上是普通任务，使用 task-* API
+  await syncTaskToExecution(task, updates);
+}
+
+/**
+ * 同步任务到阶段/迭代/看板执行
+ * 看板执行中的任务也是通过 task-create 创建的普通任务，使用相同的 task-* API
+ * @param {Object} task - 任务对象（已更新后的）
+ * @param {Object} updates - 本次更新的字段
+ * @param {string} oldStatus - 更新前的旧状态
+ */
+async function syncTaskToExecution(task, updates, oldStatus) {
+  const { updateTaskStatus: updateZentaoStatus, recordTaskEstimate } = await import('./zentaoService.js');
+
+  // 同步状态变化（使用 oldStatus 与 updates.status 比较，因为 task.status 已经被更新过了）
+  if (updates.status && oldStatus && updates.status !== oldStatus) {
+    const statusMap = {
+      'todo': 'wait',
+      'in_progress': 'doing',
+      'done': 'done'
+    };
+    const zentaoStatus = statusMap[updates.status];
+    if (zentaoStatus) {
+      await updateZentaoStatus(task.zentaoId, zentaoStatus);
+      console.log('[TaskManager] 状态已同步到禅道:', task.zentaoId, oldStatus, '->', updates.status, '(zentao:', zentaoStatus + ')');
+    }
+  }
+
+  // 同步工时记录
+  if (updates.consumedTime && updates.consumedTime > 0) {
+    // 计算剩余工时
+    const totalConsumedTime = task.totalConsumedTime || updates.consumedTime;
+    const currentProgress = updates.progress !== undefined ? updates.progress : (task.progress || 0);
+    let leftTime = 0;
+
+    if (currentProgress > 0 && currentProgress < 100 && totalConsumedTime > 0) {
+      leftTime = Math.round((totalConsumedTime / (currentProgress / 100) - totalConsumedTime) * 10) / 10;
+      if (leftTime < 0) leftTime = 0;
+    } else if (currentProgress === 100) {
+      leftTime = 0;
+    } else if (totalConsumedTime > 0) {
+      leftTime = totalConsumedTime * 2;
+    }
+
+    const result = await recordTaskEstimate(task.zentaoId, {
+      work: updates.progressComment || `进度更新至 ${currentProgress}%`,
+      consumed: updates.consumedTime,
+      left: leftTime
+    });
+
+    if (result.success) {
+      console.log('[TaskManager] 工时已同步到禅道:', task.zentaoId, `consumed=${updates.consumedTime}h, left=${leftTime}h`);
+    } else {
+      console.error('[TaskManager] 工时同步失败:', task.zentaoId, result.message);
+    }
   }
 }
 
@@ -399,6 +481,18 @@ async function deleteTask(taskId) {
   await writeTasks(data);
 
   return { success: true };
+}
+
+/**
+ * 删除所有本地任务（不影响禅道任务）
+ */
+async function deleteAllTasks() {
+  const data = await readTasks();
+  const deletedCount = data.tasks.length;
+  data.tasks = [];
+  await writeTasks(data);
+
+  return { success: true, deletedCount };
 }
 
 /**
@@ -531,6 +625,7 @@ export {
   updateTaskStatus,
   updateTask,
   deleteTask,
+  deleteAllTasks,
   getTaskStats,
   getCalendarData,
   batchUpdateTasks

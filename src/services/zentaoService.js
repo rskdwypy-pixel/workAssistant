@@ -105,6 +105,12 @@ function cookiesToString(cookies) {
  * @param {string} [taskData.assignedTo] - 指派给（可选）
  * @param {number} [taskData.priority] - 优先级（可选，默认3）
  * @param {string} [taskData.type] - 任务类型（可选，默认devel）
+ * @param {Object} [taskData.kanban] - 看板位置参数（在看板中创建任务时使用）
+ * @param {number} [taskData.kanban.regionId] - 区域ID
+ * @param {number} [taskData.kanban.laneId] - 泳道ID（分组ID）
+ * @param {number} [taskData.kanban.columnId] - 列ID
+ * @param {string} [taskData.kanban.laneType] - 泳道类型，用于自动解析 ('task'=任务, 'story'=研发需求, 'bug'=Bug)
+ * @param {string} [taskData.kanban.columnType] - 列类型，用于自动解析 ('wait'=未开始, 'developing'=研发中 等)
  * @returns {Promise<{success: boolean, taskId?: number, message?: string}>}
  */
 async function createTask(taskData) {
@@ -127,9 +133,37 @@ async function createTask(taskData) {
       };
     }
 
-    const endpoint = `${config.zentao.url}/zentao/task-create-${executionId}-0-0.html`;
+    // 判断是否在看板中创建任务
+    let kanbanParams = taskData.kanban || {};
 
-    console.log('[ZentaoService] 创建任务:', taskData.title);
+    // 如果提供了 laneType 和 columnType，但没有提供具体的 ID，则自动解析
+    if ((kanbanParams.laneType || kanbanParams.columnType) &&
+        (!kanbanParams.regionId || !kanbanParams.laneId || !kanbanParams.columnId)) {
+      console.log('[ZentaoService] 自动解析看板参数...');
+      const parsedParams = await getKanbanParams(
+        executionId,
+        kanbanParams.laneType || 'task',
+        kanbanParams.columnType || 'wait'
+      );
+      if (parsedParams) {
+        kanbanParams = { ...kanbanParams, ...parsedParams };
+      }
+    }
+
+    const isKanbanTask = kanbanParams.regionId &&
+      kanbanParams.laneId &&
+      kanbanParams.columnId;
+
+    let endpoint;
+    if (isKanbanTask) {
+      // 看板任务 URL 格式: task-create-{executionId}-0-0-0-0-regionID={regionId},laneID={laneId},columnID={columnId}.html
+      endpoint = `${config.zentao.url}/zentao/task-create-${executionId}-0-0-0-0-regionID=${kanbanParams.regionId},laneID=${kanbanParams.laneId},columnID=${kanbanParams.columnId}.html?onlybody=yes`;
+    } else {
+      // 普通任务 URL 格式
+      endpoint = `${config.zentao.url}/zentao/task-create-${executionId}-0-0.html`;
+    }
+
+    console.log('[ZentaoService] 创建任务:', taskData.title, isKanbanTask ? '(看板任务)' : '(普通任务)');
 
     // 构建 FormData
     const formData = new FormData();
@@ -157,6 +191,12 @@ async function createTask(taskData) {
     formData.append('deadline', taskData.dueDate || '');
     formData.append('after', 'toTaskList');
     formData.append('uid', Math.random().toString(36).substring(2, 14));
+
+    // 看板任务需要额外的位置参数
+    if (isKanbanTask) {
+      formData.append('region', String(kanbanParams.regionId));
+      formData.append('lane', String(kanbanParams.laneId));
+    }
 
     for (let i = 0; i < 5; i++) {
       formData.append('team[]', '');
@@ -362,6 +402,73 @@ async function updateTaskStatus(taskId, status) {
 }
 
 /**
+ * 记录任务工时（通过 task-recordEstimate API）
+ * @param {number|string} taskId - 任务ID
+ * @param {Object} effortData - 工时数据
+ * @param {string} effortData.work - 工作内容描述
+ * @param {number} effortData.consumed - 消耗工时（小时）
+ * @param {number} effortData.left - 剩余工时（小时）
+ * @returns {Promise<{success: boolean, message?: string}>}
+ */
+async function recordTaskEstimate(taskId, effortData) {
+  try {
+    const cookies = await getZentaoCookies();
+
+    const endpoint = `${config.zentao.url}/zentao/task-recordEstimate-${taskId}.html?onlybody=yes`;
+
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+    console.log('[ZentaoService] 记录任务工时:', { taskId, ...effortData });
+
+    // 构建表单数据（URL 编码格式）
+    const params = new URLSearchParams();
+    params.append('dates[1]', today);
+    params.append('id[1]', '1');
+    params.append('work[1]', effortData.work || '工作内容进度更新');
+    params.append('consumed[1]', String(effortData.consumed || 0));
+    params.append('left[1]', String(effortData.left || 0));
+
+    // 添加4个空的表单项（禅道表单要求）
+    for (let i = 2; i <= 5; i++) {
+      params.append(`dates[${i}]`, today);
+      params.append(`id[${i}]`, String(i));
+      params.append(`work[${i}]`, '');
+      params.append(`consumed[${i}]`, '');
+      params.append(`left[${i}]`, '');
+    }
+
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Cookie': cookiesToString(cookies),
+      },
+      body: params.toString()
+    });
+
+    const text = await resp.text();
+
+    // 检查响应
+    if (text.includes('alert-success') || text.includes('保存成功') || text.includes('记录成功')) {
+      console.log('[ZentaoService] 工时记录成功:', taskId);
+      return { success: true, message: '工时已记录' };
+    } else if (text.includes('alert-danger') || text.includes('错误')) {
+      console.error('[ZentaoService] 工时记录失败:', text.substring(0, 200));
+      return { success: false, message: '记录工时失败' };
+    }
+
+    // 其他情况（可能是重定向），也认为成功
+    console.log('[ZentaoService] 工时记录 - 无明确成功/失败标识，假定成功');
+    return { success: true, message: '工时已记录（推测）' };
+  } catch (err) {
+    console.error('[ZentaoService] 记录工时异常:', err.message);
+    return { success: false, message: err.message };
+  }
+}
+
+/**
  * 清除缓存的 cookie（用于测试或重新登录）
  */
 function clearCookies() {
@@ -371,23 +478,22 @@ function clearCookies() {
 }
 
 /**
- * 获取所有执行列表
+ * 获取所有执行列表（从HTML页面解析，获取准确的type字段）
  * @returns {Promise<Array>} 执行列表
  */
 async function getExecutions() {
   try {
     const cookies = await getZentaoCookies();
 
-    // 获取所有执行列表
-    const endpoint = `${config.zentao.url}/zentao/project-execution-all------1-100-1.json`;
+    // 改用HTML页面获取，因为JSON接口不返回type字段
+    const endpoint = `${config.zentao.url}/zentao/execution-all-all-order_asc-0.html`;
 
-    console.log('[ZentaoService] 获取执行列表');
+    console.log('[ZentaoService] 获取执行列表（HTML页面）');
 
     const resp = await fetch(endpoint, {
       method: 'GET',
       headers: {
-        'Accept': 'application/json',
-        'X-Requested-With': 'XMLHttpRequest',
+        'Accept': 'text/html',
         'Cookie': cookiesToString(cookies),
       },
     });
@@ -396,21 +502,48 @@ async function getExecutions() {
       throw new Error(`HTTP ${resp.status}`);
     }
 
-    const data = await resp.json();
+    const html = await resp.text();
 
-    // 禅道返回的数据结构可能是 data.executions 或直接是 executions
-    let executions = data?.data?.executions || data?.executions || [];
+    // 从HTML中提取 <script>data = "[...]"</script> 中的数据
+    const dataMatch = html.match(/<script>\s*data\s*=\s*"(\\[^]|[^\\"])*"/);
+    if (!dataMatch) {
+      console.error('[ZentaoService] 未找到执行数据');
+      return [];
+    }
 
-    // 格式化执行列表
-    return executions.map(ex => ({
-      id: String(ex.id),
-      name: ex.name || ex.title || `执行 ${ex.id}`,
-      projectId: ex.project || ex.projectId,
-      projectName: ex.projectName || '',
-      status: ex.status || 'doing',
-      begin: ex.begin || '',
-      end: ex.end || ''
-    }));
+    // 提取并解析JSON字符串
+    const jsonStr = dataMatch[0].replace(/<script>\s*data\s*=\s*"/, '').replace(/"\s*<\/script>\s*$/, '');
+    // 解码转义字符
+    const decodedJsonStr = JSON.parse(`"${jsonStr}"`);
+    const executions = JSON.parse(decodedJsonStr);
+
+    console.log('[ZentaoService] 解析到', executions.length, '个执行');
+
+    // 格式化执行列表，保留type字段
+    return executions.map(ex => {
+      // 从name中提取纯名称（去掉HTML标签）
+      let cleanName = ex.name || ex.title || `执行 ${ex.id}`;
+      // 移除HTML标签获取纯文本名称
+      cleanName = cleanName.replace(/<[^>]+>/g, '').trim();
+      // 提取链接中的文本作为名称
+      const nameMatch = cleanName.match(/>([^<]+)</);
+      if (nameMatch) {
+        cleanName = nameMatch[1].trim();
+      }
+
+      return {
+        id: String(ex.id),
+        name: cleanName,
+        projectId: String(ex.project),
+        projectName: ex.projectName || '',
+        status: ex.status || 'doing',
+        begin: ex.begin || '',
+        end: ex.end || '',
+        // 关键：使用准确的type字段
+        type: ex.type || 'execution',  // kanban, sprint, stage
+        kanbanId: ex.type === 'kanban' ? String(ex.id) : null
+      };
+    });
   } catch (err) {
     console.error('[ZentaoService] 获取执行列表失败:', err.message);
     return [];
@@ -460,6 +593,466 @@ async function getExecutionsByProject(projectId) {
   }
 }
 
+// ============================================================================
+// 看板相关 API
+// ============================================================================
+
+/**
+ * 获取看板详情（包括区域、分组、列等信息）
+ * @param {number|string} kanbanId - 看板ID
+ * @returns {Promise<Object>} 看板详情
+ */
+async function getKanbanView(kanbanId) {
+  try {
+    const cookies = await getZentaoCookies();
+    const endpoint = `${config.zentao.url}/zentao/kanban-view-${kanbanId}.json`;
+
+    console.log('[ZentaoService] 获取看板详情:', kanbanId);
+
+    const resp = await fetch(endpoint, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Cookie': cookiesToString(cookies),
+      },
+    });
+
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+
+    const data = await resp.json();
+    return data;
+  } catch (err) {
+    console.error('[ZentaoService] 获取看板详情失败:', err.message);
+    return null;
+  }
+}
+
+/**
+ * 创建看板卡片
+ * @param {Object} cardData - 卡片数据
+ * @param {number|string} cardData.kanbanId - 看板ID
+ * @param {number|string} cardData.regionId - 区域ID
+ * @param {number|string} cardData.groupId - 分组ID
+ * @param {number|string} cardData.columnId - 列ID
+ * @param {string} cardData.name - 卡片名称
+ * @param {string} [cardData.spec] - 卡片描述
+ * @param {number} [cardData.pri] - 优先级
+ * @param {string} [cardData.assignedTo] - 指派给
+ * @param {string} [cardData.deadline] - 截止日期
+ * @returns {Promise<{success: boolean, cardId?: number, message?: string}>}
+ */
+async function createKanbanCard(cardData) {
+  try {
+    const cookies = await getZentaoCookies();
+
+    const { kanbanId, regionId, groupId, columnId, ...rest } = cardData;
+
+    if (!kanbanId || !regionId || !groupId || !columnId) {
+      return {
+        success: false,
+        message: '缺少必要参数: kanbanId, regionId, groupId, columnId'
+      };
+    }
+
+    const endpoint = `${config.zentao.url}/zentao/kanban-createCard-${kanbanId}-${regionId}-${groupId}-${columnId}.json`;
+
+    console.log('[ZentaoService] 创建看板卡片:', cardData.name);
+
+    const formData = new FormData();
+    formData.append('name', rest.name || '');
+    formData.append('spec', rest.spec || '');
+    formData.append('pri', String(rest.pri ?? 3));
+    if (rest.assignedTo) {
+      formData.append('assignedTo[]', rest.assignedTo);
+    } else {
+      formData.append('assignedTo[]', '');
+    }
+    formData.append('deadline', rest.deadline || '');
+    formData.append('begin', rest.begin || '');
+    formData.append('estimate', rest.estimate || '');
+    formData.append('color', rest.color || '');
+
+    const zentaoResp = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Cookie': cookiesToString(cookies),
+      },
+      body: formData,
+    });
+
+    const responseText = await zentaoResp.text();
+
+    if (!zentaoResp.ok) {
+      console.error('[ZentaoService] HTTP 错误:', zentaoResp.status, responseText.substring(0, 200));
+      return {
+        success: false,
+        message: `HTTP ${zentaoResp.status}`
+      };
+    }
+
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (e) {
+      console.error('[ZentaoService] 响应解析失败:', responseText.substring(0, 200));
+      return {
+        success: false,
+        message: '响应解析失败'
+      };
+    }
+
+    if (data.result === 'success' || data.status === 'success') {
+      const cardId = data.id || data.card?.id || data.data?.id;
+      console.log('[ZentaoService] 看板卡片创建成功, ID:', cardId);
+      return {
+        success: true,
+        cardId: cardId,
+        message: '看板卡片已创建'
+      };
+    }
+
+    const errorMessage = data.message || data.error || '未知错误';
+    console.error('[ZentaoService] 禅道返回错误:', errorMessage);
+    return {
+      success: false,
+      message: errorMessage
+    };
+  } catch (err) {
+    console.error('[ZentaoService] 创建看板卡片异常:', err.message);
+    return {
+      success: false,
+      message: err.message
+    };
+  }
+}
+
+/**
+ * 编辑看板卡片
+ * @param {number|string} cardId - 卡片ID
+ * @param {Object} updates - 更新的字段
+ * @returns {Promise<{success: boolean, message?: string}>}
+ */
+async function editKanbanCard(cardId, updates) {
+  try {
+    const cookies = await getZentaoCookies();
+
+    const endpoint = `${config.zentao.url}/zentao/kanban-editCard-${cardId}.json`;
+
+    console.log('[ZentaoService] 编辑看板卡片:', cardId);
+
+    const formData = new FormData();
+    if (updates.name !== undefined) formData.append('name', updates.name);
+    if (updates.spec !== undefined) formData.append('spec', updates.spec);
+    if (updates.pri !== undefined) formData.append('pri', String(updates.pri));
+    if (updates.assignedTo !== undefined) formData.append('assignedTo[]', updates.assignedTo || '');
+    if (updates.deadline !== undefined) formData.append('deadline', updates.deadline || '');
+    if (updates.begin !== undefined) formData.append('begin', updates.begin || '');
+    if (updates.estimate !== undefined) formData.append('estimate', updates.estimate || '');
+    if (updates.color !== undefined) formData.append('color', updates.color || '');
+    if (updates.progress !== undefined) formData.append('progress', String(updates.progress));
+
+    const zentaoResp = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Cookie': cookiesToString(cookies),
+      },
+      body: formData,
+    });
+
+    const data = await zentaoResp.json();
+
+    if (data.result === 'success' || data.status === 'success') {
+      return {
+        success: true,
+        message: '卡片已更新'
+      };
+    }
+
+    return {
+      success: false,
+      message: data.message || '更新失败'
+    };
+  } catch (err) {
+    console.error('[ZentaoService] 编辑看板卡片失败:', err.message);
+    return {
+      success: false,
+      message: err.message
+    };
+  }
+}
+
+/**
+ * 完成看板卡片
+ * @param {number|string} cardId - 卡片ID
+ * @param {number|string} kanbanId - 看板ID
+ * @returns {Promise<{success: boolean, message?: string}>}
+ */
+async function finishKanbanCard(cardId, kanbanId) {
+  try {
+    const cookies = await getZentaoCookies();
+
+    const endpoint = `${config.zentao.url}/zentao/kanban-finishCard-${cardId}-${kanbanId}.json`;
+
+    console.log('[ZentaoService] 完成看板卡片:', cardId);
+
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Cookie': cookiesToString(cookies),
+      },
+    });
+
+    const data = await resp.json();
+
+    if (data.result === 'success' || data.status === 'success') {
+      return {
+        success: true,
+        message: '卡片已完成'
+      };
+    }
+
+    return {
+      success: false,
+      message: data.message || '操作失败'
+    };
+  } catch (err) {
+    console.error('[ZentaoService] 完成看板卡片失败:', err.message);
+    return {
+      success: false,
+      message: err.message
+    };
+  }
+}
+
+/**
+ * 激活看板卡片
+ * @param {number|string} cardId - 卡片ID
+ * @param {number|string} kanbanId - 看板ID
+ * @returns {Promise<{success: boolean, message?: string}>}
+ */
+async function activateKanbanCard(cardId, kanbanId) {
+  try {
+    const cookies = await getZentaoCookies();
+
+    const endpoint = `${config.zentao.url}/zentao/kanban-activateCard-${cardId}-${kanbanId}.json`;
+
+    console.log('[ZentaoService] 激活看板卡片:', cardId);
+
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Cookie': cookiesToString(cookies),
+      },
+    });
+
+    const data = await resp.json();
+
+    if (data.result === 'success' || data.status === 'success') {
+      return {
+        success: true,
+        message: '卡片已激活'
+      };
+    }
+
+    return {
+      success: false,
+      message: data.message || '操作失败'
+    };
+  } catch (err) {
+    console.error('[ZentaoService] 激活看板卡片失败:', err.message);
+    return {
+      success: false,
+      message: err.message
+    };
+  }
+}
+
+/**
+ * 移动看板卡片
+ * @param {Object} moveData - 移动数据
+ * @param {number|string} moveData.cardId - 卡片ID
+ * @param {number|string} moveData.fromColId - 原列ID
+ * @param {number|string} moveData.toColId - 目标列ID
+ * @param {number|string} moveData.fromLaneId - 原泳道ID
+ * @param {number|string} moveData.toLaneId - 目标泳道ID
+ * @param {number|string} moveData.kanbanId - 看板ID
+ * @returns {Promise<{success: boolean, message?: string}>}
+ */
+async function moveKanbanCard(moveData) {
+  try {
+    const cookies = await getZentaoCookies();
+
+    const { cardId, fromColId, toColId, fromLaneId, toLaneId, kanbanId } = moveData;
+
+    const endpoint = `${config.zentao.url}/zentao/kanban-moveCard-${cardId}-${fromColId}-${toColId}-${fromLaneId}-${toLaneId}-${kanbanId}.json`;
+
+    console.log('[ZentaoService] 移动看板卡片:', cardId);
+
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Cookie': cookiesToString(cookies),
+      },
+    });
+
+    const data = await resp.json();
+
+    if (data.result === 'success' || data.status === 'success') {
+      return {
+        success: true,
+        message: '卡片已移动'
+      };
+    }
+
+    return {
+      success: false,
+      message: data.message || '移动失败'
+    };
+  } catch (err) {
+    console.error('[ZentaoService] 移动看板卡片失败:', err.message);
+    return {
+      success: false,
+      message: err.message
+    };
+  }
+}
+
+/**
+ * 删除看板卡片
+ * @param {number|string} cardId - 卡片ID
+ * @param {string} [confirm='no'] - 确认删除
+ * @returns {Promise<{success: boolean, message?: string}>}
+ */
+async function deleteKanbanCard(cardId, confirm = 'yes') {
+  try {
+    const cookies = await getZentaoCookies();
+
+    const endpoint = `${config.zentao.url}/zentao/kanban-deleteCard-${cardId}-${confirm}.json`;
+
+    console.log('[ZentaoService] 删除看板卡片:', cardId);
+
+    const resp = await fetch(endpoint, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Cookie': cookiesToString(cookies),
+      },
+    });
+
+    const data = await resp.json();
+
+    if (data.result === 'success' || data.status === 'success') {
+      return {
+        success: true,
+        message: '卡片已删除'
+      };
+    }
+
+    return {
+      success: false,
+      message: data.message || '删除失败'
+    };
+  } catch (err) {
+    console.error('[ZentaoService] 删除看板卡片失败:', err.message);
+    return {
+      success: false,
+      message: err.message
+    };
+  }
+}
+
+/**
+ * 从看板页面HTML中解析 regionID、laneID、columnID
+ * @param {number|string} executionId - 执行ID
+ * @param {string} [laneType='task'] - 泳道类型 ('task'=任务, 'story'=研发需求, 'bug'=Bug)
+ * @param {string} [columnType='wait'] - 列类型 ('wait'=未开始, 'developing'=研发中, 'developed'=研发完毕 等)
+ * @returns {Promise<{regionId?: number, laneId?: number, columnId?: number} | null>}
+ */
+async function getKanbanParams(executionId, laneType = 'task', columnType = 'wait') {
+  try {
+    const cookies = await getZentaoCookies();
+    const endpoint = `${config.zentao.url}/zentao/execution-kanban-${executionId}.html`;
+
+    console.log('[ZentaoService] 解析看板页面参数:', { executionId, laneType, columnType });
+
+    const resp = await fetch(endpoint, {
+      method: 'GET',
+      headers: {
+        'Accept': 'text/html',
+        'Cookie': cookiesToString(cookies),
+      },
+    });
+
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+
+    const html = await resp.text();
+
+    // 解析 regionId: 从 .region 元素的 data-id 属性
+    const regionMatch = html.match(/<div\s+class="region[^"]*"\s+data-id="(\d+)"/);
+    if (!regionMatch) {
+      console.error('[ZentaoService] 未找到 region 元素');
+      return null;
+    }
+    const regionId = parseInt(regionMatch[1]);
+
+    // 解析 laneId: 根据 title 找到对应的 kanban-lane 元素
+    // laneType 映射到 title
+    const laneTitleMap = {
+      'task': '任务',
+      'story': '研发需求',
+      'bug': 'Bug'
+    };
+    const laneTitle = laneTitleMap[laneType] || '任务';
+
+    // 匹配 <div class="kanban-lane" data-id="114" ... 中包含 title="任务" 的元素
+    const laneMatch = html.match(new RegExp(
+      `<div\\s+class="kanban-lane[^"]*"\\s+data-id="(\\d+)"[^>]*>[\\s\\S]*?title="${laneTitle}"`,
+      'i'
+    ));
+    if (!laneMatch) {
+      console.error('[ZentaoService] 未找到 lane 元素, title:', laneTitle);
+      return null;
+    }
+    const laneId = parseInt(laneMatch[1]);
+
+    // 解析 columnId: 根据列类型找到对应的 column data-id
+    // columnType 映射到 data-type
+    const columnMatch = html.match(new RegExp(
+      `<div\\s+class="kanban-col[^"]*"\\s+data-id="(\\d+)"\\s+data-type="${columnType}"`,
+      'i'
+    ));
+    if (!columnMatch) {
+      console.error('[ZentaoService] 未找到 column 元素, type:', columnType);
+      return null;
+    }
+    const columnId = parseInt(columnMatch[1]);
+
+    console.log('[ZentaoService] 解析成功:', { regionId, laneId, columnId });
+
+    return {
+      regionId,
+      laneId,
+      columnId
+    };
+  } catch (err) {
+    console.error('[ZentaoService] 解析看板参数失败:', err.message);
+    return null;
+  }
+}
+
 /**
  * 检查禅道是否已配置
  * @returns {boolean}
@@ -478,8 +1071,18 @@ export {
   createTask,
   getTasks,
   updateTaskStatus,
+  recordTaskEstimate,
   getExecutions,
   getExecutionsByProject,
   clearCookies,
-  isConfigured
+  isConfigured,
+  getKanbanParams,
+  // 看板相关 API
+  getKanbanView,
+  createKanbanCard,
+  editKanbanCard,
+  finishKanbanCard,
+  activateKanbanCard,
+  moveKanbanCard,
+  deleteKanbanCard
 };

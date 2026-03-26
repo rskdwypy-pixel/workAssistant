@@ -29,14 +29,14 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
           // 显示通知
           chrome.notifications.create({
             type: 'basic',
-            iconUrl: 'icons/icon48.png',
+            iconUrl: 'icons/icon128.png',
             title: '工作助手',
             message: `任务已添加：${result.data.title}`
           });
         } else {
           chrome.notifications.create({
             type: 'basic',
-            iconUrl: 'icons/icon48.png',
+            iconUrl: 'icons/icon128.png',
             title: '工作助手',
             message: '添加失败，请确保后端服务正在运行'
           });
@@ -44,7 +44,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       } catch (err) {
         chrome.notifications.create({
           type: 'basic',
-          iconUrl: 'icons/icon48.png',
+          iconUrl: 'icons/icon128.png',
           title: '工作助手',
           message: '连接失败，请确保后端服务正在运行'
         });
@@ -53,8 +53,215 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 });
 
+/**
+ * 获取看板页面的参数（从已渲染的 DOM 中获取）
+ * 必须在消息处理器之前定义
+ */
+async function fetchKanbanPage(params) {
+  const { url } = params;
+
+  console.error('[Background] ========== fetchKanbanPage 开始 ==========');
+  console.error('[Background] URL:', url);
+
+  let logs = []; // 收集所有日志用于返回
+
+  // 先列出所有标签页用于调试
+  const allTabs = await chrome.tabs.query({});
+  console.log('[Background] 当前所有标签页数量:', allTabs.length);
+  allTabs.forEach((tab, i) => {
+    console.log(`[Background]   标签 ${i}: ${tab.url?.substring(0, 80)} (id=${tab.id})`);
+  });
+
+  try {
+    // 从 URL 中提取禅道 baseUrl 和 executionId
+    const urlObj = new URL(url);
+    const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
+    const executionMatch = url.match(/execution-kanban-(\d+)/);
+    const executionId = executionMatch ? executionMatch[1] : null;
+
+    logs.push(`提取参数: baseUrl=${baseUrl}, executionId=${executionId}`);
+    console.log('[Background]', logs[logs.length - 1]);
+
+    // 确保禅道页面存在，并导航到看板页面
+    console.error('[Background] 调用 ensureZentaoTab...');
+    const targetTab = await ensureZentaoTab(baseUrl, executionId);
+    console.error('[Background] ensureZentaoTab 返回:', targetTab ? `标签 ${targetTab.id}, URL: ${targetTab.url?.substring(0, 60)}` : 'null');
+
+    if (!targetTab) {
+      console.error('[Background] 无法获取禅道页面');
+      return { success: false, reason: 'no_zentao_tab' };
+    }
+
+    // 如果当前页面不是看板页面，需要导航
+    if (!targetTab.url || !targetTab.url.includes(`execution-kanban-${executionId}`)) {
+      console.log('[Background] 当前页面不是看板页面，需要导航');
+      await chrome.tabs.update(targetTab.id, { url: url });
+
+      // 等待页面加载完成
+      await new Promise(resolve => {
+        const listener = (tabId, changeInfo) => {
+          if (tabId === targetTab.id && changeInfo.status === 'complete') {
+            chrome.tabs.onUpdated.removeListener(listener);
+            // 短暂等待确保 iframe 开始加载
+            setTimeout(resolve, 500);
+          }
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+
+        // 超时保护
+        setTimeout(() => {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }, 20000);
+      });
+    } else {
+      // 即使是看板页面，也等待一下确保加载完成
+      console.log('[Background] 当前是看板页面，等待确保加载完成');
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    // 从已渲染的 DOM 中获取参数
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: targetTab.id },
+      func: () => {
+        return new Promise((resolve) => {
+          console.log('[Background Content] ============ 脚本已注入，开始执行 ============');
+          console.log('[Background Content] 当前页面 URL:', window.location.href);
+
+          try {
+            // 检查是否有 iframe
+            const iframe = document.getElementById('appIframe-execution');
+            console.log('[Background Content] iframe 元素存在:', !!iframe);
+
+            if (!iframe || !iframe.contentDocument) {
+              // 如果没有 iframe，尝试在主页面查找
+              console.log('[Background Content] 未找到 iframe，尝试在主页面查找');
+              const kanbanElem = document.getElementById('kanban');
+              if (!kanbanElem) {
+                resolve({ success: false, reason: 'no_kanban_or_iframe' });
+                return;
+              }
+
+              const regionElem = kanbanElem.querySelector('.region');
+              const regionId = regionElem?.getAttribute('data-id');
+
+              let laneId = null;
+              const laneNameElems = kanbanElem.querySelectorAll('.kanban-lane-name');
+              for (const elem of laneNameElems) {
+                if (elem.getAttribute('title') === '任务') {
+                  const laneElem = elem.closest('.kanban-lane');
+                  if (laneElem) {
+                    laneId = laneElem.getAttribute('data-id');
+                    break;
+                  }
+                }
+              }
+
+              const columnElem = kanbanElem.querySelector('.kanban-col[data-type="wait"]');
+              const columnId = columnElem?.getAttribute('data-id');
+
+              resolve({
+                success: !!(regionId && laneId && columnId),
+                regionId, laneId, columnId,
+                reason: !(regionId && laneId && columnId) ? 'params_incomplete' : null
+              });
+              return;
+            }
+
+            // 从 iframe 获取参数
+            console.log('[Background Content] 从 iframe 获取参数');
+            const doc = iframe.contentDocument;
+            console.log('[Background Content] iframe URL:', doc.location?.href);
+
+            // 等待 iframe 加载完成，使用轮询方式，最多重试 30 次（3 秒）
+            let retryCount = 0;
+            const maxRetries = 30;
+            const retryInterval = 100; // 100ms
+
+            const checkIframeReady = () => {
+              const region = doc.querySelector('.region');
+              const lanes = doc.querySelectorAll('.kanban-lane');
+              const column = doc.querySelector('.kanban-col[data-type="wait"]');
+
+              if (region && lanes.length > 0 && column) {
+                // 获取 regionId
+                const regionId = region?.getAttribute('data-id');
+
+                // 获取 laneId（title="任务"）
+                let laneId;
+                for (const lane of lanes) {
+                  const name = lane.querySelector('.kanban-lane-name');
+                  if (name?.getAttribute('title') === '任务') {
+                    laneId = lane.getAttribute('data-id');
+                    break;
+                  }
+                }
+
+                // 获取 columnId
+                const columnId = column?.getAttribute('data-id');
+
+                console.log('[Background Content] 从 iframe 获取到参数:', { regionId, laneId, columnId });
+
+                if (regionId && laneId && columnId) {
+                  resolve({ success: true, regionId, laneId, columnId });
+                } else {
+                  resolve({ success: false, reason: 'params_incomplete', debug: { regionId, laneId, columnId } });
+                }
+              } else if (retryCount < maxRetries) {
+                // 如果还没加载完成，快速重试
+                retryCount++;
+                setTimeout(checkIframeReady, retryInterval);
+              } else {
+                // 超时，返回失败
+                console.log('[Background Content] 获取参数超时');
+                resolve({
+                  success: false,
+                  reason: 'timeout',
+                  debug: {
+                    regionExists: !!region,
+                    lanesCount: lanes.length,
+                    columnExists: !!column
+                  }
+                });
+              }
+            };
+
+            checkIframeReady();
+
+          } catch (err) {
+            console.error('[Background Content] 获取参数异常:', err);
+            resolve({ success: false, reason: err.message });
+          }
+        });
+      },
+      args: []
+    });
+
+    const result = results[0]?.result;
+    console.log('[Background] 获取看板参数结果:', result);
+
+    if (!result) {
+      return { success: false, reason: 'no_result', logs };
+    }
+
+    if (!result.success && result.debug) {
+      console.log('[Background] 调试信息:', result.debug);
+      // 将日志添加到调试信息中
+      result.debug.logs = logs;
+    }
+
+    return result;
+  } catch (err) {
+    console.error('[Background] fetchKanbanPage 异常:', err.message);
+    return { success: false, reason: err.message };
+  }
+}
+
 // 处理来自前端的特权API请求
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log('[Background] ========== 收到消息 ==========');
+  console.log('[Background] 消息 action:', request.action);
+
   if (request.action === 'performZenTaoLogin') {
     console.log('[Background] 启动全自动标签页模拟登录流...');
     const baseUrl = request.url.replace(/\/$/, '');
@@ -195,6 +402,49 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch(err => sendResponse({ success: false, reason: err.message }));
     return true; // 保持异步返回
   }
+
+  // 看板相关操作
+  if (request.action === 'createKanbanCard') {
+    createKanbanCard(request)
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, reason: err.message }));
+    return true;
+  }
+
+  if (request.action === 'createKanbanTask') {
+    createKanbanTask(request)
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, reason: err.message }));
+    return true;
+  }
+
+  if (request.action === 'updateKanbanCardStatus') {
+    updateKanbanCardStatus(request)
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, reason: err.message }));
+    return true;
+  }
+
+  if (request.action === 'quickCheckKanban') {
+    quickCheckKanban(request)
+      .then(sendResponse)
+      .catch(err => sendResponse({ isKanban: false, reason: err.message }));
+    return true;
+  }
+
+  if (request.action === 'getKanbanView') {
+    getKanbanView(request)
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, reason: err.message }));
+    return true;
+  }
+
+  if (request.action === 'fetchKanbanPage') {
+    fetchKanbanPage(request)
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, reason: err.message }));
+    return true;
+  }
 });
 
 // 在禅道页面中执行请求（使用 content script）
@@ -297,31 +547,97 @@ async function executeInZentaoPage(params) {
 }
 
 // 确保禅道页面存在，如果不存在则创建一个
-async function ensureZentaoTab(baseUrl) {
-  const tabs = await chrome.tabs.query({ url: `${baseUrl}/*` });
-  let targetTab = tabs.find(tab => tab.url.includes('zentao') && !tab.url.includes('user-login'));
+// kanbanId: 可选，如果提供则尝试找到匹配的看板页面
+async function ensureZentaoTab(baseUrl, kanbanId) {
+  console.log('[Background] ensureZentaoTab 调用:', { baseUrl, kanbanId });
 
-  if (!targetTab) {
-    console.log('[Background] 未找到禅道页面，自动打开...');
-    targetTab = await chrome.tabs.create({ url: `${baseUrl}/zentao/`, active: false });
-    // 等待页面加载完成
-    await new Promise(resolve => {
-      const listener = (tabId, changeInfo) => {
-        if (tabId === targetTab.id && changeInfo.status === 'complete') {
+  // 查找所有标签页
+  const allTabs = await chrome.tabs.query({});
+  console.log('[Background] 当前所有标签页数量:', allTabs.length);
+  allTabs.forEach((tab, i) => {
+    console.log(`[Background]   标签 ${i}:`, tab.url?.substring(0, 80));
+  });
+
+  // 如果提供了 kanbanId，优先查找匹配的看板页面
+  if (kanbanId) {
+    // 查找 execution-kanban-{kanbanId}.html 或 kanban-view-{kanbanId}.html 页面
+    const kanbanTab = allTabs.find(tab =>
+      tab.url &&
+      tab.url.includes('zentao') &&
+      !tab.url.includes('user-login') &&
+      (tab.url.includes(`execution-kanban-${kanbanId}`) ||
+       tab.url.includes(`kanban-view-${kanbanId}`))
+    );
+
+    if (kanbanTab) {
+      console.log('[Background] ✓ 找到匹配的看板页面，刷新以确保cookie有效:', kanbanTab.url);
+      // 刷新页面以确保 cookie/session 有效
+      await chrome.tabs.reload(kanbanTab.id);
+      // 等待刷新完成
+      await new Promise(resolve => {
+        const listener = (tabId, changeInfo) => {
+          if (tabId === kanbanTab.id && changeInfo.status === 'complete') {
+            chrome.tabs.onUpdated.removeListener(listener);
+            setTimeout(resolve, 500);
+          }
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+        setTimeout(() => {
           chrome.tabs.onUpdated.removeListener(listener);
           resolve();
+        }, 10000);
+      });
+      return kanbanTab;
+    }
+
+    // 没有找到匹配的页面，创建一个新的标签页（设为可见以便调试）
+    console.log('[Background] ✗ 未找到匹配的看板页面，创建新页面');
+    const newUrl = `${baseUrl}/zentao/execution-kanban-${kanbanId}.html`;
+    console.log('[Background] 创建标签页 URL:', newUrl);
+    const newTab = await chrome.tabs.create({
+      url: newUrl,
+      active: true  // 设为可见以便调试
+    });
+    console.log('[Background] 新标签页已创建, ID:', newTab.id);
+
+    // 等待页面加载完成，并重新获取 tab 信息以确保 URL 正确
+    await new Promise(resolve => {
+      const listener = (tabId, changeInfo) => {
+        if (tabId === newTab.id && changeInfo.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          // 再等待一小段时间确保页面完全稳定
+          setTimeout(resolve, 500);
         }
       };
       chrome.tabs.onUpdated.addListener(listener);
+
       // 超时保护
       setTimeout(() => {
         chrome.tabs.onUpdated.removeListener(listener);
         resolve();
-      }, 5000);
+      }, 10000);
     });
+
+    // 重新获取 tab 信息以确保 URL 已更新
+    const updatedTab = await chrome.tabs.get(newTab.id);
+    console.log('[Background] 新页面已加载，URL:', updatedTab.url);
+    return updatedTab;
   }
 
-  return targetTab;
+  // 查找任何禅道页面（排除登录页面）
+  const zentaoTab = allTabs.find(tab =>
+    tab.url &&
+    tab.url.includes('zentao') &&
+    !tab.url.includes('user-login')
+  );
+
+  if (zentaoTab) {
+    console.log('[Background] 使用禅道页面:', zentaoTab.url);
+    return zentaoTab;
+  }
+
+  console.log('[Background] 未找到禅道页面，无法继续');
+  return null;
 }
 
 // 更新禅道任务状态
@@ -381,12 +697,13 @@ async function updateZentaoTaskStatus(params) {
 
 // 记录禅道任务工时
 async function recordZentaoEffort(params) {
-  const { baseUrl, taskId, comment, consumedTime, leftTime } = params;
+  const { baseUrl, taskId, comment, consumedTime, leftTime, kanbanId, progress } = params;
 
-  console.log('[Background] 记录禅道任务工时:', { taskId, consumedTime, comment });
+  console.log('[Background] 记录禅道任务工时:', { taskId, consumedTime, comment, kanbanId, progress });
 
-  // 确保禅道页面存在
-  const targetTab = await ensureZentaoTab(baseUrl);
+  // 确保禅道页面存在（如果提供了 kanbanId，尝试找到匹配的页面）
+  const targetTab = await ensureZentaoTab(baseUrl, kanbanId);
+  console.log('[Background] recordZentaoEffort 使用禅道页面:', targetTab?.url);
 
   // 获取当前日期
   const now = new Date();
@@ -394,7 +711,7 @@ async function recordZentaoEffort(params) {
 
   const results = await chrome.scripting.executeScript({
     target: { tabId: targetTab.id },
-    func: (taskId, comment, consumedTime, leftTime, today) => {
+    func: (taskId, comment, consumedTime, leftTime, today, progress) => {
       return new Promise((resolve) => {
         const endpoint = `${window.location.origin}/zentao/task-recordEstimate-${taskId}.html?onlybody=yes`;
 
@@ -423,32 +740,41 @@ async function recordZentaoEffort(params) {
           },
           body: params.toString()
         })
-        .then(r => r.text())
+        .then(r => {
+          console.log('[Background Content] recordEstimate 响应状态:', r.status);
+          return r.text();
+        })
         .then(text => {
+          console.log('[Background Content] recordEstimate 响应长度:', text.length, '前200字符:', text.substring(0, 200));
           // 检查是否成功（返回的 HTML 中可能包含成功信息）
           if (text.includes('class="alert alert-success"') || text.includes('保存成功') || text.includes('记录成功')) {
+            console.log('[Background Content] ✓ 工时记录成功 (明确成功标识)');
             resolve({ success: true });
           } else if (text.includes('class="alert alert-danger"') || text.includes('错误')) {
             // 尝试提取错误信息
-            const errorMatch = text.match(/<div class="alert alert-success"[^>]*>([^<]+)</);
-            if (errorMatch) {
-              resolve({ success: false, reason: errorMatch[1] });
-            } else {
-              resolve({ success: false, reason: '记录工时失败' });
-            }
+            const errorMatch = text.match(/<div class="alert alert-danger"[^>]*>([^<]+)</);
+            const errorMsg = errorMatch ? errorMatch[1] : '记录工时失败';
+            console.log('[Background Content] ✗ 工时记录失败:', errorMsg);
+            resolve({ success: false, reason: errorMsg });
+          } else if (text.includes('user-login') || text.includes('登录')) {
+            console.log('[Background Content] ✗ 会话已过期，需要重新登录');
+            resolve({ success: false, reason: '会话已过期' });
           } else {
-            // 可能是重定向或其他情况，认为成功
-            resolve({ success: true });
+            // 可能是重定向或其他情况
+            console.log('[Background Content] ⚠ 工时记录 - 无明确标识，假定成功。响应内容:', text.substring(0, 500));
+            resolve({ success: true, assumed: true });
           }
         })
         .catch(err => {
+          console.log('[Background Content] ✗ 工时记录请求异常:', err.message);
           resolve({ success: false, reason: err.message });
         });
       });
     },
-    args: [taskId, comment, consumedTime, leftTime, today]
+    args: [taskId, comment, consumedTime, leftTime, today, progress]
   });
 
+  console.log('[Background] recordZentaoEffort 执行结果:', results[0]?.result);
   return results[0].result;
 }
 
@@ -678,3 +1004,776 @@ async function editZentaoTask(params) {
 
   return results[0].result;
 }
+
+// ============================================================================
+// 看板相关操作
+// ============================================================================
+
+/**
+ * 创建看板卡片
+ */
+async function createKanbanCard(params) {
+  const { baseUrl, kanbanId, regionId, groupId, columnId, taskData } = params;
+
+  console.log('[Background] 创建看板卡片:', { kanbanId, regionId, groupId, columnId, taskData });
+
+  // 确保禅道页面存在
+  const targetTab = await ensureZentaoTab(baseUrl, kanbanId);
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: targetTab.id },
+    func: (kanbanId, regionId, groupId, columnId, taskData) => {
+      return new Promise((resolve) => {
+        const endpoint = `${window.location.origin}/zentao/kanban-createCard-${kanbanId}-${regionId}-${groupId}-${columnId}.json`;
+
+        console.log('[Background Content] 请求端点:', endpoint);
+
+        const formData = new FormData();
+        formData.append('name', taskData.title || '');
+        formData.append('spec', taskData.content || taskData.title || '');
+        formData.append('pri', String(taskData.pri || 3));
+        formData.append('assignedTo[]', taskData.assignedTo || '');
+        formData.append('deadline', taskData.dueDate || '');
+        formData.append('begin', taskData.begin || '');
+        formData.append('estimate', taskData.estimate || '');
+        formData.append('color', taskData.color || '');
+
+        fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Origin': window.location.origin,
+            'Referer': `${window.location.origin}/zentao/execution-kanban-${kanbanId}.html`,
+          },
+          body: formData
+        })
+        .then(r => {
+          console.log('[Background Content] 响应状态:', r.status);
+          return r.text();
+        })
+        .then(text => {
+          console.log('[Background Content] 响应内容:', text.substring(0, 1000));
+          try {
+            const data = JSON.parse(text);
+            console.log('[Background Content] 解析后的数据:', data);
+
+            // data.data 可能是 JSON 字符串，需要二次解析
+            let innerData = data.data;
+            if (typeof innerData === 'string') {
+              try {
+                innerData = JSON.parse(innerData);
+              } catch (e) {
+                console.log('[Background Content] data.data 不是有效的 JSON');
+              }
+            }
+
+            // 检查 locate 是否指向 user-deny（权限拒绝）
+            if (innerData?.locate && innerData.locate.includes('user-deny')) {
+              console.log('[Background Content] 权限被拒绝:', innerData.locate);
+              resolve({ success: false, reason: 'permission_denied', message: '没有创建看板卡片的权限', responseData: data });
+              return;
+            }
+
+            if (data.result === 'success' || data.status === 'success') {
+              // 尝试多种方式获取卡片ID
+              const cardId = data.id || data.card?.id || innerData?.id || innerData?.cardId || data.cardId;
+              console.log('[Background Content] 提取到的卡片ID:', cardId, '来源:', {
+                'data.id': data.id,
+                'data.card?.id': data.card?.id,
+                'innerData?.id': innerData?.id,
+                'innerData?.cardId': innerData?.cardId,
+                'data.cardId': data.cardId
+              });
+              resolve({ success: true, cardId, responseData: data });
+            } else {
+              console.log('[Background Content] 创建失败:', data);
+              resolve({ success: false, reason: data.message || '创建失败', responseData: data });
+            }
+          } catch (e) {
+            console.log('[Background Content] JSON解析失败:', e, '原始文本:', text);
+            resolve({ success: false, reason: 'invalid_json', responseText: text.substring(0, 500) });
+          }
+        })
+        .catch(err => {
+          console.log('[Background Content] 请求异常:', err);
+          resolve({ success: false, reason: err.message });
+        });
+      });
+    },
+    args: [kanbanId, regionId, groupId, columnId, taskData]
+  });
+
+  const result = results[0]?.result;
+  console.log('[Background] 创建结果:', result);
+  return result;
+}
+
+/**
+ * 使用 task-create 接口创建看板任务
+ */
+async function createKanbanTask(params) {
+  const { baseUrl, executionId, regionId, laneId, columnId, taskData } = params;
+
+  console.log('[Background] 创建看板任务 (task-create):', { executionId, regionId, laneId, columnId, taskData });
+
+  try {
+    // 确保禅道页面存在
+    const targetTab = await ensureZentaoTab(baseUrl, executionId);
+
+    if (!targetTab) {
+      console.error('[Background] 无法获取禅道页面');
+      return { success: false, reason: 'no_zentao_tab' };
+    }
+
+    console.log('[Background] 准备执行脚本，tab ID:', targetTab.id);
+
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: targetTab.id },
+      func: (executionId, regionId, laneId, columnId, taskData) => {
+        return new Promise((resolve) => {
+          try {
+            // URL 格式: /zentao/task-create-{executionId}-0-0-0-0-regionID={regionId},laneID={laneId},columnID={columnId}.html?onlybody=yes
+            const endpoint = `${window.location.origin}/zentao/task-create-${executionId}-0-0-0-0-regionID=${regionId},laneID=${laneId},columnID=${columnId}.html?onlybody=yes`;
+
+            console.log('[Background Content] 请求端点:', endpoint);
+
+        const formData = new FormData();
+        formData.append('type', taskData.type || 'devel');
+        formData.append('module', '0');
+        formData.append('assignedTo[]', taskData.assignedTo || '');
+        formData.append('teamMember', '');
+        formData.append('mode', 'linear');
+        formData.append('region', String(regionId));
+        formData.append('lane', String(laneId));
+        formData.append('status', 'wait');
+        formData.append('story', '');
+        formData.append('color', '');
+        formData.append('name', taskData.title || '');
+        formData.append('storyEstimate', '');
+        formData.append('storyDesc', '');
+        formData.append('storyPri', '');
+        formData.append('pri', String(taskData.pri || 3));
+        formData.append('estimate', '');
+        formData.append('desc', taskData.content || taskData.title || '');
+        formData.append('estStarted', '');
+        formData.append('deadline', taskData.dueDate || '');
+        formData.append('uid', Math.random().toString(36).substring(2, 14));
+
+        // 添加空的 team 数组（5个）
+        for (let i = 0; i < 5; i++) {
+          formData.append('team[]', '');
+          formData.append('teamSource[]', '');
+          formData.append('teamEstimate[]', '');
+        }
+
+        // 打印完整的请求数据
+        const requestDataLogs = {};
+        for (let [key, value] of formData.entries()) {
+          requestDataLogs[key] = value;
+        }
+        console.log('[Background Content] =================== 预备发送创建请求 ===================');
+        console.log('[Background Content] 创建 URL:', endpoint);
+        console.log('[Background Content] 请求体参数 (FormData):', JSON.stringify(requestDataLogs, null, 2));
+
+        fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Origin': window.location.origin,
+            'Referer': endpoint,
+          },
+          body: formData
+        })
+        .then(r => {
+          console.log('[Background Content] 响应 HTTP 状态码:', r.status);
+          return r.text();
+        })
+        .then(async text => {
+          console.log('[Background Content] =================== 完整响应文本开始 ===================');
+          console.log(text);
+          console.log('[Background Content] =================== 完整响应文本结束 ===================');
+          try {
+            const data = JSON.parse(text);
+            console.log('[Background Content] 解析后的数据:', data);
+
+            // data.data 可能是 JSON 字符串，需要二次解析
+            let innerData = data.data;
+            if (typeof innerData === 'string') {
+              try {
+                innerData = JSON.parse(innerData);
+              } catch (e) {
+                console.log('[Background Content] data.data 不是有效的 JSON');
+              }
+            }
+
+            // 检查 locate 是否指向 user-deny（权限拒绝）
+            if (innerData?.locate && innerData.locate.includes('user-deny')) {
+              console.log('[Background Content] 权限被拒绝:', innerData.locate);
+              resolve({ success: false, reason: 'permission_denied', message: '没有创建看板任务的权限', responseData: data });
+              return;
+            }
+
+            if (data.result === 'success' || data.status === 'success') {
+              console.log('[Background Content] 创建成功，开始解析任务ID');
+
+              // 尝试多种方式获取任务ID
+              let taskId = data.id || data.task?.id || innerData?.id || innerData?.taskId || data.taskId;
+
+              console.log('[Background Content] 初步提取的 taskId:', taskId, '有 callback:', !!data.callback);
+
+              // 检查 callback 字段 - 看板任务返回的 callback 中包含新任务 ID
+              if (!taskId && data.callback) {
+                console.log('[Background Content] 开始解析 callback，长度:', data.callback.length);
+                try {
+                  // callback 格式: parent.updateKanban({...}, 0)
+                  // 需要从中解析出看板数据，然后找到新创建的任务
+                  const callbackMatch = data.callback.match(/parent\.updateKanban\((.+),\s*\d+\)/);
+                  console.log('[Background Content] callback 匹配结果:', callbackMatch ? '成功' : '失败');
+                  if (callbackMatch) {
+                    const kanbanJson = callbackMatch[1];
+                    console.log('[Background Content] 提取的 JSON 长度:', kanbanJson.length);
+                    const kanbanData = JSON.parse(kanbanJson);
+                    console.log('[Background Content] 解析后的看板数据键:', Object.keys(kanbanData));
+
+                    // 遍历所有区域、分组、泳道，找到所有任务
+                    let allTasks = [];
+                    Object.values(kanbanData).forEach(region => {
+                      if (region.groups) {
+                        region.groups.forEach(group => {
+                          if (group.lanes) {
+                            group.lanes.forEach(lane => {
+                              if (lane.items) {
+                                Object.values(lane.items).forEach(items => {
+                                  if (Array.isArray(items)) {
+                                    items.forEach(item => {
+                                      if (item.id) {
+                                        allTasks.push(item);
+                                      }
+                                    });
+                                  }
+                                });
+                              }
+                            });
+                          }
+                        });
+                      }
+                    });
+
+                    // 按照 ID 降序排序，从后往前遍历
+                    allTasks.sort((a, b) => b.id - a.id);
+
+                    const now = Date.now();
+                    const targetTitle = taskData.title;
+
+                    // 精准匹配：name 相同，且创建时间在 5 分钟内算成功
+                    let matchedTask = allTasks.find(item => {
+                      if (item.name !== targetTitle) return false;
+                      const timeStr = item.openedDate || item.createdDate || item.addedDate || item.date;
+                      if (!timeStr) return true; // 若无时间字段，降序且名称匹配即算数
+                      const taskTime = new Date(timeStr.replace(/-/g, '/')).getTime();
+                      return Math.abs(now - taskTime) <= 5 * 60 * 1000;
+                    });
+
+                    if (matchedTask) {
+                      taskId = String(matchedTask.id);
+                      console.log('[Background Content] 从 callback 中精准匹配到任务ID:', taskId);
+                    } else {
+                      console.log('[Background Content] 未能通过 name 和时间精准匹配到任务 ID');
+                    }
+                  }
+                } catch (e) {
+                  console.log('[Background Content] 解析 callback 失败:', e);
+                }
+              }
+
+              // 检查 locate 中的任务ID
+              if (!taskId && innerData?.locate) {
+                const match = innerData.locate.match(/task-view-(\d+)/);
+                if (match) {
+                  taskId = match[1];
+                }
+              }
+
+              // 【新增兜底方案】如果依然没有在 callback 中找到任务，使用看板 API 抓取当前所有看板卡片并比对
+              if (!taskId) {
+                console.log('[Background Content] 🔄 触发看板终极兜底: 通过 kanban-view API 抓取所有任务...');
+                try {
+                  const viewUrl = `${window.location.origin}/zentao/kanban-view-${executionId}.json`;
+                  const viewResp = await fetch(viewUrl, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+                  });
+                  if (viewResp.ok) {
+                    const text = await viewResp.text();
+                    let listData = JSON.parse(text);
+                    let viewData = listData.data?.data || listData.data || listData;
+                    if (typeof viewData === 'string') {
+                       try { viewData = JSON.parse(viewData); } catch (e) {}
+                    }
+                    if (viewData && typeof viewData.data === 'string') {
+                       try { viewData = JSON.parse(viewData.data); } catch (e) {}
+                    }
+                    
+                    let tasksArray = [];
+                    
+                    // 递归提取对象中所有的 items
+                    function extractItems(obj) {
+                      if (!obj || typeof obj !== 'object') return;
+                      // 如果发现是 items 对象，里面包含 wait/doing/done 数组
+                      if (obj.items && typeof obj.items === 'object') {
+                        Object.values(obj.items).forEach(itemsList => {
+                          if (Array.isArray(itemsList)) {
+                            itemsList.forEach(task => tasksArray.push(task));
+                          }
+                        });
+                      }
+                      // 如果是直接包含了项的数组（通常项含有 id, name 且没有 children 等特定标志）
+                      if (Array.isArray(obj)) {
+                        obj.forEach(item => {
+                          if (item && item.id && item.name) tasksArray.push(item);
+                          else extractItems(item);
+                        });
+                      } else {
+                        Object.values(obj).forEach(val => extractItems(val));
+                      }
+                    }
+                    
+                    extractItems(viewData);
+                    
+                    if (tasksArray.length > 0) {
+                      tasksArray.sort((a, b) => b.id - a.id);
+                      const tNow = Date.now();
+                      const tTitle = taskData.title;
+                      const matchedFallback = tasksArray.find(item => {
+                        if (item.name !== tTitle) return false;
+                        const tStr = item.openedDate || item.createdDate || item.addedDate || item.date;
+                        if (!tStr) return true;
+                        const ttTime = new Date(tStr.replace(/-/g, '/')).getTime();
+                        return Math.abs(tNow - ttTime) <= 5 * 60 * 1000;
+                      });
+                      
+                      if (matchedFallback) {
+                        taskId = String(matchedFallback.id);
+                        console.log('[Background Content] 🎉 看板兜底匹配成功，找回最新卡片ID:', taskId);
+                      } else {
+                        console.log('[Background Content] ⚠️ 看板兜底拉取成功但也未找到该任务，抓取总记录数:', tasksArray.length);
+                      }
+                    }
+                  } else {
+                    console.log('[Background Content] 看板兜底网络异常 HTTP:', viewResp.status);
+                  }
+                } catch(err) {
+                  console.log('[Background Content] 看板兜底发生异常:', err);
+                }
+              }
+
+              console.log('[Background Content] 最终提取到的任务ID:', taskId);
+              resolve({ success: true, taskId, cardId: taskId, responseData: data });
+            } else {
+              console.log('[Background Content] 创建失败:', data);
+              resolve({ success: false, reason: data.message || '创建失败', responseData: data });
+            }
+          } catch (e) {
+            console.log('[Background Content] JSON解析失败:', e, '原始文本:', text);
+            resolve({ success: false, reason: 'invalid_json', responseText: text.substring(0, 500) });
+          }
+        })
+        .catch(err => {
+          console.log('[Background Content] 请求异常:', err);
+          resolve({ success: false, reason: err.message });
+        });
+      } catch (error) {
+        console.error('[Background Content] 脚本执行异常:', error);
+        resolve({ success: false, reason: 'script_error: ' + error.message });
+      }
+      });
+    },
+    args: [executionId, regionId, laneId, columnId, taskData]
+  });
+
+  if (!results || results.length === 0) {
+    console.error('[Background] 执行脚本无结果返回');
+    return { success: false, reason: 'no_script_result' };
+  }
+
+  const result = results[0]?.result;
+  console.log('[Background] 创建看板任务结果:', result);
+
+  // 如果创建成功，尝试从 callback 中解析任务 ID
+  if (result && result.success && result.responseData && result.responseData.callback) {
+    console.log('[Background] 开始解析 callback 获取任务 ID');
+    try {
+      const callback = result.responseData.callback;
+      console.log('[Background] callback 前100字符:', callback.substring(0, 100));
+      console.log('[Background] callback 后100字符:', callback.substring(callback.length - 100));
+
+      // callback 格式: parent.updateKanban({...}, 0)
+      // 使用更健壮的方法：找到第一个 { 和最后一个 ), 然后找到最后的数字
+      const startIdx = callback.indexOf('{');
+      const lastCommaIdx = callback.lastIndexOf(',');
+      const endIdx = callback.lastIndexOf(')');
+
+      if (startIdx >= 0 && lastCommaIdx > startIdx && endIdx > lastCommaIdx) {
+        const kanbanJson = callback.substring(startIdx, lastCommaIdx);
+        console.log('[Background] 提取的 JSON 长度:', kanbanJson.length);
+
+        const kanbanData = JSON.parse(kanbanJson);
+        console.log('[Background] kanbanData 顶层键:', Object.keys(kanbanData));
+
+        // 遍历看板数据，获取所有任务
+        // 数据结构: kanbanData["20"].groups[].lanes[].items[status][] = tasks
+        let allTasks = [];
+        Object.values(kanbanData).forEach(region => {
+          console.log('[Background] region:', region.id, region.name, 'groups 数量:', region.groups?.length);
+          if (region.groups && Array.isArray(region.groups)) {
+            region.groups.forEach(group => {
+              console.log('[Background]   group:', group.id, '有 lanes:', !!group.lanes, 'lanes 数量:', group.lanes?.length);
+              if (group.lanes && Array.isArray(group.lanes)) {
+                group.lanes.forEach(lane => {
+                  console.log('[Background]     lane:', lane.id, lane.name, '有 items:', !!lane.items);
+                  if (lane.items) {
+                    console.log('[Background]       items 键:', Object.keys(lane.items));
+                    // items 是对象，键是状态名（如 wait, closed），值是数组
+                    Object.entries(lane.items).forEach(([status, items]) => {
+                      console.log('[Background]         status:', status, '数组长度:', items?.length);
+                      if (Array.isArray(items)) {
+                        items.forEach(item => {
+                          console.log('[Background]           item id:', item.id, 'name:', item.name);
+                          if (item.id) {
+                            allTasks.push(item);
+                          }
+                        });
+                      }
+                    });
+                  }
+                });
+              }
+            });
+          }
+        });
+
+        // 按照 ID 降序排序，从后往前遍历
+        allTasks.sort((a, b) => b.id - a.id);
+
+        const now = Date.now();
+        const targetTitle = taskData.title;
+
+        // 精准匹配：name 相同，且创建时间在 5 分钟内算成功
+        let matchedTask = allTasks.find(item => {
+          if (item.name !== targetTitle) return false;
+          const timeStr = item.openedDate || item.createdDate || item.addedDate || item.date;
+          if (!timeStr) return true; // 若无时间字段，降序且名称匹配即算数
+          const taskTime = new Date(timeStr.replace(/-/g, '/')).getTime();
+          return Math.abs(now - taskTime) <= 5 * 60 * 1000;
+        });
+
+        if (matchedTask) {
+          result.taskId = String(matchedTask.id);
+          result.cardId = String(matchedTask.id);
+          console.log('[Background] ✅ 从 callback 中精准匹配到任务 ID:', result.taskId);
+        } else {
+          console.log('[Background] ⚠️ 未能通过 name 和时间精准匹配到任务 ID');
+        }
+      } else {
+        console.log('[Background] ❌ 无法解析 callback 格式');
+      }
+    } catch (e) {
+      console.log('[Background] ❌ 解析 callback 异常:', e.message, e.stack);
+    }
+  }
+
+  return result || { success: false, reason: 'null_result' };
+  } catch (error) {
+    console.error('[Background] createKanbanTask 异常:', error);
+    return { success: false, reason: 'exception: ' + error.message };
+  }
+}
+
+/**
+ * 更新看板卡片状态
+ */
+async function updateKanbanCardStatus(params) {
+  const { baseUrl, cardId, kanbanId, status } = params;
+
+  console.log('[Background] 更新看板卡片状态:', { cardId, kanbanId, status });
+
+  // 确保使用正确的看板页面（匹配 kanbanId）
+  const targetTab = await ensureZentaoTab(baseUrl, kanbanId);
+
+  if (!targetTab) {
+    console.error('[Background] 无法获取禅道页面');
+    return { success: false, reason: 'no_zentao_tab' };
+  }
+
+  console.log('[Background] 使用禅道页面:', targetTab.url);
+
+  // 根据状态选择API端点（在 content script 中使用 window.location.origin）
+  let apiPath;
+  if (status === 'done') {
+    apiPath = `/zentao/kanban-finishCard-${cardId}-${kanbanId}.json`;
+  } else if (status === 'in_progress') {
+    apiPath = `/zentao/kanban-activateCard-${cardId}-${kanbanId}.json`;
+  } else {
+    // 对于其他状态，可能需要移动卡片
+    apiPath = `/zentao/kanban-activateCard-${cardId}-${kanbanId}.json`;
+  }
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: targetTab.id },
+    func: (apiPath) => {
+      return new Promise((resolve) => {
+        const endpoint = `${window.location.origin}${apiPath}`;
+        // 添加详细日志，包括当前页面URL
+        console.log('[Background Content] ===== 更新看板卡片状态 =====');
+        console.log('[Background Content] 当前页面 URL:', window.location.href);
+        console.log('[Background Content] 请求 endpoint:', endpoint);
+        console.log('[Background Content] apiPath:', apiPath);
+        fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+          }
+        })
+        .then(r => {
+          console.log('[Background Content] 响应状态:', r.status);
+          return r.json();
+        })
+        .then(data => {
+          console.log('[Background Content] 响应数据:', data);
+          if (data.result === 'success' || data.status === 'success') {
+            console.log('[Background Content] ✓ 更新成功');
+            resolve({ success: true });
+          } else {
+            console.log('[Background Content] ✗ 更新失败:', data);
+            resolve({ success: false, reason: data.message || data.result || '更新失败' });
+          }
+        })
+        .catch(err => {
+          console.log('[Background Content] ✗ 请求异常:', err.message);
+          resolve({ success: false, reason: err.message });
+        });
+      });
+    },
+    args: [apiPath]
+  });
+
+  return results[0].result;
+}
+
+/**
+ * 快速检测执行是否为看板类型
+ * 通过尝试获取看板视图来判断
+ */
+async function quickCheckKanban(params) {
+  const { baseUrl, executionId } = params;
+  console.log('[Background] 快速检测看板类型:', executionId);
+
+  try {
+    // 确保禅道页面存在
+    const targetTab = await ensureZentaoTab(baseUrl, executionId);
+
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: targetTab.id },
+      func: (executionId) => {
+        return new Promise((resolve) => {
+          // 尝试请求看板视图JSON接口
+          const jsonUrl = `${window.location.origin}/zentao/kanban-view-${executionId}.json`;
+          console.log('[Background Content] 检测看板:', jsonUrl);
+
+          fetch(jsonUrl, {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+            }
+          })
+          .then(r => {
+            console.log('[Background Content] 响应状态:', r.status);
+            return r.text();
+          })
+          .then(text => {
+            console.log('[Background Content] 看板检测响应前200字符:', text.substring(0, 200));
+
+            // 尝试解析JSON
+            try {
+              const data = JSON.parse(text);
+              console.log('[Background Content] 解析后的JSON顶层键:', Object.keys(data));
+              console.log('[Background Content] data.data类型:', typeof data.data);
+
+              // 检查是否被拒绝访问（user-deny表示不是看板类型或权限不足）
+              if (data.data && typeof data.data === 'string') {
+                try {
+                  const innerData = JSON.parse(data.data);
+                  console.log('[Background Content] innerData键:', Object.keys(innerData));
+                  if (innerData.locate && innerData.locate.includes('user-deny')) {
+                    console.log('[Background Content] 返回user-deny，不是看板类型');
+                    resolve({ isKanban: false, reason: 'not_kanban' });
+                    return;
+                  }
+                  // 检查innerData中是否有regions
+                  if (innerData.regions && Array.isArray(innerData.regions) && innerData.regions.length > 0) {
+                    console.log('[Background Content] 在innerData中检测到regions');
+                    resolve({ isKanban: true });
+                    return;
+                  }
+                } catch (e) {
+                  console.log('[Background Content] 解析innerData失败:', e.message);
+                }
+              }
+
+              // 检查是否有regions数组（看板的特征）
+              if (data.data && typeof data.data === 'object') {
+                console.log('[Background Content] data.data是对象，键:', Object.keys(data.data));
+
+                // 情况1: data.data.data 是JSON字符串
+                if (data.data.data && typeof data.data.data === 'string') {
+                  try {
+                    const kanbanData = JSON.parse(data.data.data);
+                    console.log('[Background Content] 解析data.data.data成功，键:', Object.keys(kanbanData));
+                    if (kanbanData.regions && Array.isArray(kanbanData.regions) && kanbanData.regions.length > 0) {
+                      console.log('[Background Content] 检测到看板结构(data.data.data解析后)');
+                      resolve({ isKanban: true });
+                      return;
+                    }
+                  } catch (e) {
+                    console.log('[Background Content] 解析data.data.data失败:', e.message);
+                  }
+                }
+
+                // 情况2: data.data 本身有regions
+                if (data.data.regions && Array.isArray(data.data.regions) && data.data.regions.length > 0) {
+                  console.log('[Background Content] 检测到看板结构(data.data.regions)');
+                  resolve({ isKanban: true });
+                  return;
+                }
+
+                // 情况3: 检查data.data的data属性（对象形式）
+                if (data.data.data && typeof data.data.data === 'object') {
+                  const kanbanData = data.data.data;
+                  console.log('[Background Content] data.data.data是对象，键:', Object.keys(kanbanData));
+                  if (kanbanData.regions && Array.isArray(kanbanData.regions) && kanbanData.regions.length > 0) {
+                    console.log('[Background Content] 检测到看板结构(data.data.data对象)');
+                    resolve({ isKanban: true });
+                    return;
+                  }
+                }
+              }
+
+              // 其他情况：可能是普通的阶段/迭代
+              console.log('[Background Content] 未检测到看板结构');
+              resolve({ isKanban: false, reason: 'no_regions' });
+            } catch (e) {
+              // JSON解析失败，可能不是有效的看板响应
+              console.log('[Background Content] JSON解析失败:', e.message);
+              resolve({ isKanban: false, reason: 'parse_error' });
+            }
+          })
+          .catch(err => {
+            console.log('[Background Content] 请求失败:', err.message);
+            // 请求失败也可能是网络问题，保守判断为不是看板
+            resolve({ isKanban: false, reason: 'request_failed' });
+          });
+        });
+      },
+      args: [executionId]
+    });
+
+    return results[0]?.result || { isKanban: false, reason: 'no_result' };
+  } catch (err) {
+    console.log('[Background] 快速检测看板异常:', err.message);
+    return { isKanban: false, reason: err.message };
+  }
+}
+
+/**
+ * 获取看板视图
+ */
+async function getKanbanView(params) {
+  const { baseUrl, kanbanId } = params;
+
+  console.log('[Background] 获取看板视图:', kanbanId);
+
+  // 确保禅道页面存在
+  const targetTab = await ensureZentaoTab(baseUrl, kanbanId);
+
+  if (!targetTab) {
+    console.error('[Background] 无法获取禅道页面，请确保已打开禅道');
+    return { success: false, reason: 'no_zentao_tab' };
+  }
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: targetTab.id },
+    func: (kanbanId) => {
+      return new Promise((resolve) => {
+        // 尝试先获取HTML页面
+        const htmlUrl = `${window.location.origin}/zentao/kanban-view-${kanbanId}.html`;
+
+        console.log('[Background Content] 请求看板HTML页面:', htmlUrl);
+
+        fetch(htmlUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': 'text/html',
+            'X-Requested-With': 'XMLHttpRequest'
+          }
+        })
+        .then(r => r.text())
+        .then(html => {
+          console.log('[Background Content] 看板HTML页面长度:', html.length);
+
+          // 尝试从HTML中提取看板数据
+          // 看板数据通常在 window.kanban 或类似的变量中
+          // 或者页面中有 data 属性包含 JSON 数据
+
+          // 查找页面中的 script 标签中的数据
+          const dataMatch = html.match(/var kanban\s*=\s*(\{[\s\S]*?\});/);
+          if (dataMatch) {
+            try {
+              const kanbanData = eval('(' + dataMatch[1] + ')');
+              console.log('[Background Content] 从页面提取到看板数据:', kanbanData);
+              resolve({ success: true, data: kanbanData });
+              return;
+            } catch (e) {
+              console.log('[Background Content] 解析页面数据失败:', e);
+            }
+          }
+
+          // 如果无法从HTML提取，尝试JSON接口
+          const jsonUrl = `${window.location.origin}/zentao/kanban-view-${kanbanId}.json`;
+          console.log('[Background Content] 尝试JSON接口:', jsonUrl);
+
+          return fetch(jsonUrl, {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest'
+            }
+          })
+          .then(r => {
+            console.log('[Background Content] JSON接口响应状态:', r.status);
+            return r.json();
+          })
+          .then(data => {
+            console.log('[Background Content] JSON接口返回:', data);
+            console.log('[Background Content] 当前页面URL:', window.location.href);
+            resolve({ success: true, data: data });
+          })
+          .catch(err => {
+            console.log('[Background Content] JSON接口失败:', err);
+            resolve({ success: false, reason: err.message });
+          });
+        })
+        .catch(err => {
+          console.log('[Background Content] 请求失败:', err);
+          resolve({ success: false, reason: err.message });
+        });
+      });
+    },
+    args: [kanbanId]
+  });
+
+  return results[0].result;
+}
+

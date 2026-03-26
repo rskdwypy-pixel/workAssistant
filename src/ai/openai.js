@@ -322,8 +322,223 @@ async function generateSummary(todoTasks, inProgressTasks, doneTasks, type = 'da
   }
 }
 
+/**
+ * 本地规则引擎：前置关键词匹配
+ * @param {string} taskContent - 任务内容
+ * @param {Array} executions - 可用的执行列表
+ * @returns {string|null} - 匹配的执行ID，如果无法唯一匹配则返回null
+ */
+function ruleBasedMatch(taskContent, executions) {
+  console.log('[规则引擎] ========== 开始本地匹配 ==========');
+  console.log('[规则引擎] 任务内容:', taskContent);
+  console.log('[规则引擎] 候选执行数量:', executions.length);
+
+  if (!executions || executions.length === 0) {
+    console.log('[规则引擎] 没有可用的执行列表');
+    return null;
+  }
+
+  const lowerContent = taskContent.toLowerCase();
+  const matches = [];
+
+  // 构建别名映射（从执行的项目名称和执行名称生成）
+  for (const exec of executions) {
+    const aliases = new Set();
+
+    console.log(`[规则引擎] 检查执行 ${exec.id}: ${exec.name} | 项目: ${exec.projectName || '未设置'}`);
+
+    // 添加项目名称（全名和小写）
+    if (exec.projectName) {
+      const lowerProjectName = exec.projectName.toLowerCase();
+      aliases.add(lowerProjectName);
+      console.log(`[规则引擎]   - 项目名: ${lowerProjectName}`);
+    }
+
+    // 添加执行名称
+    if (exec.name) {
+      aliases.add(exec.name.toLowerCase());
+      console.log(`[规则引擎]   - 执行名: ${exec.name.toLowerCase()}`);
+    }
+
+    // 添加常见别名映射
+    const aliasMap = {
+      '阿迪达斯': ['阿迪', 'adidas', 'adi'],
+      '阿迪': ['阿迪达斯', 'adidas'],
+      'adidas': ['阿迪', '阿迪达斯', 'adi'],
+      '阿达斯': ['阿迪', 'adidas'],
+      '耐克': ['耐', 'nike'],
+      '耐': ['耐克', 'nike'],
+      'nike': ['耐', '耐克'],
+      '民生': ['民生卡', '民生证券']
+    };
+
+    // 检查是否需要添加额外别名
+    for (const [key, values] of Object.entries(aliasMap)) {
+      const projectName = exec.projectName || '';
+      const execName = exec.name || '';
+      const lowerProjectName = projectName.toLowerCase();
+      const lowerExecName = execName.toLowerCase();
+
+      // 双向匹配：项目名包含关键字 OR 关键字包含项目名
+      if (lowerProjectName.includes(key) || key.includes(lowerProjectName) ||
+          lowerExecName.includes(key) || key.includes(lowerExecName)) {
+        console.log(`[规则引擎]   - 匹配到别名映射 "${key}": 添加`, values.join(', '));
+        values.forEach(v => aliases.add(v.toLowerCase()));
+      }
+    }
+
+    console.log(`[规则引擎]   - 所有别名: [${Array.from(aliases).join(', ')}]`);
+
+    // 检查是否匹配
+    for (const alias of aliases) {
+      if (lowerContent.includes(alias) && alias.length >= 2) {
+        matches.push({ id: exec.id, name: exec.name, matchedBy: alias });
+        console.log(`[规则引擎] ✓ 匹配成功: ID=${exec.id}, 别名="${alias}"`);
+        break; // 找到一个匹配就跳出
+      }
+    }
+  }
+
+  console.log('[规则引擎] 匹配结果:', matches.length, '个');
+  matches.forEach(m => console.log(`[规则引擎]   - ${m.id}: ${m.name} (关键词: ${m.matchedBy})`));
+
+  if (matches.length === 1) {
+    console.log('[规则引擎] ✓✓✓ 唯一匹配 ✓✓✓:', matches[0].id, matches[0].name);
+    return matches[0].id;
+  } else if (matches.length > 1) {
+    console.log('[规则引擎] ? 多个匹配，需要AI抉择:', matches.map(m => `${m.id}(${m.matchedBy})`).join(', '));
+    return null;
+  } else {
+    console.log('[规则引擎] ✗ 无匹配，进入AI分析');
+    return null;
+  }
+}
+
+/**
+ * 分析任务并匹配最合适的执行（规则 + AI 双引擎）
+ * @param {string} taskContent - 任务内容
+ * @param {Array} executions - 可用的执行列表
+ * @returns {Promise<string|null>} - 匹配的执行ID，如果没有匹配则返回null
+ */
+async function analyzeTaskForExecution(taskContent, executions) {
+  try {
+    console.log('[Routing] ========== 任务路由分析 ==========');
+    console.log('[Routing] 任务内容:', taskContent);
+    console.log('[Routing] 候选执行数量:', executions.length);
+
+    if (!executions || executions.length === 0) {
+      console.log('[Routing] 没有可用的执行列表');
+      return null;
+    }
+
+    // 第一步：本地规则引擎匹配
+    const ruleMatch = ruleBasedMatch(taskContent, executions);
+    if (ruleMatch) {
+      return ruleMatch; // 规则引擎唯一匹配，直接返回
+    }
+
+    // 第二步：AI 分析（规则引擎无匹配或多匹配）
+    console.log('[Routing] 进入 AI 分析阶段...');
+
+    // 构建 AI 输入的执行列表（JSON 格式）
+    const executionListForAI = executions.map(e => {
+      const aliases = [];
+      if (e.projectName) {
+        aliases.push(e.projectName);
+        // 生成常见别名
+        if (e.projectName.includes('阿迪达斯') || e.projectName.includes('Adidas')) {
+          aliases.push('阿迪', 'Adidas');
+        }
+        if (e.projectName.includes('耐克') || e.projectName.includes('Nike')) {
+          aliases.push('耐', 'Nike');
+        }
+      }
+      return {
+        id: parseInt(e.id) || e.id,
+        name: e.name,
+        project: e.projectName || '未分类',
+        aliases: aliases
+      };
+    });
+
+    // 添加"无法确定"选项
+    executionListForAI.push({
+      id: 0,
+      name: '默认执行',
+      project: '未分类',
+      aliases: ['无法确定', '其他', '默认']
+    });
+
+    // 使用 JSON Mode 和 Few-Shot 优化提示词
+    const prompt = `你是任务分类路由引擎。请分析【用户任务】，从【可用列表】中匹配最合适的执行项目，并输出 JSON 格式。
+
+【可用列表】
+${JSON.stringify(executionListForAI, null, 2)}
+
+【匹配规则】
+1. 优先根据别名和关键词进行精确映射
+2. 如果任务描述模糊或无法匹配任何可用列表中的项目，请务必返回 id: 0 (未分类)
+
+【示例】
+任务："测试阿迪新版本" -> 返回：{"executionId": 123}
+任务："去楼下拿个快递" -> 返回：{"executionId": 0}
+任务："修复登录bug" -> 返回：{"executionId": 456}
+
+【用户任务】
+"${taskContent}"
+
+请只返回JSON格式：{"executionId": 数字}`;
+
+    console.log('[Routing] 发送请求到 OpenAI...');
+
+    const response = await client.chat.completions.create({
+      model: config.ai.model,
+      response_format: { type: "json_object" },  // JSON Mode
+      messages: [
+        { role: 'system', content: '你是任务分类路由引擎，擅长理解任务内容并将其分配到合适的执行中。严格按照JSON格式返回结果。' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.1,  // 降低温度，提高稳定性
+      max_tokens: 50
+    });
+
+    const content = response.choices[0].message.content.trim();
+    console.log('[Routing] AI 原始返回:', content);
+
+    // 解析 JSON
+    let result;
+    try {
+      result = JSON.parse(content);
+    } catch (e) {
+      console.error('[Routing] JSON 解析失败:', content);
+      return null;
+    }
+
+    const aiExecutionId = result.executionId;
+
+    // 验证 ID
+    if (aiExecutionId === 0) {
+      console.log('[Routing] AI 推断为"无法确定"，将使用默认执行');
+      return null; // 返回 null 让调用方使用默认执行
+    }
+
+    const exists = executions.find(e => String(e.id) === String(aiExecutionId));
+    if (exists) {
+      console.log('[Routing] ✓ AI 推断成功:', aiExecutionId, exists.name, '项目:', exists.projectName);
+      return String(aiExecutionId);
+    }
+
+    console.log('[Routing] AI 返回的 ID 不在候选列表中:', aiExecutionId);
+    return null;
+  } catch (err) {
+    console.error('[Routing] AI 分析失败:', err.message);
+    return null;
+  }
+}
+
 export {
   analyzeTask,
+  analyzeTaskForExecution,
   generateSummary,
   SUMMARY_PROMPT,
   TASK_ANALYSIS_PROMPT

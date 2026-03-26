@@ -13,13 +13,58 @@ const router = express.Router();
  */
 router.post('/task', async (req, res) => {
   try {
-    const { content, zentaoId } = req.body;
+    const { content, zentaoId, executionId } = req.body;
 
     if (!content) {
       return res.status(400).json({ error: '请输入任务内容' });
     }
 
-    const result = await taskManager.addOrUpdateTask(content, { zentaoId });
+    // 如果没有提供 executionId，使用 AI 分析自动选择
+    let finalExecutionId = executionId;
+    if (!finalExecutionId || finalExecutionId === '') {
+      console.log('[API] 未提供执行ID，使用 AI 分析自动选择');
+      console.log('[API] 任务内容:', content);
+      // 获取收藏的执行列表
+      const { getFavoriteExecutions } = await import('../services/executionManager.js');
+      const favoriteExecutions = await getFavoriteExecutions();
+      console.log('[API] 收藏的执行列表:', favoriteExecutions.map(e => `ID:${e.id} 名称:${e.name} 项目:${e.projectName || '未分类'}`).join(', '));
+      if (favoriteExecutions.length > 0) {
+        // 有收藏的执行，使用 AI 匹配
+        const { analyzeTaskForExecution } = await import('../ai/openai.js');
+        const matchedExecutionId = await analyzeTaskForExecution(content, favoriteExecutions);
+        if (matchedExecutionId) {
+          finalExecutionId = matchedExecutionId;
+          const matchedExec = favoriteExecutions.find(e => e.id === matchedExecutionId);
+          console.log('[API] ✓ AI 匹配到执行:', finalExecutionId, matchedExec?.name);
+        } else {
+          console.log('[API] ✗ AI 匹配失败，未找到匹配的执行');
+        }
+      } else {
+        console.log('[API] ! 没有收藏的执行，请先收藏需要使用的执行');
+      }
+      // 如果没有匹配到，使用默认执行
+      if (!finalExecutionId) {
+        const { getDefaultExecution } = await import('../services/executionManager.js');
+        const defaultExec = await getDefaultExecution();
+        if (defaultExec) {
+          finalExecutionId = defaultExec.id;
+          console.log('[API] 使用默认执行:', finalExecutionId, defaultExec.name);
+        } else {
+          // 最后的后备：使用配置中的 executionId
+          const { config } = await import('../config.js');
+          if (config.zentao.executionId) {
+            finalExecutionId = String(config.zentao.executionId);
+            console.log('[API] 使用配置中的执行ID:', finalExecutionId);
+          }
+        }
+      }
+    } else {
+      console.log('[API] 用户手动选择执行ID:', finalExecutionId);
+    }
+
+    console.log('[API] 最终使用的执行ID:', finalExecutionId);
+
+    const result = await taskManager.addOrUpdateTask(content, { zentaoId, executionId: finalExecutionId });
     res.json({
       success: true,
       data: result.task,
@@ -192,6 +237,18 @@ router.delete('/task/:id', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/tasks/all - 删除所有本地任务（不影响禅道任务）
+ */
+router.delete('/tasks/all', async (req, res) => {
+  try {
+    const result = await taskManager.deleteAllTasks();
+    res.json({ success: true, deletedCount: result.deletedCount });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -1203,13 +1260,27 @@ router.get('/bugs/stats', async (req, res) => {
 });
 
 /**
- * GET /api/executions - 获取执行列表
+ * GET /api/executions - 获取执行列表（收藏的排在前面）
  */
 router.get('/executions', async (req, res) => {
   try {
-    const { getExecutions } = await import('../services/executionManager.js');
-    const executions = await getExecutions();
+    const { getExecutionsOrdered } = await import('../services/executionManager.js');
+    const executions = await getExecutionsOrdered();
     res.json({ success: true, data: executions });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/executions/update-types - 更新执行类型字段
+ */
+router.post('/executions/update-types', async (req, res) => {
+  try {
+    const { getExecutions } = await import('../services/executionManager.js');
+    // 触发getExecutions会自动更新type字段
+    const executions = await getExecutions();
+    res.json({ success: true, data: executions, message: '执行类型已更新' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1220,9 +1291,10 @@ router.get('/executions', async (req, res) => {
  */
 router.post('/executions/sync', async (req, res) => {
   try {
+    const { executions } = req.body; // 可选：从前端传来的执行数据
     const { syncExecutionsFromZentao } = await import('../services/executionManager.js');
-    const executions = await syncExecutionsFromZentao();
-    res.json({ success: true, data: executions, message: '执行列表已同步' });
+    const syncedExecutions = await syncExecutionsFromZentao(executions);
+    res.json({ success: true, data: syncedExecutions, message: '执行列表已同步' });
   } catch (err) {
     console.error('[API] 同步执行列表失败:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -1241,6 +1313,70 @@ router.post('/executions/default', async (req, res) => {
     const { setDefaultExecution } = await import('../services/executionManager.js');
     await setDefaultExecution(executionId);
     res.json({ success: true, message: '默认执行已设置' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/executions/favorites - 获取收藏的执行列表
+ */
+router.get('/executions/favorites', async (req, res) => {
+  try {
+    const { getFavoriteExecutions } = await import('../services/executionManager.js');
+    const executions = await getFavoriteExecutions();
+    res.json({ success: true, data: executions });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/executions/favorites - 设置收藏的执行列表
+ */
+router.post('/executions/favorites', async (req, res) => {
+  try {
+    const { executionIds } = req.body;
+    if (!Array.isArray(executionIds)) {
+      return res.status(400).json({ success: false, error: 'executionIds 必须是数组' });
+    }
+    const { setFavoriteExecutions } = await import('../services/executionManager.js');
+    await setFavoriteExecutions(executionIds);
+    res.json({ success: true, message: '收藏执行已设置' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/executions/favorites/add - 添加收藏执行
+ */
+router.post('/executions/favorites/add', async (req, res) => {
+  try {
+    const { executionId } = req.body;
+    if (!executionId) {
+      return res.status(400).json({ success: false, error: '缺少 executionId' });
+    }
+    const { addFavoriteExecution } = await import('../services/executionManager.js');
+    await addFavoriteExecution(executionId);
+    res.json({ success: true, message: '已添加到收藏' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/executions/favorites/remove - 移除收藏执行
+ */
+router.post('/executions/favorites/remove', async (req, res) => {
+  try {
+    const { executionId } = req.body;
+    if (!executionId) {
+      return res.status(400).json({ success: false, error: '缺少 executionId' });
+    }
+    const { removeFavoriteExecution } = await import('../services/executionManager.js');
+    await removeFavoriteExecution(executionId);
+    res.json({ success: true, message: '已从收藏移除' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1325,6 +1461,35 @@ router.post('/zentao/task/create', async (req, res) => {
     res.json({ success: true, data });
   } catch (err) {
     console.error('[API] 创建禅道任务失败:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/zentao/kanban/params - 从看板页面解析 regionId、laneId、columnId
+ * Query 参数:
+ *   - executionId: 执行ID
+ *   - laneType: 泳道类型 ('task'=任务, 'story'=研发需求, 'bug'=Bug)
+ *   - columnType: 列类型 ('wait'=未开始, 'developing'=研发中 等)
+ */
+router.get('/zentao/kanban/params', async (req, res) => {
+  try {
+    const { executionId, laneType = 'task', columnType = 'wait' } = req.query;
+
+    if (!executionId) {
+      return res.status(400).json({ success: false, error: '缺少 executionId 参数' });
+    }
+
+    const { getKanbanParams } = await import('../services/zentaoService.js');
+    const params = await getKanbanParams(executionId, laneType, columnType);
+
+    if (!params) {
+      return res.status(404).json({ success: false, error: '无法解析看板参数' });
+    }
+
+    res.json({ success: true, data: params });
+  } catch (err) {
+    console.error('[API] 获取看板参数失败:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
