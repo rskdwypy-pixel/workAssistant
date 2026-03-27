@@ -1171,6 +1171,111 @@ ${projectsList}
   }
 });
 
+/**
+ * POST /api/ai/analyze-bug - AI 分析 Bug 生成标题和类型
+ */
+router.post('/ai/analyze-bug', async (req, res) => {
+  try {
+    const { steps } = req.body;
+    if (!steps) {
+      return res.status(400).json({ success: false, error: '缺少 steps' });
+    }
+
+    const prompt = `你是 Bug 分析助手。根据用户提供的 Bug 复现步骤，生成简洁的 Bug 标题并判断类型。
+
+【Bug 类型列表】
+- codeerror: 代码错误（程序报错、异常、崩溃）
+- config: 配置相关（配置错误、环境问题）
+- install: 安装部署（部署失败、依赖问题）
+- security: 安全相关（权限、数据泄露）
+- performance: 性能问题（慢、卡顿、内存占用高）
+- standard: 标准规范（代码风格、命名规范）
+- automation: 测试脚本（测试用例问题）
+- designdefect: 设计缺陷（逻辑错误、交互问题）
+- others: 其他
+
+【分析规则】
+1. 标题要简洁，不超过20字，突出核心问题
+2. 根据复现步骤判断 Bug 类型
+3. 严重程度默认为 3（一般），明显严重的可以设为 2（严重）
+
+用户输入的复现步骤：
+${steps}
+
+请只返回JSON：
+{
+  "title": "简洁的Bug标题",
+  "type": "bug类型代码",
+  "severity": 3
+}`;
+
+    const { generateResponse } = await import('../ai/openai.js');
+    const aiResponse = await generateResponse(prompt);
+
+    // 解析 AI 响应
+    let analysisResult = { title: '未知Bug', type: 'others', severity: 3 };
+    try {
+      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        analysisResult = { ...analysisResult, ...parsed };
+      }
+    } catch (e) {
+      console.error('[API] 解析 AI 响应失败:', e);
+    }
+
+    console.log('[API] Bug 分析结果:', analysisResult);
+    res.json({ success: true, data: analysisResult });
+  } catch (err) {
+    console.error('[API] AI 分析 Bug 失败:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/ai/match-execution - AI 匹配执行
+ */
+router.post('/ai/match-execution', async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content) {
+      return res.status(400).json({ success: false, error: '缺少 content' });
+    }
+
+    // 获取收藏的执行
+    const { getFavoriteExecutions } = await import('../services/executionManager.js');
+    const favoriteExecutions = await getFavoriteExecutions();
+
+    if (favoriteExecutions.length === 0) {
+      return res.json({ success: true, data: null, message: '没有收藏的执行' });
+    }
+
+    // 调用 AI 分析匹配执行
+    const { analyzeTaskForExecution } = await import('../ai/openai.js');
+    const matchedExecutionId = await analyzeTaskForExecution(content, favoriteExecutions);
+
+    let matchResult = null;
+    if (matchedExecutionId) {
+      const matchedExec = favoriteExecutions.find(e => e.id === matchedExecutionId);
+      console.log('[API] 匹配到的执行对象:', JSON.stringify(matchedExec));
+      matchResult = {
+        executionId: matchedExecutionId,
+        executionName: matchedExec?.name || '',
+        projectName: matchedExec?.projectName || '',
+        projectId: matchedExec?.projectId || ''
+      };
+      console.log('[API] ✓ AI 匹配到执行:', JSON.stringify(matchResult));
+    } else {
+      console.log('[API] ✗ AI 匹配失败，未找到匹配的执行');
+    }
+
+    res.json({ success: true, data: matchResult });
+  } catch (err) {
+    console.error('[API] AI 匹配执行失败:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ==================== Bug 相关接口 ====================
 
 /**
@@ -1198,13 +1303,16 @@ router.post('/bug', async (req, res) => {
     const { createBugWithSync } = await import('../services/bugManager.js');
     const bugData = req.body;
 
-    // 获取项目信息以获取执行ID
-    if (bugData.projectId) {
+    console.log('[API] 创建 Bug 请求数据:', bugData);
+
+    // 如果前端没有传递 executionId，尝试从项目信息获取
+    if (!bugData.executionId && bugData.projectId) {
       const { getProjectById } = await import('../services/projectManager.js');
       const project = await getProjectById(bugData.projectId);
-      if (project) {
-        bugData.executionId = project.id;
+      if (project && project.executionId) {
+        bugData.executionId = project.executionId;
         bugData.executionName = project.name;
+        console.log('[API] 从项目获取执行ID:', project.executionId);
       }
     }
 

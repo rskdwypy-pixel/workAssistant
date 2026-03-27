@@ -194,15 +194,12 @@ async function createZentaoBug(bugData) {
     formData.append('title', bugData.title);
     formData.append('severity', String(bugData.severity || 3));
     formData.append('type', bugData.type || 'codeerror');
-    formData.append('openedBuild[]', bugData.openedBuild || 'trunk');
     formData.append('steps', bugData.steps || '');
-    formData.append('os', bugData.os || '');
-    formData.append('browser', bugData.browser || '');
     formData.append('status', 'active');
 
     const endpoint = `${config.zentao.url}/zentao/bug-create-${productId}-.json`;
 
-    console.log('[BugManager] 创建禅道 Bug:', bugData.title);
+    console.log('[BugManager] 创建禅道 Bug:', bugData.title, '执行ID:', executionId);
 
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -232,6 +229,20 @@ async function createZentaoBug(bugData) {
       return {
         success: false,
         message: '响应解析失败'
+      };
+    }
+
+    // 检查登录是否超时
+    if (data.message && (
+      data.message.includes('登录已超时') ||
+      data.message.includes('请重新登入') ||
+      data.message.includes('请先登录')
+    )) {
+      console.log('[BugManager] 检测到禅道登录超时');
+      return {
+        success: false,
+        needRelogin: true,
+        message: '禅道登录已超时，需要重新登录'
       };
     }
 

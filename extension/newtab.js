@@ -637,7 +637,7 @@ function bindEvents() {
   setupProgressDragEvents();
   // 添加任务
   document.getElementById('addTaskBtn').addEventListener('click', addTask);
-  document.getElementById('taskInput').addEventListener('keydown', function (e) {
+  document.getElementById('taskInput').addEventListener('keydown', async function (e) {
     if (e.key === 'Enter') {
       // 正在使用输入法拼音选词的时候按下回车不应该触发添加
       if (e.isComposing || e.keyCode === 229) {
@@ -646,7 +646,51 @@ function bindEvents() {
 
       if (!e.shiftKey) {
         e.preventDefault();
-        addTask();
+        // 根据 TabSwitcher 的当前模式决定调用哪个函数
+        if (TabSwitcher.currentMode === 'bug') {
+          // Bug 模式：获取执行选择和内容
+          const executionSelect = document.getElementById('executionSelect');
+          const selectedExecutionId = executionSelect ? executionSelect.value : null;
+          const content = this.value.trim();
+
+          // 必须输入内容
+          if (!content) {
+            Toast.error('请输入 Bug 描述');
+            return;
+          }
+
+          // 获取执行名称和项目ID（如果选择了具体执行）
+          let executionName = '';
+          let projectId = '';
+          if (selectedExecutionId && executionSelect.selectedIndex >= 0) {
+            executionName = executionSelect.options[executionSelect.selectedIndex]?.text || '';
+            // 从 ExecutionSelector 的收藏列表中查找 projectId
+            if (typeof ExecutionSelector !== 'undefined' && ExecutionSelector.favoriteExecutions) {
+              const exec = ExecutionSelector.favoriteExecutions.find(e => e.id === selectedExecutionId);
+              if (exec) {
+                projectId = exec.projectId || '';
+                console.log('[Bug模式] 从执行选择器获取项目ID:', projectId, '执行:', exec.name);
+              }
+            }
+          }
+
+          console.log('[Bug模式] 准备提交 - executionId:', selectedExecutionId, 'projectId:', projectId, 'content:', content.substring(0, 50));
+
+          // 调用 BugManager 打开弹窗并预填信息
+          // 如果 selectedExecutionId 为空，AI 会自动匹配执行
+          console.log('[Bug模式] BugManager 对象:', typeof BugManager, 'quickSubmit 方法:', typeof BugManager?.quickSubmit);
+          if (typeof BugManager !== 'undefined' && BugManager.quickSubmit) {
+            console.log('[Bug模式] 调用 quickSubmit...');
+            await BugManager.quickSubmit(selectedExecutionId, executionName, projectId, content);
+            this.value = ''; // 清空输入框
+            console.log('[Bug模式] quickSubmit 完成');
+          } else {
+            console.error('[Bug模式] BugManager 或 quickSubmit 不可用');
+          }
+        } else {
+          // 任务模式：添加任务
+          addTask();
+        }
       } else {
         // 明确实现 Shift+Enter 换行功能
         e.preventDefault();
@@ -5231,116 +5275,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ==================== Bug 模式切换 ====================
 
-const BugMode = {
-  isBugMode: false,
-
-  // 任务模式标题
-  taskModeTitles: {
-    todo: '🔴 待办',
-    inProgress: '🟢 进行中',
-    done: '⚪ 已完成'
-  },
-
-  // Bug 模式标题
-  bugModeTitles: {
-    todo: '🟡 未确认',
-    inProgress: '🔵 激活',
-    done: '⚪ 已关闭'
-  },
-
-  /**
-   * 初始化 Bug 模式
-   */
-  init() {
-    const flipBtn = document.getElementById('flipModeBtn');
-    if (!flipBtn) return;
-
-    flipBtn.addEventListener('click', () => this.toggle());
-
-    // 检查保存的模式
-    const savedMode = localStorage.getItem('bugMode');
-    if (savedMode === 'true') {
-      this.enable();
-    }
-  },
-
-  /**
-   * 切换模式
-   */
-  toggle() {
-    if (this.isBugMode) {
-      this.disable();
-    } else {
-      this.enable();
-    }
-  },
-
-  /**
-   * 启用 Bug 模式
-   */
-  enable() {
-    this.isBugMode = true;
-    document.body.classList.add('bug-mode');
-    const flipBtn = document.getElementById('flipModeBtn');
-    if (flipBtn) {
-      flipBtn.classList.add('bug-mode');
-      flipBtn.innerHTML = '📋';
-      flipBtn.title = '切换到任务模式';
-    }
-    this.updateUI();
-    localStorage.setItem('bugMode', 'true');
-    Toast.info('已切换到 Bug 模式');
-  },
-
-  /**
-   * 禁用 Bug 模式
-   */
-  disable() {
-    this.isBugMode = false;
-    document.body.classList.remove('bug-mode');
-    const flipBtn = document.getElementById('flipModeBtn');
-    if (flipBtn) {
-      flipBtn.classList.remove('bug-mode');
-      flipBtn.innerHTML = '🐛';
-      flipBtn.title = '切换到Bug模式';
-    }
-    this.updateUI();
-    localStorage.setItem('bugMode', 'false');
-    Toast.info('已切换到任务模式');
-  },
-
-  /**
-   * 更新 UI
-   */
-  updateUI() {
-    // 更新列标题
-    const titles = this.isBugMode ? this.bugModeTitles : this.taskModeTitles;
-
-    // 查找并更新列标题
-    const columnHeaders = document.querySelectorAll('.column-header h3');
-    if (columnHeaders.length >= 3) {
-      columnHeaders[0].textContent = titles.todo;
-      columnHeaders[1].textContent = titles.inProgress;
-      columnHeaders[2].textContent = titles.done;
-    }
-
-    // 更新任务看板标题
-    const boardTitle = document.getElementById('taskBoardTitle');
-    if (boardTitle) {
-      boardTitle.textContent = this.isBugMode ? '📋 今日 Bug' : '📋 今日任务';
-    }
-
-    // 重新加载任务列表（如果需要）
-    if (typeof loadTasks === 'function') {
-      loadTasks();
-    }
-  }
-};
-
-// 在页面加载时初始化 Bug 模式
-document.addEventListener('DOMContentLoaded', () => {
-  BugMode.init();
-});
+// ==================== BugMode 已移除 ====================
+// 旧的 BugMode 系统已被 TabSwitcher 替代
+// 现在使用独立的 taskMode/bugMode 内容区域进行切换
 
 // ==================== Tab 切换 ====================
 
@@ -5355,12 +5292,18 @@ const TabSwitcher = {
         this.switchMode(mode);
       });
     });
+    // 恢复上次选择的标签页
+    const lastMode = localStorage.getItem('lastTabMode') || 'task';
+    this.switchMode(lastMode);
   },
 
   switchMode(mode) {
     this.currentMode = mode;
 
-    // 更新 Tab 按钮
+    // 1. 保存标签页选择
+    localStorage.setItem('lastTabMode', mode);
+
+    // 2. 更新 Tab 按钮
     document.querySelectorAll('.tab-btn').forEach(btn => {
       if (btn.dataset.mode === mode) {
         btn.classList.add('active');
@@ -5369,7 +5312,7 @@ const TabSwitcher = {
       }
     });
 
-    // 更新内容区域
+    // 3. 更新主内容区域
     document.querySelectorAll('.mode-content').forEach(content => {
       if (content.id === `${mode}Mode`) {
         content.classList.add('active');
@@ -5378,9 +5321,61 @@ const TabSwitcher = {
       }
     });
 
-    // 加载对应模式的数据
+    // 4. 处理左侧区域的显示状态和标题更新
+    // 4.1 更新左侧标题
+    const addTaskTitle = document.querySelector('.add-task-title');
+    if (addTaskTitle) {
+      addTaskTitle.textContent = mode === 'bug' ? '🐛 快速提交 Bug' : '📝 添加任务';
+    }
+
+    // 4.2 更新提示文字
+    const addTaskHint = document.querySelector('.add-task-hint');
+    if (addTaskHint) {
+      addTaskHint.textContent = mode === 'bug' ? '选择执行后，输入 Bug 描述，按回车提交' : '按回车添加 · Shift+回车换行';
+    }
+
+    // 4.3 执行选择器在两种模式下都显示
+    const executionSelectorWrapper = document.getElementById('executionSelectorWrapper');
+    const executionLabel = document.querySelector('.execution-label');
+    if (executionSelectorWrapper) {
+      executionSelectorWrapper.style.display = '';
+    }
+    // 更新执行选择器标签
+    if (executionLabel) {
+      executionLabel.textContent = mode === 'bug' ? '所属执行:' : '所属执行:';
+    }
+
+    // 4.4 输入框在两种模式下都显示
+    const taskInputWrapper = document.querySelector('.task-input-wrapper');
+    if (taskInputWrapper) {
+      taskInputWrapper.style.display = '';
+    }
+
+    // 4.5 更新输入框 placeholder
+    const taskInput = document.getElementById('taskInput');
+    if (taskInput) {
+      taskInput.placeholder = mode === 'bug' ? '描述 Bug 现象...' : ' ';
+    }
+
+    // 4.6 处理整个 add-task-form 区域（兼容 Gemini 的代码）
+    const addTaskForm = document.getElementById('addTaskForm');
+    if (addTaskForm) {
+      addTaskForm.style.display = ''; // 两种模式都显示
+    }
+
+    // 5. 优化：加载对应模式的数据
     if (mode === 'bug') {
-      BugManager.loadBugs();
+      if (typeof BugManager !== 'undefined' && BugManager.loadBugs) {
+        BugManager.loadBugs();
+      }
+    } else if (mode === 'task') {
+      // 切换回任务模式时，如果本地已有数据，直接通过 renderTasks 更新 DOM，更加流畅
+      // 避免不必要的全量 HTTP 刷新请求
+      if (typeof renderTasks === 'function' && window.allTasks && window.allTasks.length > 0) {
+        renderTasks();
+      } else if (typeof loadTasks === 'function') {
+        loadTasks();
+      }
     }
   }
 };
@@ -5904,7 +5899,7 @@ const BugManager = {
     }
 
     // 自动保存草稿
-    const bugInputs = ['bugTitle', 'bugSeverity', 'bugType', 'bugSteps', 'bugOpenedBuild', 'bugOs', 'bugBrowser'];
+    const bugInputs = ['bugTitle', 'bugSeverity', 'bugType', 'bugSteps'];
     bugInputs.forEach(id => {
       const input = document.getElementById(id);
       if (input) {
@@ -6010,16 +6005,24 @@ const BugManager = {
     return types[type] || type;
   },
 
-  async showBugModal() {
+  async showBugModal(initialContent = '') {
     const modal = document.getElementById('bugModal');
     if (!modal) return;
 
     // 加载项目列表
     await this.loadProjectOptions();
 
-    // 恢复草稿
-    if (this.draft) {
-      this.restoreDraft();
+    // 如果有初始内容，预填到 bugSteps 字段
+    if (initialContent) {
+      const bugSteps = document.getElementById('bugSteps');
+      if (bugSteps) {
+        bugSteps.value = initialContent;
+      }
+    } else {
+      // 恢复草稿（只有在没有初始内容时）
+      if (this.draft) {
+        this.restoreDraft();
+      }
     }
 
     modal.style.display = 'flex';
@@ -6032,29 +6035,184 @@ const BugManager = {
     }
   },
 
+  /**
+   * 快速提交 Bug（从左侧输入框触发）
+   * @param {string} executionId - 执行 ID（可能为空，表示需要 AI 匹配）
+   * @param {string} executionName - 执行名称
+   * @param {string} projectId - 项目 ID
+   * @param {string} steps - Bug 复现步骤
+   */
+  async quickSubmit(executionId, executionName, projectId, steps) {
+    try {
+      Toast.info('AI 正在分析 Bug...');
+
+      // 1. 如果 executionId 为空，调用 AI 匹配执行
+      if (!executionId) {
+        const matchResponse = await fetch(`${API_BASE_URL}/api/ai/match-execution`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: steps })
+        });
+        const matchResult = await matchResponse.json();
+
+        if (matchResult.success && matchResult.data) {
+          executionId = matchResult.data.executionId;
+          executionName = matchResult.data.executionName || matchResult.data.projectName || '';
+          projectId = matchResult.data.projectId || '';
+          console.log('[BugManager] AI 匹配到执行:', executionId, executionName, projectId);
+        } else {
+          // AI 匹配失败，提示用户手动选择
+          Toast.warning('AI 无法确定执行，请在弹窗中手动选择');
+          // 不设置 executionId，让用户在弹窗中选择
+        }
+      }
+
+      // 2. 调用 AI 分析生成标题和类型
+      const analysisResponse = await fetch(`${API_BASE_URL}/api/ai/analyze-bug`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ steps })
+      });
+      const analysisResult = await analysisResponse.json();
+
+      let bugTitle = '未知 Bug';
+      let bugType = 'others';
+      let bugSeverity = '3';
+
+      if (analysisResult.success && analysisResult.data) {
+        bugTitle = analysisResult.data.title || bugTitle;
+        bugType = analysisResult.data.type || bugType;
+        bugSeverity = String(analysisResult.data.severity || 3);
+      }
+
+      // 3. 加载项目列表并打开弹窗
+      await this.showBugModalWithData(executionId, executionName, projectId, steps, bugTitle, bugType, bugSeverity);
+
+    } catch (err) {
+      console.error('[BugManager] 快速提交失败:', err);
+      Toast.error('分析失败，请重试');
+    }
+  },
+
+  /**
+   * 显示 Bug 弹窗并预填数据
+   */
+  async showBugModalWithData(executionId, executionName, projectId, steps, title, type, severity) {
+    const modal = document.getElementById('bugModal');
+    if (!modal) return;
+
+    // 加载项目列表
+    await this.loadProjectOptions();
+
+    // 预填数据
+    // 标题
+    const bugTitle = document.getElementById('bugTitle');
+    if (bugTitle) {
+      bugTitle.value = title;
+    }
+
+    // 严重程度
+    const bugSeverity = document.getElementById('bugSeverity');
+    if (bugSeverity) {
+      bugSeverity.value = severity;
+    }
+
+    // 类型
+    const bugType = document.getElementById('bugType');
+    if (bugType) {
+      bugType.value = type;
+    }
+
+    // 复现步骤
+    const bugSteps = document.getElementById('bugSteps');
+    if (bugSteps) {
+      bugSteps.value = steps;
+    }
+
+    // 根据 projectId 自动选择项目
+    if (projectId) {
+      const bugProject = document.getElementById('bugProject');
+      if (bugProject) {
+        // 确保类型匹配（尝试字符串和数字两种形式）
+        bugProject.value = projectId;
+        if (bugProject.value !== projectId) {
+          // 尝试查找匹配的 option
+          for (const option of bugProject.options) {
+            if (option.value === projectId || option.value === String(projectId) || option.value === Number(projectId).toString()) {
+              bugProject.value = option.value;
+              break;
+            }
+          }
+        }
+        console.log('[BugManager] 选择项目:', projectId, '当前值:', bugProject.value);
+      }
+    }
+
+    // 保存执行信息到 modal 的 dataset 中，提交时使用
+    modal.dataset.executionId = executionId || '';
+    modal.dataset.executionName = executionName || '';
+
+    // 显示弹窗
+    modal.style.display = 'flex';
+  },
+
   async loadProjectOptions() {
     const select = document.getElementById('bugProject');
     if (!select) return;
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/projects/favorites`);
-      const result = await response.json();
+      // 同时获取本地项目列表和执行列表
+      const [projectsResp, executionsResp] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/projects`),
+        fetch(`${API_BASE_URL}/api/executions`)
+      ]);
+      const projectsResult = await projectsResp.json();
+      const executionsResult = await executionsResp.json();
 
-      if (result.success && result.data.length > 0) {
-        select.innerHTML = '<option value="">请选择项目</option>';
-        result.data.forEach(project => {
-          const option = document.createElement('option');
-          option.value = project.id;
-          option.textContent = project.name;
-          select.appendChild(option);
+      // 收集所有项目
+      const projectsMap = new Map(); // 使用 Map 去重
+
+      // 1. 添加本地项目列表中的项目
+      if (projectsResult.success && projectsResult.data) {
+        projectsResult.data.forEach(p => {
+          projectsMap.set(p.id, { id: p.id, name: p.name });
         });
+      }
 
-        // 如果草稿有项目选择，恢复它
-        if (this.draft && this.draft.projectId) {
-          select.value = this.draft.projectId;
-        }
-      } else {
-        select.innerHTML = '<option value="">请先在设置中收藏项目</option>';
+      // 2. 从执行列表中提取项目（补充本地可能缺失的项目）
+      if (executionsResult.success && executionsResult.data) {
+        executionsResult.data.forEach(exec => {
+          if (exec.projectId && !projectsMap.has(exec.projectId)) {
+            projectsMap.set(exec.projectId, {
+              id: exec.projectId,
+              name: exec.projectName || `项目${exec.projectId}`
+            });
+          }
+        });
+      }
+
+      // 转换为数组并排序
+      const allProjects = Array.from(projectsMap.values()).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+
+      // 保存当前选中的值（如果有）
+      const currentValue = select.value;
+
+      select.innerHTML = '<option value="">请选择项目</option>';
+      allProjects.forEach(project => {
+        const option = document.createElement('option');
+        option.value = project.id;
+        option.textContent = project.name;
+        select.appendChild(option);
+      });
+
+      // 如果之前有选中的值，恢复它
+      if (currentValue) {
+        select.value = currentValue;
+      }
+
+      // 如果草稿有项目选择，恢复它
+      if (this.draft && this.draft.projectId && !currentValue) {
+        select.value = this.draft.projectId;
       }
     } catch (err) {
       console.error('[BugManager] 加载项目失败:', err);
@@ -6062,14 +6220,21 @@ const BugManager = {
   },
 
   async submitBug() {
+    console.log('[BugManager] submitBug 被调用');
+    const modal = document.getElementById('bugModal');
+
     const projectId = document.getElementById('bugProject').value;
     const title = document.getElementById('bugTitle').value.trim();
     const severity = document.getElementById('bugSeverity').value;
     const type = document.getElementById('bugType').value;
     const steps = document.getElementById('bugSteps').value.trim();
-    const openedBuild = document.getElementById('bugOpenedBuild').value.trim();
-    const os = document.getElementById('bugOs').value.trim();
-    const browser = document.getElementById('bugBrowser').value.trim();
+
+    console.log('[BugManager] 表单数据:', { projectId, title, severity, type, steps: steps?.substring(0, 50) });
+
+    // 从 modal 获取执行信息（如果有）
+    const executionId = modal?.dataset.executionId;
+    const executionName = modal?.dataset.executionName;
+    console.log('[BugManager] 执行信息:', executionId, executionName);
 
     // 验证必填项
     if (!projectId) {
@@ -6091,12 +6256,15 @@ const BugManager = {
       severity: parseInt(severity),
       type,
       steps,
-      openedBuild,
-      os,
-      browser
+      // 如果有执行信息，添加到 Bug 数据中
+      ...(executionId && { executionId: parseInt(executionId) }),
+      ...(executionName && { executionName })
     };
 
+    console.log('[BugManager] 准备提交 Bug 数据:', bugData);
+
     try {
+      console.log('[BugManager] 发送请求到后端...');
       const response = await fetch(`${API_BASE_URL}/api/bug`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -6104,10 +6272,38 @@ const BugManager = {
       });
       const result = await response.json();
 
+      console.log('[BugManager] 后端响应:', result);
+
+      // 检查是否需要重新登录禅道
+      if (result.needRelogin) {
+        console.log('[BugManager] 需要重新登录禅道');
+        Toast.warning('禅道登录已超时，正在重新登录...');
+
+        // 调用浏览器端的 ZentaoBrowser 刷新 Cookie
+        if (typeof ZentaoBrowser !== 'undefined' && ZentaoBrowser.refreshCookies) {
+          const refreshSuccess = await ZentaoBrowser.refreshCookies();
+          if (refreshSuccess) {
+            Toast.success('禅道登录成功，请重新提交 Bug');
+            return; // 用户需要重新点击提交
+          } else {
+            Toast.error('禅道登录失败，请手动在禅道标签页登录');
+            return;
+          }
+        } else {
+          Toast.error('请手动在禅道标签页登录后重试');
+          return;
+        }
+      }
+
       if (result.success) {
         Toast.success('Bug 已创建');
         this.clearDraft();
         this.hideBugModal();
+        // 清除 modal 中的执行信息
+        if (modal) {
+          delete modal.dataset.executionId;
+          delete modal.dataset.executionName;
+        }
         this.loadBugs(); // 重新加载 Bug 列表
       } else {
         Toast.error('创建失败: ' + (result.error || '未知错误'));
@@ -6130,9 +6326,6 @@ const BugManager = {
       severity: document.getElementById('bugSeverity').value,
       type: document.getElementById('bugType').value,
       steps: document.getElementById('bugSteps').value,
-      openedBuild: document.getElementById('bugOpenedBuild').value,
-      os: document.getElementById('bugOs').value,
-      browser: document.getElementById('bugBrowser').value,
       savedAt: new Date().toISOString()
     };
 
@@ -6167,9 +6360,6 @@ const BugManager = {
     document.getElementById('bugSeverity').value = this.draft.severity || '3';
     document.getElementById('bugType').value = this.draft.type || 'codeerror';
     document.getElementById('bugSteps').value = this.draft.steps || '';
-    document.getElementById('bugOpenedBuild').value = this.draft.openedBuild || 'trunk';
-    document.getElementById('bugOs').value = this.draft.os || '';
-    document.getElementById('bugBrowser').value = this.draft.browser || '';
   },
 
   clearDraft() {
@@ -6182,9 +6372,6 @@ const BugManager = {
     document.getElementById('bugSeverity').value = '3';
     document.getElementById('bugType').value = 'codeerror';
     document.getElementById('bugSteps').value = '';
-    document.getElementById('bugOpenedBuild').value = 'trunk';
-    document.getElementById('bugOs').value = '';
-    document.getElementById('bugBrowser').value = '';
   }
 };
 

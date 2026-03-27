@@ -536,10 +536,43 @@ ${JSON.stringify(executionListForAI, null, 2)}
   }
 }
 
+/**
+ * 通用 AI 响应生成函数
+ * @param {string} prompt - 提示词
+ * @param {number} maxTokens - 最大 token 数，默认 500
+ * @returns {Promise<string>} AI 响应内容
+ */
+async function generateResponse(prompt, maxTokens = 500) {
+  try {
+    const response = await client.chat.completions.create({
+      model: config.ai.model,
+      messages: [
+        { role: 'system', content: '你是专业的助手，擅长分析和处理各种任务。' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.3,
+      max_tokens: maxTokens
+    });
+
+    let content = response.choices[0].message.content.trim();
+
+    // 清理可能的 markdown 代码块标记
+    if (content.startsWith('```')) {
+      content = content.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+    }
+
+    return content;
+  } catch (error) {
+    console.error('[OpenAI] 生成响应失败:', error);
+    throw error;
+  }
+}
+
 export {
   analyzeTask,
   analyzeTaskForExecution,
   generateSummary,
+  generateResponse,
   SUMMARY_PROMPT,
   TASK_ANALYSIS_PROMPT
 };

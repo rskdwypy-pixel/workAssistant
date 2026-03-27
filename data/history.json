@@ -2,6 +2,29 @@
   "version": "1.0",
   "dailySummaries": [
     {
+      "id": "6ff9e28c-ef20-4274-9fc7-ba55d86eb8ae",
+      "type": "weekly",
+      "date": "3/23 - 3/27周报",
+      "dateLabel": "3/23 - 3/27周报",
+      "summary": "本周共处理任务5项，其中完成工作0项。本周主要工作内容暂无",
+      "completed": [],
+      "tomorrowFocus": [
+        "[待办] 更新controller版本 1.9.15",
+        "[待办] 阿迪新版本更新",
+        "[待办] 江苏农信抖音支付",
+        "[进行中] 民生卡中心竞品分析（40%）",
+        "[进行中] 3月2日任务巡检（25%）"
+      ],
+      "risks": [],
+      "stats": {
+        "total": 5,
+        "todo": 3,
+        "inProgress": 2,
+        "done": 0
+      },
+      "createdAt": "2026-03-27T09:00:05.255Z"
+    },
+    {
       "id": "52a761d7-ca2a-4ab5-9d78-808a47ff6702",
       "type": "daily",
       "date": "2026-03-02",
@@ -129,6 +152,29 @@
     }
   ],
   "reports": [
+    {
+      "id": "6ff9e28c-ef20-4274-9fc7-ba55d86eb8ae",
+      "type": "weekly",
+      "date": "3/23 - 3/27周报",
+      "dateLabel": "3/23 - 3/27周报",
+      "summary": "本周共处理任务5项，其中完成工作0项。本周主要工作内容暂无",
+      "completed": [],
+      "tomorrowFocus": [
+        "[待办] 更新controller版本 1.9.15",
+        "[待办] 阿迪新版本更新",
+        "[待办] 江苏农信抖音支付",
+        "[进行中] 民生卡中心竞品分析（40%）",
+        "[进行中] 3月2日任务巡检（25%）"
+      ],
+      "risks": [],
+      "stats": {
+        "total": 5,
+        "todo": 3,
+        "inProgress": 2,
+        "done": 0
+      },
+      "createdAt": "2026-03-27T09:00:05.255Z"
+    },
     {
       "id": "52a761d7-ca2a-4ab5-9d78-808a47ff6702",
       "type": "daily",
