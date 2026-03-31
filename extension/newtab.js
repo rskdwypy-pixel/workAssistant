@@ -1005,6 +1005,30 @@ function bindEvents() {
     }
   });
 
+  // 更新禅道用户列表
+  document.getElementById('updateZentaoUsers').addEventListener('click', async () => {
+    const resultEl = document.getElementById('zentaoUsersResult');
+
+    resultEl.textContent = '⏳ 正在更新用户列表...';
+    resultEl.className = 'test-result';
+
+    try {
+      const users = await ZentaoBrowserClient.loadUsersFromTeamPage();
+      const userCount = Object.keys(users).length;
+
+      if (userCount > 0) {
+        resultEl.textContent = `✅ 用户列表已更新，共 ${userCount} 个用户`;
+        resultEl.className = 'test-result success';
+      } else {
+        resultEl.textContent = '❌ 未获取到用户列表，请确保已登录禅道';
+        resultEl.className = 'test-result error';
+      }
+    } catch (err) {
+      resultEl.textContent = `❌ 更新失败: ${err.message}`;
+      resultEl.className = 'test-result error';
+    }
+  });
+
   // 保存配置
   document.getElementById('saveSettings').addEventListener('click', async () => {
     const config = {
@@ -4047,8 +4071,6 @@ const ZentaoBrowserClient = {
       if (isValid) {
         console.log('[ZentaoBrowser] 检测到浏览器中已登录禅道，无需重复登录');
         this.isLoggedIn = true;
-        // 登录成功后加载用户列表
-        await this.loadUsersFromTeamPage();
         this.startKeepAlive();
         return;
       }
@@ -4057,8 +4079,6 @@ const ZentaoBrowserClient = {
       console.log('[ZentaoBrowser] 浏览器中未登录禅道，开始自动登录...');
       const loginSuccess = await this.login();
       if (loginSuccess) {
-        // 登录成功后加载用户列表
-        await this.loadUsersFromTeamPage();
         this.startKeepAlive();
       }
     }
@@ -4253,11 +4273,6 @@ const ZentaoBrowserClient = {
    * 通过创建临时标签页访问 my-team.html，注入脚本提取用户信息
    */
   async loadUsersFromTeamPage() {
-    if (this.usersLoaded && this.users.length > 0) {
-      console.log('[ZentaoBrowser] 用户列表已缓存，跳过加载');
-      return this.users;
-    }
-
     const config = await this.initConfig();
     const baseUrl = config?.url?.replace(/\/$/, '');
     if (!baseUrl) {
@@ -4265,7 +4280,7 @@ const ZentaoBrowserClient = {
       return {};
     }
 
-    console.log('[ZentaoBrowser] 开始加载用户列表...');
+    console.log('[ZentaoBrowser] 开始从禅道页面加载用户列表...');
 
     // 创建临时标签页获取用户列表
     const tab = await chrome.tabs.create({ url: `${baseUrl}/zentao/my-team.html`, active: false });
@@ -4322,11 +4337,14 @@ const ZentaoBrowserClient = {
         this.users = data.data;
         this.usersLoaded = true;
         const userCount = Object.keys(this.users).length;
-        console.log('[ZentaoBrowser] 加载用户列表成功:', userCount, '个用户');
+        console.log('[ZentaoBrowser] 从禅道页面加载用户列表成功:', userCount, '个用户');
         console.log('[ZentaoBrowser] 用户列表:', this.users);
         if (data.list) {
           console.log('[ZentaoBrowser] 用户详细信息:', data.list);
         }
+
+        // 保存用户列表到后端
+        await this.saveUsersToBackend(this.users);
       } else if (data && data.status === 'error') {
         console.warn('[ZentaoBrowser] 提取用户失败:', data.message);
         this.users = {};
@@ -4353,9 +4371,62 @@ const ZentaoBrowserClient = {
   },
 
   /**
-   * 获取用户列表（供外部调用）
+   * 保存用户列表到后端
    */
-  getUsers() {
+  async saveUsersToBackend(users) {
+    try {
+      console.log('[ZentaoBrowser] 保存用户列表到后端，用户数量:', Object.keys(users).length);
+      const response = await fetch(`${API_BASE_URL}/api/zentao/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ users })
+      });
+      const result = await response.json();
+      if (result.success) {
+        console.log('[ZentaoBrowser] ✓ 用户列表已保存到后端:', result.message);
+      } else {
+        console.warn('[ZentaoBrowser] 保存用户列表到后端失败:', result.error);
+      }
+    } catch (err) {
+      console.error('[ZentaoBrowser] 保存用户列表到后端异常:', err.message);
+    }
+  },
+
+  /**
+   * 从后端加载用户列表
+   */
+  async loadUsersFromBackend() {
+    try {
+      console.log('[ZentaoBrowser] 从后端加载用户列表...');
+      const response = await fetch(`${API_BASE_URL}/api/zentao/users`);
+      const result = await response.json();
+      if (result.success && result.data && Object.keys(result.data).length > 0) {
+        this.users = result.data;
+        this.usersLoaded = true;
+        console.log('[ZentaoBrowser] ✓ 从后端加载用户列表成功:', Object.keys(this.users).length, '个用户');
+        return this.users;
+      } else {
+        console.log('[ZentaoBrowser] 后端暂无用户列表数据');
+        return {};
+      }
+    } catch (err) {
+      console.error('[ZentaoBrowser] 从后端加载用户列表异常:', err.message);
+      return {};
+    }
+  },
+
+  /**
+   * 获取用户列表（供外部调用）
+   * 优先从后端加载，如果没有则从内存获取
+   */
+  async getUsers() {
+    // 如果内存中没有用户列表，先尝试从后端加载
+    if (!this.usersLoaded || Object.keys(this.users).length === 0) {
+      const backendUsers = await this.loadUsersFromBackend();
+      if (Object.keys(backendUsers).length > 0) {
+        return backendUsers;
+      }
+    }
     return this.users;
   },
 
@@ -6717,13 +6788,13 @@ const BugManager = {
     console.log('[BugManager] loadAssigneeOptions 开始执行');
 
     // 获取用户列表
-    let users = ZentaoBrowserClient.getUsers();
+    let users = await ZentaoBrowserClient.getUsers();
     console.log('[BugManager] 缓存的用户数量:', users ? Object.keys(users).length : 0);
 
     if (!users || Object.keys(users).length === 0) {
       console.warn('[BugManager] 用户列表未加载，尝试从禅道加载...');
       await ZentaoBrowserClient.loadUsersFromTeamPage();
-      users = ZentaoBrowserClient.getUsers();
+      users = await ZentaoBrowserClient.getUsers();
       console.log('[BugManager] 从禅道加载后的用户数量:', users ? Object.keys(users).length : 0);
     }
 
@@ -7593,11 +7664,11 @@ const BugManager = {
     if (!assigneeContainer || !ccContainer) return;
 
     // 获取用户列表
-    let users = ZentaoBrowserClient.getUsers();
+    let users = await ZentaoBrowserClient.getUsers();
     if (!users || Object.keys(users).length === 0) {
       console.warn('[BugManager] 用户列表未加载，尝试加载...');
       await ZentaoBrowserClient.loadUsersFromTeamPage();
-      users = ZentaoBrowserClient.getUsers();
+      users = await ZentaoBrowserClient.getUsers();
     }
 
     if (!users || Object.keys(users).length === 0) {

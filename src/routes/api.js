@@ -920,6 +920,68 @@ router.post('/zentao/config', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/zentao/users - 获取禅道用户列表
+ */
+router.get('/zentao/users', async (req, res) => {
+  try {
+    const configModule = await import('../config.js');
+    const users = configModule.config.zentao.users || {};
+
+    res.json({
+      success: true,
+      data: users
+    });
+  } catch (err) {
+    console.error('[API] 获取禅道用户列表失败:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/zentao/users - 保存禅道用户列表
+ */
+router.post('/zentao/users', async (req, res) => {
+  try {
+    const { users } = req.body;
+
+    if (!users || typeof users !== 'object') {
+      return res.status(400).json({ error: '用户列表格式错误' });
+    }
+
+    console.log('[API] 保存禅道用户列表，用户数量:', Object.keys(users).length);
+
+    // 更新运行时配置
+    const configModule = await import('../config.js');
+    configModule.config.zentao.users = users;
+    configModule.config.zentao.usersUpdatedAt = new Date().toISOString();
+
+    // 持久化到 data/zentao-users.json 文件
+    const fs = await import('fs');
+    const path = await import('path');
+    const usersFilePath = path.join(process.cwd(), 'data', 'zentao-users.json');
+
+    // 确保 data 目录存在
+    const dataDir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+
+    // 保存用户列表
+    fs.writeFileSync(usersFilePath, JSON.stringify(users, null, 2), 'utf-8');
+
+    console.log('[API] 禅道用户列表已保存到:', usersFilePath);
+    res.json({
+      success: true,
+      message: `用户列表已保存，共 ${Object.keys(users).length} 个用户`,
+      count: Object.keys(users).length
+    });
+  } catch (err) {
+    console.error('[API] 保存禅道用户列表失败:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==================== 禅道代理接口（已废弃） ====================
 // 注意：所有禅道操作已迁移到浏览器端，通过 ZentaoBrowserClient 完成
 // 以下函数和接口已废弃，保留仅为向后兼容，不再使用后端 cookie
