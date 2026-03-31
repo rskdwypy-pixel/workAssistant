@@ -346,6 +346,32 @@
           </select>
         </div>
         <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size:  13px; color: var(--text-secondary);">指派人</label>
+          <div class="multi-select-container" id="bugAssigneeContainer">
+            <div class="multi-select-display" id="bugAssigneeDisplay">
+              <span class="multi-select-placeholder">请选择指派人</span>
+            </div>
+            <div class="multi-select-dropdown" id="bugAssigneeDropdown" style="display: none;">
+              <div class="multi-select-options" id="bugAssigneeOptions">
+                <!-- 用户选项将通过 JS 动态生成 -->
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">抄送人</label>
+          <div class="multi-select-container" id="bugCcContainer">
+            <div class="multi-select-display" id="bugCcDisplay">
+              <span class="multi-select-placeholder">请选择抄送人</span>
+            </div>
+            <div class="multi-select-dropdown" id="bugCcDropdown" style="display: none;">
+              <div class="multi-select-options" id="bugCcOptions">
+                <!-- 用户选项将通过 JS 动态生成 -->
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
           <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">Bug 标题 *</label>
           <input type="text" id="bugTitle" class="form-control" placeholder="简要描述 Bug" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
         </div>
@@ -381,6 +407,62 @@
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <span id="bugDraftSaved" style="font-size: 12px; color: var(--text-muted); display: none;">草稿已自动保存</span>
           <button id="submitBugBtn" class="btn-primary">提交 Bug</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bug 详情弹窗 -->
+  <div id="bugDetailModal" class="modal">
+    <div class="modal-content" style="max-width: 500px;">
+      <div class="modal-header">
+        <h3>🐛 Bug 详情</h3>
+        <button class="close-btn" id="closeBugDetailModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="bugDetailContent">
+          <!-- Bug 详情内容动态填充 -->
+        </div>
+        <div id="bugDetailActions" class="bug-detail-actions">
+          <!-- 操作按钮动态填充 -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bug 修复弹窗 -->
+  <div id="bugResolveModal" class="modal">
+    <div class="modal-content" style="max-width: 450px;">
+      <div class="modal-header">
+        <h3>🔧 修复 Bug</h3>
+        <button class="close-btn" id="closeBugResolveModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">解决方式</label>
+          <select id="resolveResolution" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+            <option value="fixed">已修复</option>
+            <option value="postponed">延期处理</option>
+            <option value="bydesign">设计如此</option>
+            <option value="notrepro">无法复现</option>
+            <option value="duplicate">重复 Bug</option>
+            <option value="external">外部原因</option>
+            <option value="willnotfix">不予解决</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">指派人</label>
+          <select id="resolveAssignee" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+            <option value="">请选择指派人</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">备注</label>
+          <textarea id="resolveComment" rows="3" class="form-control" placeholder="填写备注信息..." style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical;"></textarea>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px;">
+          <button id="cancelResolveBtn" class="btn-secondary">取消</button>
+          <button id="confirmResolveBtn" class="btn-primary">确认修复</button>
         </div>
       </div>
     </div>

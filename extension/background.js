@@ -623,11 +623,19 @@ async function executeBugInZentaoPage(params) {
         if (projectId) formData.append('project', projectId);
         if (executionId) formData.append('execution', executionId);
         formData.append('openedBuild[]', bugData.openedBuild || 'trunk');
-        if (bugData.assignedTo) formData.append('assignedTo', bugData.assignedTo);
+
+        // 处理指派人（兼容新旧格式）
+        const assignedTo = bugData.assignedTo || (bugData.assignedToList && bugData.assignedToList.length > 0 ? bugData.assignedToList[0] : '');
+        if (assignedTo) formData.append('assignedTo', assignedTo);
+
         formData.append('deadline', '');
         formData.append('feedbackBy', '');
         formData.append('notifyEmail', '');
         formData.append('type', bugData.type || 'codeerror');
+
+        // 添加缺失的必需字段
+        formData.append('os[]', '');
+        formData.append('browser[]', '');
 
         // 看板相关参数
         if (bugData.regionId) formData.append('region', bugData.regionId);
@@ -640,9 +648,21 @@ async function executeBugInZentaoPage(params) {
         formData.append('steps', bugData.steps || '');
         formData.append('story', '');
         formData.append('task', '');
+        formData.append('oldTaskID', '0'); // 必需字段
+
+        // 处理抄送人列表（支持，放在 keywords 之前）
+        if (bugData.cc && Array.isArray(bugData.cc)) {
+          bugData.cc.forEach(ccAccount => {
+            if (ccAccount) formData.append('mailto[]', ccAccount);
+          });
+        }
+
         formData.append('keywords', '');
-        formData.append('status', 'active');
+        formData.append('status', 'active'); // 看板创建 Bug 必须使用 active、resolved 或 closed
         formData.append('issueKey', '');
+
+        // 注意：不发送 comment 字段（看板创建 Bug 不支持此字段）
+
         formData.append('uid', Math.random().toString(36).substring(2, 14));
         formData.append('case', '0');
         formData.append('caseVersion', '0');
@@ -2068,4 +2088,256 @@ async function getKanbanView(params) {
 
   return results[0].result;
 }
+
+// ============================================================================
+// Bug 操作相关方法
+// ============================================================================
+
+/**
+ * 激活 Bug
+ */
+async function activateBugInZentao(params) {
+  const { baseUrl, kanbanUrl, bugId, assignedTo, comment } = params;
+  console.log('[Background] ========== 激活 Bug 开始 ==========');
+  console.log('[Background] 参数:', { baseUrl, kanbanUrl, bugId, assignedTo, comment });
+
+  // 如果提供了看板 URL，确保使用看板页面
+  let targetTab;
+  if (kanbanUrl) {
+    console.log('[Background] 使用指定的看板页面:', kanbanUrl);
+    targetTab = await ensureZentaoTabByUrl(baseUrl, kanbanUrl);
+  } else {
+    targetTab = await ensureZentaoTab(baseUrl);
+  }
+
+  if (!targetTab) {
+    console.error('[Background] 未找到禅道标签页');
+    return { success: false, reason: 'no_zentao_tab' };
+  }
+
+  console.log('[Background] 使用标签页:', targetTab.id, targetTab.url);
+
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: targetTab.id },
+      func: (bugId, assignedTo, comment) => {
+        console.log('[Bug Activate] 注入脚本开始执行，当前页面:', window.location.href);
+        return new Promise((resolve) => {
+          const formData = new URLSearchParams();
+          formData.append('assignedTo', assignedTo || '');
+          formData.append('type', 'codeerror');
+          formData.append('pri', '3');
+          formData.append('status', 'active');
+          if (assignedTo) formData.append('mailto[]', assignedTo);
+          formData.append('comment', comment || '');
+          formData.append('uid', Math.random().toString(36).substring(2, 14));
+
+          const endpoint = `${window.location.origin}/zentao/bug-confirmbug-${bugId}.html?onlybody=yes`;
+          console.log('[Bug Activate] 请求端点:', endpoint);
+          console.log('[Bug Activate] 表单数据:', formData.toString());
+
+          fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: formData.toString()
+          })
+          .then(r => {
+            console.log('[Bug Activate] 响应状态:', r.status);
+            return r.text();
+          })
+          .then(text => {
+            console.log('[Bug Activate] 响应内容（前500字符）:', text.substring(0, 500));
+            // 检查响应中的 updateKanban 调用
+            if (text.includes('updateKanban') || text.includes('refresh') || text.includes('success')) {
+              console.log('[Bug Activate] ✓ 激活成功');
+              resolve({ success: true });
+            } else {
+              console.error('[Bug Activate] ✗ 激活失败，响应中未找到成功标识');
+              resolve({ success: false, reason: 'no_success_indicator', responseText: text.substring(0, 500) });
+            }
+          })
+          .catch(err => {
+            console.error('[Bug Activate] ✗ 请求失败:', err);
+            resolve({ success: false, reason: err.message });
+          });
+        });
+      },
+      args: [bugId, assignedTo, comment]
+    });
+
+    console.log('[Background] executeScript 结果:', results);
+
+    if (results && results.length > 0) {
+      const result = results[0].result;
+      console.log('[Background] 激活结果:', result);
+      console.log('[Background] ========== 激活 Bug 结束 ==========');
+      return result;
+    } else {
+      console.error('[Background] executeScript 返回结果为空');
+      return { success: false, reason: 'no_result' };
+    }
+  } catch (error) {
+    console.error('[Background] 激活 Bug 异常:', error);
+    return { success: false, reason: error.message };
+  }
+}
+
+// 确保指定的 URL 标签页存在
+async function ensureZentaoTabByUrl(baseUrl, targetUrl) {
+  console.log('[Background] ensureZentaoTabByUrl 调用:', { baseUrl, targetUrl });
+
+  // 查找是否已打开该页面
+  const allTabs = await chrome.tabs.query({});
+  let existingTab = allTabs.find(tab => tab.url && tab.url.includes(targetUrl));
+
+  if (existingTab) {
+    console.log('[Background] 找到已存在的标签页:', existingTab.id, existingTab.url);
+    return existingTab;
+  }
+
+  // 未找到，创建新标签页
+  console.log('[Background] 未找到目标标签页，创建新标签页');
+  try {
+    const newTab = await chrome.tabs.create({ url: targetUrl, active: false });
+
+    // 等待页面加载完成
+    await new Promise(resolve => {
+      const listener = (tabId, changeInfo) => {
+        if (tabId === newTab.id && changeInfo.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          setTimeout(resolve, 1000);
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+      setTimeout(() => {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }, 15000);
+    });
+
+    console.log('[Background] 新标签页已创建并加载:', newTab.id);
+    return newTab;
+  } catch (error) {
+    console.error('[Background] 创建标签页失败:', error);
+    return null;
+  }
+}
+
+/**
+ * 修复 Bug
+ */
+async function resolveBugInZentao(params) {
+  const { baseUrl, kanbanUrl, bugId, resolution, assignedTo, comment } = params;
+  console.log('[Background] 修复 Bug:', { bugId, resolution, assignedTo });
+
+  const targetTab = await ensureZentaoTab(baseUrl);
+  if (!targetTab) {
+    return { success: false, reason: 'no_zentao_tab' };
+  }
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: targetTab.id },
+    func: (bugId, resolution, assignedTo, comment) => {
+      return new Promise((resolve) => {
+        const formData = new FormData();
+        formData.append('resolution', resolution);
+        formData.append('duplicateBug', '0');
+        formData.append('buildExecution', '');
+        formData.append('resolvedBuild', 'trunk');
+        formData.append('resolvedDate', '');
+        if (assignedTo) formData.append('assignedTo', assignedTo);
+        formData.append('status', 'resolved');
+        formData.append('comment', comment || '');
+        formData.append('uid', Math.random().toString(36).substring(2, 14));
+
+        const endpoint = `${window.location.origin}/zentao/bug-resolve-${bugId}.html?onlybody=yes`;
+        fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          body: formData
+        })
+        .then(r => r.text())
+        .then(text => {
+          console.log('[Bug Resolve] 响应:', text.substring(0, 200));
+          if (text.includes('updateKanban') || text.includes('refresh')) {
+            resolve({ success: true });
+          } else {
+            resolve({ success: false, reason: 'unknown', responseText: text.substring(0, 200) });
+          }
+        })
+        .catch(err => resolve({ success: false, reason: err.message }));
+      });
+    },
+    args: [bugId, resolution, assignedTo, comment]
+  });
+
+  return results[0].result;
+}
+
+/**
+ * 删除 Bug
+ */
+async function deleteBugInZentao(params) {
+  const { baseUrl, bugId, regionId } = params;
+  console.log('[Background] 删除 Bug:', { bugId, regionId });
+
+  const targetTab = await ensureZentaoTab(baseUrl);
+  if (!targetTab) {
+    return { success: false, reason: 'no_zentao_tab' };
+  }
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: targetTab.id },
+    func: (bugId, regionId) => {
+      return new Promise((resolve) => {
+        const endpoint = `${window.location.origin}/zentao/kanban-deleteObjectCard-bug-${bugId}-${regionId}.html`;
+        fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+          }
+        })
+        .then(r => r.json())
+        .then(data => {
+          console.log('[Bug Delete] 响应:', data);
+          // 检查返回的数据中 items 是否为空或删除成功
+          resolve({ success: true, data });
+        })
+        .catch(err => resolve({ success: false, reason: err.message }));
+      });
+    },
+    args: [bugId, regionId || '0']
+  });
+
+  return results[0].result;
+}
+
+// 在消息监听器中添加对应的 action 处理
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'activateBugInZentao') {
+    activateBugInZentao(request)
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, reason: err.message }));
+    return true;
+  }
+
+  if (request.action === 'resolveBugInZentao') {
+    resolveBugInZentao(request)
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, reason: err.message }));
+    return true;
+  }
+
+  if (request.action === 'deleteBugInZentao') {
+    deleteBugInZentao(request)
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, reason: err.message }));
+    return true;
+  }
+});
 

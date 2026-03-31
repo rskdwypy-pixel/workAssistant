@@ -3781,6 +3781,150 @@ function triggerSync() {
   }
 }
 
+// ==================== 禅道数据提取纯函数 ====================
+
+/**
+ * 从禅道团队页面提取用户数据的纯函数
+ * 这个函数会被注入到禅道页面执行，必须是纯函数（不能引用外部变量）
+ * 参考 Gemini 方案设计
+ * @returns {Object} { status: 'success'|'error'|'fatal', count: number, data: Object, message?: string }
+ */
+function scrapeUserDataFromZentao() {
+  // 收集所有日志信息，返回给主调用方
+  const logs = [];
+
+  function log(msg, ...args) {
+    logs.push({ msg, args });
+  }
+
+  try {
+    log('[scrapeUserData] 开始提取用户数据');
+    log('[scrapeUserData] 当前页面 URL:', window.location.href);
+    log('[scrapeUserData] 当前页面标题:', document.title);
+
+    // 查找 iframe
+    const iframe = document.getElementById('appIframe-system');
+    log('[scrapeUserData] iframe #appIframe-system 存在:', !!iframe);
+
+    if (!iframe) {
+      return {
+        status: 'error',
+        message: '未找到 iframe #appIframe-system',
+        data: {},
+        logs: logs
+      };
+    }
+
+    // 获取 iframe 的 document
+    let iframeDoc;
+    try {
+      iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      log('[scrapeUserData] 成功获取 iframe document');
+    } catch (e) {
+      log('[scrapeUserData] 获取 iframe document 失败:', e.toString());
+      return {
+        status: 'error',
+        message: '无法访问 iframe document（可能是跨域限制）',
+        data: {},
+        logs: logs
+      };
+    }
+
+    // 在 iframe document 中查找 #userList
+    const userTable = iframeDoc.getElementById('userList');
+    log('[scrapeUserData] iframe 中 #userList 元素存在:', !!userTable);
+
+    if (!userTable) {
+      // 打印 iframe 中所有 id 以便调试
+      const iframeElementsWithId = iframeDoc.querySelectorAll('[id]');
+      const iframeIds = Array.from(iframeElementsWithId).map(el => el.id);
+      log('[scrapeUserData] iframe 中所有带 id 的元素（前 50 个）:', iframeIds.slice(0, 50));
+      log('[scrapeUserData] iframe 中包含 "user" 的 id:', iframeIds.filter(id => id.toLowerCase().includes('user')));
+
+      return {
+        status: 'error',
+        message: 'iframe 中未找到 #userList 元素',
+        data: {},
+        logs: logs
+      };
+    }
+
+    const tbody = userTable.querySelector('tbody');
+    log('[scrapeUserData] tbody 元素存在:', !!tbody);
+
+    if (!tbody) {
+      return {
+        status: 'error',
+        message: '找到表格但未找到 tbody 元素',
+        data: {},
+        logs: logs
+      };
+    }
+
+    const rows = tbody.querySelectorAll('tr');
+    log('[scrapeUserData] 找到表格行数:', rows.length);
+
+    const users = {};
+    const usersList = [];
+
+    Array.from(rows).forEach((row, index) => {
+      const tds = row.querySelectorAll('td');
+
+      if (tds.length < 3) {
+        log(`[scrapeUserData] 第 ${index} 行单元格数量不足: ${tds.length}`);
+        return;
+      }
+
+      // 提取单元格文本内容
+      const getText = (idx) => tds[idx] ? tds[idx].textContent.trim() : '';
+
+      const no = getText(0);      // 序号
+      const name = getText(1);    // 姓名
+      const account = getText(2); // 用户名
+
+      log(`[scrapeUserData] 行 ${index}: no=${no}, name=${name}, account=${account}`);
+
+      // 过滤表头和无效数据
+      if (name && account &&
+          name !== '姓名' &&
+          account !== '用户名' &&
+          account !== 'account' &&
+          !no.includes('共')) {
+        users[account] = name;
+        usersList.push({ no, name, account });
+      }
+    });
+
+    const userCount = Object.keys(users).length;
+    log('[scrapeUserData] 提取成功，用户数量:', userCount);
+
+    if (userCount > 0) {
+      return {
+        status: 'success',
+        count: userCount,
+        data: users,
+        list: usersList,
+        logs: logs
+      };
+    } else {
+      return {
+        status: 'error',
+        message: '表格存在但未提取到有效用户数据',
+        data: {},
+        logs: logs
+      };
+    }
+  } catch (error) {
+    log('[scrapeUserData] 提取过程发生错误:', error.toString());
+    return {
+      status: 'fatal',
+      message: error.toString(),
+      data: {},
+      logs: logs
+    };
+  }
+}
+
 // ==================== 禅道浏览器客户端 ====================
 
 /**
@@ -3793,6 +3937,8 @@ const ZentaoBrowserClient = {
   sessionToken: null,
   cookies: null, // 手动存储的 Cookie 字符串
   keepAliveTimer: null,
+  users: {}, // 用户列表缓存 {account: name}
+  usersLoaded: false, // 用户列表是否已加载
 
   /**
    * 初始化配置（每次都重新获取，确保使用最新配置）
@@ -3901,6 +4047,8 @@ const ZentaoBrowserClient = {
       if (isValid) {
         console.log('[ZentaoBrowser] 检测到浏览器中已登录禅道，无需重复登录');
         this.isLoggedIn = true;
+        // 登录成功后加载用户列表
+        await this.loadUsersFromTeamPage();
         this.startKeepAlive();
         return;
       }
@@ -3909,6 +4057,8 @@ const ZentaoBrowserClient = {
       console.log('[ZentaoBrowser] 浏览器中未登录禅道，开始自动登录...');
       const loginSuccess = await this.login();
       if (loginSuccess) {
+        // 登录成功后加载用户列表
+        await this.loadUsersFromTeamPage();
         this.startKeepAlive();
       }
     }
@@ -4097,6 +4247,118 @@ const ZentaoBrowserClient = {
     }
     return null;
   },
+
+  /**
+   * 从团队页面加载用户列表
+   * 通过创建临时标签页访问 my-team.html，注入脚本提取用户信息
+   */
+  async loadUsersFromTeamPage() {
+    if (this.usersLoaded && this.users.length > 0) {
+      console.log('[ZentaoBrowser] 用户列表已缓存，跳过加载');
+      return this.users;
+    }
+
+    const config = await this.initConfig();
+    const baseUrl = config?.url?.replace(/\/$/, '');
+    if (!baseUrl) {
+      console.warn('[ZentaoBrowser] 无法获取 baseUrl，跳过用户列表加载');
+      return {};
+    }
+
+    console.log('[ZentaoBrowser] 开始加载用户列表...');
+
+    // 创建临时标签页获取用户列表
+    const tab = await chrome.tabs.create({ url: `${baseUrl}/zentao/my-team.html`, active: false });
+
+    // 等待页面加载完成 - 直接从源代码提取，不需要等待动态渲染
+    await new Promise(resolve => {
+      const listener = (tabId, changeInfo) => {
+        if (tabId === tab.id && changeInfo.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          // 只需等待页面基础加载完成，不需要等待JavaScript渲染
+          setTimeout(resolve, 500);
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+      setTimeout(() => {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }, 10000); // 10秒超时
+    });
+
+    // 注入脚本提取用户 - 参考 Gemini 方案的纯函数设计
+    console.log('[ZentaoBrowser] 准备注入脚本，tab ID:', tab.id, 'URL:', tab.url);
+
+    // 先获取 tab 信息确认页面已加载
+    const updatedTab = await chrome.tabs.get(tab.id);
+    console.log('[ZentaoBrowser] Tab 当前状态:', {
+      id: updatedTab.id,
+      url: updatedTab.url,
+      status: updatedTab.status,
+      title: updatedTab.title
+    });
+
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: scrapeUserDataFromZentao
+    });
+
+    console.log('[ZentaoBrowser] 脚本注入完成，results:', results);
+
+    if (results && results.length > 0) {
+      const data = results[0].result;
+      console.log('[ZentaoBrowser] 返回数据:', data);
+
+      // 打印所有从注入脚本返回的日志
+      if (data && data.logs && Array.isArray(data.logs)) {
+        console.log('[ZentaoBrowser] ========== 注入脚本日志开始 ==========');
+        data.logs.forEach(logEntry => {
+          console.log('[scrapeUserData]', ...logEntry.args);
+        });
+        console.log('[ZentaoBrowser] ========== 注入脚本日志结束 ==========');
+      }
+
+      if (data && data.status === 'success' && data.data) {
+        this.users = data.data;
+        this.usersLoaded = true;
+        const userCount = Object.keys(this.users).length;
+        console.log('[ZentaoBrowser] 加载用户列表成功:', userCount, '个用户');
+        console.log('[ZentaoBrowser] 用户列表:', this.users);
+        if (data.list) {
+          console.log('[ZentaoBrowser] 用户详细信息:', data.list);
+        }
+      } else if (data && data.status === 'error') {
+        console.warn('[ZentaoBrowser] 提取用户失败:', data.message);
+        this.users = {};
+        this.usersLoaded = true;
+      } else if (data && data.status === 'fatal') {
+        console.error('[ZentaoBrowser] 提取过程发生致命错误:', data.message);
+        this.users = {};
+        this.usersLoaded = true;
+      } else {
+        console.warn('[ZentaoBrowser] 返回数据格式异常:', data);
+        this.users = {};
+        this.usersLoaded = true;
+      }
+    } else {
+      console.warn('[ZentaoBrowser] 用户列表加载失败，无结果');
+      this.users = {};
+      this.usersLoaded = true;
+    }
+
+    // 关闭临时标签页
+    await chrome.tabs.remove(tab.id);
+
+    return this.users;
+  },
+
+  /**
+   * 获取用户列表（供外部调用）
+   */
+  getUsers() {
+    return this.users;
+  },
+
 
   /**
    * 创建任务
@@ -5942,6 +6204,36 @@ const BugManager = {
     if (bugProject) {
       bugProject.addEventListener('change', () => this.saveDraftDebounced());
     }
+
+    // Bug 详情弹窗关闭按钮
+    const closeBugDetailBtn = document.getElementById('closeBugDetailModal');
+    if (closeBugDetailBtn) {
+      closeBugDetailBtn.addEventListener('click', () => this.hideBugDetail());
+    }
+
+    // Bug 修复弹窗关闭按钮
+    const closeBugResolveBtn = document.getElementById('closeBugResolveModal');
+    if (closeBugResolveBtn) {
+      closeBugResolveBtn.addEventListener('click', () => this.hideResolveModal());
+    }
+
+    // 取消修复按钮
+    const cancelResolveBtn = document.getElementById('cancelResolveBtn');
+    if (cancelResolveBtn) {
+      cancelResolveBtn.addEventListener('click', () => this.hideResolveModal());
+    }
+
+    // 确认修复按钮
+    const confirmResolveBtn = document.getElementById('confirmResolveBtn');
+    if (confirmResolveBtn) {
+      confirmResolveBtn.addEventListener('click', () => {
+        const modal = document.getElementById('bugResolveModal');
+        const bugId = modal?.dataset.bugId;
+        if (bugId) {
+          this.resolveBug(bugId);
+        }
+      });
+    }
   },
 
   async loadBugs() {
@@ -6076,16 +6368,93 @@ const BugManager = {
     const severityClass = `bug-severity-${bug.severity || 3}`;
     const severityText = ['', '致命', '严重', '一般', '提示'][bug.severity || 3];
 
+    // Bug ID 显示和链接（直接在标题后面）
+    let bugIdSuffix = '';
+    if (bug.zentaoId) {
+      bugIdSuffix = ` <a class="bug-id-link-inline" href="javascript:void(0)" data-bug-id="${bug.zentaoId}" title="点击查看禅道详情">#${bug.zentaoId}</a>`;
+    }
+
+    // 根据状态显示不同的快捷按钮
+    let quickActionButton = '';
+    if (bug.status === 'unconfirmed') {
+      quickActionButton = `<button class="bug-quick-btn bug-activate-btn" title="激活 Bug">⚡ 激活</button>`;
+    } else if (bug.status === 'activated') {
+      quickActionButton = `<button class="bug-quick-btn bug-resolve-btn" title="修复 Bug">🔧 修复</button>`;
+    }
+
     card.innerHTML = `
       <div class="task-title">
         <span class="bug-severity ${severityClass}">${severityText}</span>
-        <span class="task-title-text">${escapeHtml(bug.title)}</span>
+        <span class="task-title-text">${escapeHtml(bug.title)}${bugIdSuffix}</span>
       </div>
       ${bug.projectName ? `<span class="execution-tag">${escapeHtml(bug.projectName)}</span>` : ''}
-      ${bug.type ? `<span class="bug-type">${this.getBugTypeText(bug.type)}</span>` : ''}
+      <div class="bug-card-actions">
+        ${quickActionButton}
+      </div>
     `;
 
+    // Bug ID 点击事件 - 跳转到禅道详情页面
+    const bugIdLink = card.querySelector('.bug-id-link-inline');
+    if (bugIdLink) {
+      bugIdLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const zentaoBugId = bugIdLink.dataset.bugId;
+        this.openBugDetailInZentao(zentaoBugId);
+      });
+    }
+
+    // 添加右键事件
+    card.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      this.showBugDetail(bug.id);
+    });
+
+    // 添加快捷按钮事件
+    const activateBtn = card.querySelector('.bug-activate-btn');
+    if (activateBtn) {
+      activateBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.activateBug(bug.id);
+      });
+    }
+
+    const resolveBtn = card.querySelector('.bug-resolve-btn');
+    if (resolveBtn) {
+      resolveBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.showResolveModal(bug.id);
+      });
+    }
+
     return card;
+  },
+
+  /**
+   * 在禅道中打开 Bug 详情页面
+   * @param {string|number} bugId - Bug ID
+   */
+  async openBugDetailInZentao(bugId) {
+    try {
+      const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
+      const configResult = await configResp.json();
+      const baseUrl = configResult.data?.url?.replace(/\/$/, '');
+
+      if (!baseUrl) {
+        Toast.error('未配置禅道地址');
+        return;
+      }
+
+      const bugDetailUrl = `${baseUrl}/zentao/bug-view-${bugId}.html`;
+
+      // 在新标签页中打开
+      chrome.tabs.create({ url: bugDetailUrl, active: true });
+
+      console.log('[BugManager] 打开禅道 Bug 详情:', bugDetailUrl);
+    } catch (error) {
+      console.error('[BugManager] 打开 Bug 详情失败:', error);
+      Toast.error('打开 Bug 详情失败');
+    }
   },
 
   getBugTypeText(type) {
@@ -6109,6 +6478,9 @@ const BugManager = {
 
     // 加载项目列表
     await this.loadProjectOptions();
+
+    // 加载指派人选项
+    await this.loadAssigneeOptions();
 
     // 如果有初始内容，预填到 bugSteps 字段
     if (initialContent) {
@@ -6201,6 +6573,9 @@ const BugManager = {
 
     // 加载项目列表
     await this.loadProjectOptions();
+
+    // 加载指派人选项
+    await this.loadAssigneeOptions();
 
     // 预填数据
     // 标题
@@ -6317,6 +6692,210 @@ const BugManager = {
     }
   },
 
+  /**
+   * 加载指派人选项到下拉框
+   */
+  async loadAssigneeOptions() {
+    console.log('[BugManager] loadAssigneeOptions 开始执行');
+
+    // 获取用户列表
+    let users = ZentaoBrowserClient.getUsers();
+    console.log('[BugManager] 缓存的用户数量:', users ? Object.keys(users).length : 0);
+
+    if (!users || Object.keys(users).length === 0) {
+      console.warn('[BugManager] 用户列表未加载，尝试从禅道加载...');
+      await ZentaoBrowserClient.loadUsersFromTeamPage();
+      users = ZentaoBrowserClient.getUsers();
+      console.log('[BugManager] 从禅道加载后的用户数量:', users ? Object.keys(users).length : 0);
+    }
+
+    if (!users || Object.keys(users).length === 0) {
+      console.warn('[BugManager] 无法获取用户列表');
+      return;
+    }
+
+    console.log('[BugManager] 加载用户列表到下拉框，用户数量:', Object.keys(users).length);
+
+    // 初始化指派人多选组件
+    this.initMultiSelect('bugAssignee', users);
+
+    // 初始化抄送人多选组件
+    this.initMultiSelect('bugCc', users);
+
+    console.log('[BugManager] 用户选项加载完成');
+  },
+
+  /**
+   * 初始化多选组件
+   * @param {string} fieldId - 字段 ID（bugAssignee 或 bugCc）
+   * @param {Object} users - 用户列表 {account: name}
+   */
+  initMultiSelect(fieldId, users) {
+    const container = document.getElementById(`${fieldId}Container`);
+    const display = document.getElementById(`${fieldId}Display`);
+    const dropdown = document.getElementById(`${fieldId}Dropdown`);
+    const optionsContainer = document.getElementById(`${fieldId}Options`);
+
+    if (!container || !display || !dropdown || !optionsContainer) {
+      console.error(`[BugManager] 多选组件元素不存在: ${fieldId}`);
+      return;
+    }
+
+    // 存储选中的用户
+    const selectedUsers = new Set();
+
+    // 生成用户选项
+    const renderOptions = () => {
+      optionsContainer.innerHTML = '';
+
+      if (Object.keys(users).length === 0) {
+        optionsContainer.innerHTML = '<div class="multi-select-no-data">暂无用户数据</div>';
+        return;
+      }
+
+      Object.entries(users).forEach(([account, name]) => {
+        const option = document.createElement('div');
+        option.className = 'multi-select-option';
+        if (selectedUsers.has(account)) {
+          option.classList.add('selected');
+        }
+
+        option.innerHTML = `
+          <div class="multi-select-option-text">
+            ${name}
+            <span class="multi-select-option-account">(${account})</span>
+          </div>
+          <div class="multi-select-option-check"></div>
+        `;
+
+        option.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (selectedUsers.has(account)) {
+            selectedUsers.delete(account);
+            option.classList.remove('selected');
+          } else {
+            selectedUsers.add(account);
+            option.classList.add('selected');
+          }
+          this.updateMultiSelectDisplay(fieldId, selectedUsers, users);
+        });
+
+        optionsContainer.appendChild(option);
+      });
+    };
+
+    // 更新显示区域
+    this.updateMultiSelectDisplay(fieldId, selectedUsers, users);
+
+    // 点击显示/隐藏下拉列表
+    display.addEventListener('click', (e) => {
+      if (!e.target.closest('.multi-select-tag-remove')) {
+        const isVisible = dropdown.style.display !== 'none';
+        dropdown.style.display = isVisible ? 'none' : 'block';
+        display.classList.toggle('active', !isVisible);
+      }
+    });
+
+    // 点击其他地方关闭下拉
+    document.addEventListener('click', (e) => {
+      if (!container.contains(e.target)) {
+        dropdown.style.display = 'none';
+        display.classList.remove('active');
+      }
+    });
+
+    // 初始化渲染选项
+    renderOptions();
+
+    // 保存引用以便后续访问
+    container._selectedUsers = selectedUsers;
+    container._users = users;
+  },
+
+  /**
+   * 更新多选组件的显示区域
+   * @param {string} fieldId - 字段 ID
+   * @param {Set} selectedUsers - 选中的用户集合
+   * @param {Object} users - 用户列表
+   */
+  updateMultiSelectDisplay(fieldId, selectedUsers, users) {
+    const display = document.getElementById(`${fieldId}Display`);
+    if (!display) return;
+
+    if (selectedUsers.size === 0) {
+      display.innerHTML = '<span class="multi-select-placeholder">请选择用户</span>';
+    } else {
+      display.innerHTML = '';
+      selectedUsers.forEach(account => {
+        const name = users[account] || account;
+        const tag = document.createElement('span');
+        tag.className = 'multi-select-tag';
+        tag.innerHTML = `
+          <span class="multi-select-tag-name">${name}</span>
+          <span class="multi-select-tag-remove" data-account="${account}">×</span>
+        `;
+
+        // 移除标签事件
+        tag.querySelector('.multi-select-tag-remove').addEventListener('click', (e) => {
+          e.stopPropagation();
+          selectedUsers.delete(account);
+          this.updateMultiSelectDisplay(fieldId, selectedUsers, users);
+
+          // 更新下拉列表中的选中状态
+          const container = document.getElementById(`${fieldId}Container`);
+          if (container && container._selectedUsers) {
+            // 重新渲染选项以更新选中状态
+            const optionsContainer = document.getElementById(`${fieldId}Options`);
+            const options = optionsContainer.querySelectorAll('.multi-select-option');
+            options.forEach(option => {
+              const optionText = option.querySelector('.multi-select-option-text').textContent;
+              if (optionText.includes(`(${account})`)) {
+                option.classList.remove('selected');
+              }
+            });
+          }
+        });
+
+        display.appendChild(tag);
+      });
+    }
+  },
+
+  /**
+   * 获取多选组件的选中值
+   * @param {string} fieldId - 字段 ID
+   * @returns {Array} 选中的用户账号数组
+   */
+  getMultiSelectValues(fieldId) {
+    const container = document.getElementById(`${fieldId}Container`);
+    if (container && container._selectedUsers) {
+      return Array.from(container._selectedUsers);
+    }
+    return [];
+  },
+
+  /**
+   * 设置多选组件的选中值
+   * @param {string} fieldId - 字段 ID
+   * @param {Array} values - 要选中的用户账号数组
+   */
+  setMultiSelectValues(fieldId, values) {
+    const container = document.getElementById(`${fieldId}Container`);
+    if (container && container._selectedUsers && container._users) {
+      container._selectedUsers.clear();
+      values.forEach(value => container._selectedUsers.add(value));
+      this.updateMultiSelectDisplay(fieldId, container._selectedUsers, container._users);
+    }
+  },
+
+  /**
+   * 清空多选组件的选中值
+   * @param {string} fieldId - 字段 ID
+   */
+  clearMultiSelectValues(fieldId) {
+    this.setMultiSelectValues(fieldId, []);
+  },
+
   async submitBug() {
     console.log('[BugManager] submitBug 被调用');
     const modal = document.getElementById('bugModal');
@@ -6327,7 +6906,13 @@ const BugManager = {
     const type = document.getElementById('bugType').value;
     const steps = document.getElementById('bugSteps').value.trim();
 
-    console.log('[BugManager] 表单数据:', { projectId, title, severity, type, steps: steps?.substring(0, 50) });
+    // 获取指派人（多选）
+    const assignedToList = this.getMultiSelectValues('bugAssignee');
+
+    // 获取抄送人（多选）
+    const ccList = this.getMultiSelectValues('bugCc');
+
+    console.log('[BugManager] 表单数据:', { projectId, title, severity, type, assignedToList, ccList, steps: steps?.substring(0, 50) });
 
     // 从 modal 获取执行信息（如果有）
     const executionId = modal?.dataset.executionId;
@@ -6354,6 +6939,9 @@ const BugManager = {
       severity: parseInt(severity),
       type,
       steps,
+      assignedToList,  // 改为数组，支持多个指派人
+      assignedTo: assignedToList.length > 0 ? assignedToList[0] : '',  // 兼容旧API，取第一个作为主指派人
+      cc: ccList,
       // 如果有执行信息，添加到 Bug 数据中
       ...(executionId && { executionId: parseInt(executionId) }),
       ...(executionName && { executionName })
@@ -6689,12 +7277,20 @@ const BugManager = {
   },
 
   saveDraft() {
+    // 获取指派人（多选）
+    const assignedToList = this.getMultiSelectValues('bugAssignee');
+
+    // 获取抄送人（多选）
+    const ccList = this.getMultiSelectValues('bugCc');
+
     const draft = {
       projectId: document.getElementById('bugProject').value,
       title: document.getElementById('bugTitle').value,
       severity: document.getElementById('bugSeverity').value,
       type: document.getElementById('bugType').value,
       steps: document.getElementById('bugSteps').value,
+      assignedToList,  // 保存指派人列表
+      ccList,          // 保存抄送人列表
       savedAt: new Date().toISOString()
     };
 
@@ -6729,6 +7325,16 @@ const BugManager = {
     document.getElementById('bugSeverity').value = this.draft.severity || '3';
     document.getElementById('bugType').value = this.draft.type || 'codeerror';
     document.getElementById('bugSteps').value = this.draft.steps || '';
+
+    // 恢复指派人（多选）
+    if (this.draft.assignedToList && this.draft.assignedToList.length > 0) {
+      this.setMultiSelectValues('bugAssignee', this.draft.assignedToList);
+    }
+
+    // 恢复抄送人（多选）
+    if (this.draft.ccList && this.draft.ccList.length > 0) {
+      this.setMultiSelectValues('bugCc', this.draft.ccList);
+    }
   },
 
   clearDraft() {
@@ -6741,6 +7347,12 @@ const BugManager = {
     document.getElementById('bugSeverity').value = '3';
     document.getElementById('bugType').value = 'codeerror';
     document.getElementById('bugSteps').value = '';
+
+    // 清空指派人选择
+    this.clearMultiSelectValues('bugAssignee');
+
+    // 清空抄送人选择
+    this.clearMultiSelectValues('bugCc');
   },
 
   /**
@@ -6767,6 +7379,341 @@ const BugManager = {
     } catch (err) {
       console.error('[BugManager] 删除所有 Bug 失败:', err);
       Toast.error('删除失败: ' + err.message);
+    }
+  },
+
+  /**
+   * 显示 Bug 详情弹窗
+   */
+  showBugDetail(bugId) {
+    const bug = this.bugs.find(b => b.id === bugId);
+    if (!bug) return;
+
+    const modal = document.getElementById('bugDetailModal');
+    const content = document.getElementById('bugDetailContent');
+    const actions = document.getElementById('bugDetailActions');
+
+    if (!modal || !content || !actions) return;
+
+    const severityText = ['', '致命', '严重', '一般', '提示'][bug.severity || 3];
+    const statusText = { unconfirmed: '未确认', activated: '激活', closed: '已关闭' }[bug.status] || bug.status;
+
+    content.innerHTML = `
+      <div style="margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+          <span class="bug-severity bug-severity-${bug.severity || 3}">${severityText}</span>
+          <span style="font-size: 13px; color: var(--text-secondary);">${statusText}</span>
+        </div>
+        <h4 style="margin: 0 0 12px 0;">${escapeHtml(bug.title)}</h4>
+        ${bug.projectName ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">项目: ${escapeHtml(bug.projectName)}</p>` : ''}
+        ${bug.type ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">类型: ${this.getBugTypeText(bug.type)}</p>` : ''}
+        ${bug.steps ? `<div style="margin-top: 12px; padding: 12px; background: var(--bg-secondary); border-radius: 6px;"><p style="margin: 0; font-size: 13px; white-space: pre-wrap;">${escapeHtml(bug.steps)}</p></div>` : ''}
+      </div>
+    `;
+
+    // 清空并重新创建按钮，避免 CSP 问题
+    actions.innerHTML = '';
+
+    if (bug.status === 'unconfirmed') {
+      const activateBtn = document.createElement('button');
+      activateBtn.className = 'btn-primary';
+      activateBtn.textContent = '激活';
+      activateBtn.onclick = () => this.activateBug(bugId);
+      actions.appendChild(activateBtn);
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'btn-danger';
+      deleteBtn.textContent = '删除';
+      deleteBtn.style.marginLeft = '8px';
+      deleteBtn.onclick = () => this.deleteBug(bugId);
+      actions.appendChild(deleteBtn);
+    } else if (bug.status === 'activated') {
+      const resolveBtn = document.createElement('button');
+      resolveBtn.className = 'btn-primary';
+      resolveBtn.textContent = '修复';
+      resolveBtn.onclick = () => this.showResolveModal(bugId);
+      actions.appendChild(resolveBtn);
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'btn-danger';
+      deleteBtn.textContent = '删除';
+      deleteBtn.style.marginLeft = '8px';
+      deleteBtn.onclick = () => this.deleteBug(bugId);
+      actions.appendChild(deleteBtn);
+    } else {
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'btn-danger';
+      deleteBtn.textContent = '删除';
+      deleteBtn.onclick = () => this.deleteBug(bugId);
+      actions.appendChild(deleteBtn);
+    }
+
+    modal.style.display = 'flex';
+  },
+
+  /**
+   * 隐藏 Bug 详情弹窗
+   */
+  hideBugDetail() {
+    const modal = document.getElementById('bugDetailModal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
+  },
+
+  /**
+   * 显示修复弹窗
+   */
+  showResolveModal(bugId) {
+    const bug = this.bugs.find(b => b.id === bugId);
+    if (!bug) return;
+
+    // 先隐藏详情弹窗
+    this.hideBugDetail();
+
+    const modal = document.getElementById('bugResolveModal');
+    if (!modal) return;
+
+    // 加载用户列表到指派人下拉框
+    this.loadAssigneeOptions();
+
+    // 保存当前操作的 Bug ID
+    modal.dataset.bugId = bugId;
+
+    modal.style.display = 'flex';
+  },
+
+  /**
+   * 隐藏修复弹窗
+   */
+  hideResolveModal() {
+    const modal = document.getElementById('bugResolveModal');
+    if (modal) {
+      modal.style.display = 'none';
+      // 清空表单
+      document.getElementById('resolveResolution').value = 'fixed';
+      document.getElementById('resolveAssignee').value = '';
+      document.getElementById('resolveComment').value = '';
+    }
+  },
+
+  /**
+   * 激活 Bug
+   */
+  async activateBug(bugId) {
+    console.log('[BugManager] ========== 激活 Bug 开始 ==========');
+    console.log('[BugManager] Bug ID:', bugId);
+
+    const bug = this.bugs.find(b => b.id === bugId);
+    if (!bug) {
+      console.error('[BugManager] 未找到 Bug:', bugId);
+      return;
+    }
+
+    console.log('[BugManager] Bug 信息:', { id: bug.id, zentaoId: bug.zentaoId, title: bug.title, executionId: bug.executionId });
+
+    if (!bug.zentaoId) {
+      Toast.warning('该 Bug 未同步到禅道');
+      return;
+    }
+
+    if (!bug.executionId) {
+      Toast.warning('该 Bug 缺少执行 ID 信息，无法激活');
+      return;
+    }
+
+    Toast.info('正在激活 Bug...');
+
+    try {
+      const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
+      const configResult = await configResp.json();
+      const baseUrl = configResult.data?.url?.replace(/\/$/, '');
+
+      console.log('[BugManager] 禅道地址:', baseUrl);
+
+      if (!baseUrl) {
+        Toast.error('禅道未配置');
+        return;
+      }
+
+      // 构造看板页面 URL
+      const kanbanUrl = `${baseUrl}/zentao/execution-kanban-${bug.executionId}-bug.html`;
+      console.log('[BugManager] 看板页面 URL:', kanbanUrl);
+
+      // 调用 background.js 激活 Bug（使用看板页面）
+      console.log('[BugManager] 发送激活消息到 background:', {
+        action: 'activateBugInZentao',
+        baseUrl,
+        kanbanUrl,
+        bugId: bug.zentaoId,
+        assignedTo: '',
+        comment: ''
+      });
+
+      const response = await chrome.runtime.sendMessage({
+        action: 'activateBugInZentao',
+        baseUrl,
+        kanbanUrl,
+        bugId: bug.zentaoId,
+        assignedTo: '',
+        comment: ''
+      });
+
+      console.log('[BugManager] Background 响应:', response);
+
+      if (response && response.success) {
+        Toast.success('Bug 已激活');
+        console.log('[BugManager] ✓ 激活成功，更新本地状态');
+        // 更新本地 Bug 状态
+        await this.updateBugStatus(bugId, 'activated');
+        this.hideBugDetail();
+      } else {
+        console.error('[BugManager] ✗ 激活失败:', response);
+        Toast.error('激活失败: ' + (response?.reason || '未知错误'));
+      }
+      console.log('[BugManager] ========== 激活 Bug 结束 ==========');
+    } catch (err) {
+      console.error('[BugManager] 激活 Bug 异常:', err);
+      Toast.error('激活失败: ' + err.message);
+    }
+  },
+
+  /**
+   * 修复 Bug
+   */
+  async resolveBug(bugId) {
+    const bug = this.bugs.find(b => b.id === bugId);
+    if (!bug) return;
+
+    if (!bug.zentaoId) {
+      Toast.warning('该 Bug 未同步到禅道');
+      return;
+    }
+
+    if (!bug.executionId) {
+      Toast.warning('该 Bug 缺少执行 ID 信息，无法修复');
+      return;
+    }
+
+    const modal = document.getElementById('bugResolveModal');
+    const resolution = document.getElementById('resolveResolution').value;
+    const assignedTo = document.getElementById('resolveAssignee').value;
+    const comment = document.getElementById('resolveComment').value;
+
+    Toast.info('正在修复 Bug...');
+
+    try {
+      const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
+      const configResult = await configResp.json();
+      const baseUrl = configResult.data?.url?.replace(/\/$/, '');
+
+      if (!baseUrl) {
+        Toast.error('禅道未配置');
+        return;
+      }
+
+      // 构造看板页面 URL
+      const kanbanUrl = `${baseUrl}/zentao/execution-kanban-${bug.executionId}-bug.html`;
+
+      // 调用 background.js 修复 Bug（使用看板页面）
+      const response = await chrome.runtime.sendMessage({
+        action: 'resolveBugInZentao',
+        baseUrl,
+        kanbanUrl,
+        bugId: bug.zentaoId,
+        resolution,
+        assignedTo,
+        comment
+      });
+
+      if (response && response.success) {
+        Toast.success('Bug 已修复');
+        // 更新本地 Bug 状态
+        await this.updateBugStatus(bugId, 'closed');
+        this.hideResolveModal();
+        this.hideBugDetail(); // 同时关闭详情弹窗
+      } else {
+        Toast.error('修复失败: ' + (response?.reason || '未知错误'));
+      }
+    } catch (err) {
+      console.error('[BugManager] 修复 Bug 失败:', err);
+      Toast.error('修复失败: ' + err.message);
+    }
+  },
+
+  /**
+   * 删除 Bug
+   */
+  async deleteBug(bugId) {
+    const bug = this.bugs.find(b => b.id === bugId);
+    if (!bug) return;
+
+    const confirmDelete = confirm('确定要删除这个 Bug 吗？此操作将同时删除禅道中的 Bug。');
+    if (!confirmDelete) return;
+
+    Toast.info('正在删除 Bug...');
+
+    try {
+      // 如果有禅道 ID，先删除禅道中的 Bug
+      if (bug.zentaoId) {
+        const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
+        const configResult = await configResp.json();
+        const baseUrl = configResult.data?.url?.replace(/\/$/, '');
+
+        if (baseUrl) {
+          // 获取 regionId（如果有）
+          const regionId = bug.regionId || '0';
+
+          const response = await chrome.runtime.sendMessage({
+            action: 'deleteBugInZentao',
+            baseUrl,
+            bugId: bug.zentaoId,
+            regionId
+          });
+
+          if (!response || !response.success) {
+            Toast.warning('禅道 Bug 删除失败，但将删除本地记录');
+          }
+        }
+      }
+
+      // 删除本地 Bug
+      const deleteResp = await fetch(`${API_BASE_URL}/api/bug/${bugId}`, {
+        method: 'DELETE'
+      });
+      const deleteResult = await deleteResp.json();
+
+      if (deleteResult.success) {
+        Toast.success('Bug 已删除');
+        this.hideBugDetail();
+        await this.loadBugs();
+      } else {
+        Toast.error('删除失败: ' + (deleteResult.error || '未知错误'));
+      }
+    } catch (err) {
+      console.error('[BugManager] 删除 Bug 失败:', err);
+      Toast.error('删除失败: ' + err.message);
+    }
+  },
+
+  /**
+   * 更新 Bug 状态
+   */
+  async updateBugStatus(bugId, newStatus) {
+    console.log('[BugManager] updateBugStatus:', bugId, '->', newStatus);
+
+    // 直接在内存中更新 Bug 状态
+    const bug = this.bugs.find(b => b.id === bugId);
+    if (bug) {
+      console.log('[BugManager] 更新前状态:', bug.status);
+      bug.status = newStatus;
+      console.log('[BugManager] 更新后状态:', bug.status);
+
+      // 重新渲染 Bug 列表
+      this.renderBugs();
+      console.log('[BugManager] Bug 列表已重新渲染');
+    } else {
+      console.error('[BugManager] 未找到 Bug:', bugId);
     }
   }
 };
