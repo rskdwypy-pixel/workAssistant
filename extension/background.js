@@ -58,21 +58,25 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
  * 必须在消息处理器之前定义
  */
 async function fetchKanbanPage(params) {
-  const { url } = params;
-
-  console.error('[Background] ========== fetchKanbanPage 开始 ==========');
-  console.error('[Background] URL:', url);
-
-  let logs = []; // 收集所有日志用于返回
-
-  // 先列出所有标签页用于调试
-  const allTabs = await chrome.tabs.query({});
-  console.log('[Background] 当前所有标签页数量:', allTabs.length);
-  allTabs.forEach((tab, i) => {
-    console.log(`[Background]   标签 ${i}: ${tab.url?.substring(0, 80)} (id=${tab.id})`);
-  });
+  console.log('[Background] ========== fetchKanbanPage 开始 ==========');
+  console.log('[Background] 接收到的params:', JSON.stringify(params));
 
   try {
+    const { url, laneType = 'task', columnType = 'wait' } = params;
+
+    console.log('[Background] URL:', url);
+    console.log('[Background] laneType:', laneType, 'columnType:', columnType);
+
+    let logs = []; // 收集所有日志用于返回
+
+    // 先列出所有标签页用于调试
+    console.log('[Background] 准备查询标签页...');
+    const allTabs = await chrome.tabs.query({});
+    console.log('[Background] ✓ 查询成功，标签页数量:', allTabs.length);
+    allTabs.forEach((tab, i) => {
+      console.log(`[Background]   标签 ${i}: ${tab.url?.substring(0, 80)} (id=${tab.id})`);
+    });
+
     // 从 URL 中提取禅道 baseUrl 和 executionId
     const urlObj = new URL(url);
     const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
@@ -82,19 +86,71 @@ async function fetchKanbanPage(params) {
     logs.push(`提取参数: baseUrl=${baseUrl}, executionId=${executionId}`);
     console.log('[Background]', logs[logs.length - 1]);
 
-    // 确保禅道页面存在，并导航到看板页面
-    console.error('[Background] 调用 ensureZentaoTab...');
-    const targetTab = await ensureZentaoTab(baseUrl, executionId);
-    console.error('[Background] ensureZentaoTab 返回:', targetTab ? `标签 ${targetTab.id}, URL: ${targetTab.url?.substring(0, 60)}` : 'null');
+    // 直接查找精确匹配的标签页
+    console.log('[Background] 查找精确匹配的标签页:', url);
+    let targetTab = allTabs.find(tab => tab.url === url);
+
+    if (targetTab) {
+      console.log('[Background] ✓ 找到精确匹配的标签页:', targetTab.id, targetTab.url);
+      // 刷新页面以确保内容是最新的
+      await chrome.tabs.reload(targetTab.id);
+      // 等待刷新完成
+      await new Promise(resolve => {
+        const listener = (tabId, changeInfo) => {
+          if (tabId === targetTab.id && changeInfo.status === 'complete') {
+            chrome.tabs.onUpdated.removeListener(listener);
+            setTimeout(resolve, 1000); // 等待DOM渲染
+          }
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+        setTimeout(() => {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }, 10000);
+      });
+    } else {
+      // 没有找到精确匹配的标签页，创建一个新的
+      console.log('[Background] 未找到精确匹配的标签页，创建新标签页');
+      targetTab = await chrome.tabs.create({ url, active: false });
+
+      // 等待页面加载完成
+      await new Promise(resolve => {
+        const listener = (tabId, changeInfo) => {
+          if (tabId === targetTab.id && changeInfo.status === 'complete') {
+            chrome.tabs.onUpdated.removeListener(listener);
+            setTimeout(resolve, 1000); // 等待DOM渲染
+          }
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+        setTimeout(() => {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }, 20000);
+      });
+
+      // 重新获取 tab 信息以获取更新后的 URL
+      targetTab = await chrome.tabs.get(targetTab.id);
+      console.log('[Background] 新标签页 URL 已更新:', targetTab.url);
+    }
 
     if (!targetTab) {
-      console.error('[Background] 无法获取禅道页面');
+      console.error('[Background] 无法获取或创建禅道页面');
       return { success: false, reason: 'no_zentao_tab' };
     }
 
-    // 如果当前页面不是看板页面，需要导航
-    if (!targetTab.url || !targetTab.url.includes(`execution-kanban-${executionId}`)) {
-      console.log('[Background] 当前页面不是看板页面，需要导航');
+    // 如果当前页面不是目标看板页面，需要导航
+    // 必须精确匹配URL，区分主看板和Bug看板
+    const expectedUrlPattern = new URL(url).pathname; // 获取 /zentao/execution-kanban-148-bug.html
+    const currentUrlPath = targetTab.url ? new URL(targetTab.url).pathname : '';
+
+    console.log('[Background] URL 检查:', {
+      expected: expectedUrlPattern,
+      current: currentUrlPath,
+      match: currentUrlPath === expectedUrlPattern
+    });
+
+    if (currentUrlPath !== expectedUrlPattern) {
+      console.log('[Background] 当前页面不是目标看板页面，需要导航到:', url);
       await chrome.tabs.update(targetTab.id, { url: url });
 
       // 等待页面加载完成
@@ -102,8 +158,8 @@ async function fetchKanbanPage(params) {
         const listener = (tabId, changeInfo) => {
           if (tabId === targetTab.id && changeInfo.status === 'complete') {
             chrome.tabs.onUpdated.removeListener(listener);
-            // 短暂等待确保 iframe 开始加载
-            setTimeout(resolve, 500);
+            // 短暂等待确保 DOM 完全渲染
+            setTimeout(resolve, 1000);
           }
         };
         chrome.tabs.onUpdated.addListener(listener);
@@ -114,131 +170,207 @@ async function fetchKanbanPage(params) {
           resolve();
         }, 20000);
       });
+
+      // 重新获取 tab 信息以获取更新后的 URL
+      targetTab = await chrome.tabs.get(targetTab.id);
+      console.log('[Background] 导航后 URL 已更新:', targetTab.url);
     } else {
-      // 即使是看板页面，也等待一下确保加载完成
-      console.log('[Background] 当前是看板页面，等待确保加载完成');
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // 即使是正确的看板页面，也等待一下确保加载完成
+      console.log('[Background] ✓ 当前已是目标看板页面，等待确保加载完成');
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
-    // 从已渲染的 DOM 中获取参数
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: targetTab.id },
-      func: () => {
-        return new Promise((resolve) => {
-          console.log('[Background Content] ============ 脚本已注入，开始执行 ============');
-          console.log('[Background Content] 当前页面 URL:', window.location.href);
+    // 从 HTML 源代码中获取参数
+    console.log('[Background] 获取看板参数，laneType=' + laneType + ', columnType=' + columnType);
+    console.log('[Background] 目标 URL:', targetTab.url);
 
-          try {
-            // 检查是否有 iframe
-            const iframe = document.getElementById('appIframe-execution');
-            console.log('[Background Content] iframe 元素存在:', !!iframe);
+    try {
+      // 使用 fetch 获取页面 HTML 源代码
+      console.log('[Background] 正在获取页面 HTML 源代码...');
+      const response = await fetch(targetTab.url);
+      const html = await response.text();
+      console.log('[Background] ✓ 成功获取 HTML，长度:', html.length);
 
-            if (!iframe || !iframe.contentDocument) {
-              // 如果没有 iframe，尝试在主页面查找
-              console.log('[Background Content] 未找到 iframe，尝试在主页面查找');
-              const kanbanElem = document.getElementById('kanban');
-              if (!kanbanElem) {
-                resolve({ success: false, reason: 'no_kanban_or_iframe' });
-                return;
-              }
+      // 从 HTML 源代码中提取参数
+      console.log('[Background] ========== 开始从 HTML 源代码提取参数 ==========');
 
-              const regionElem = kanbanElem.querySelector('.region');
-              const regionId = regionElem?.getAttribute('data-id');
+      let productId = null;    // 产品ID
+      let projectId = null;    // 项目ID
+      let regionId = null;
+      let laneId = null;
+      let columnId = null;
 
-              let laneId = null;
-              const laneNameElems = kanbanElem.querySelectorAll('.kanban-lane-name');
-              for (const elem of laneNameElems) {
-                if (elem.getAttribute('title') === '任务') {
-                  const laneElem = elem.closest('.kanban-lane');
-                  if (laneElem) {
-                    laneId = laneElem.getAttribute('data-id');
-                    break;
+      // 提取 productID - 产品ID，用于构建 Bug 创建 URL
+      console.log('[Background] 提取 productID...');
+      const productMatch = html.match(/productID\s*=\s*(\d+);/);
+      if (productMatch) {
+        productId = productMatch[1];
+        console.log('[Background] ✓ 找到 productID:', productId);
+      } else {
+        console.log('[Background] ✗ 未找到 productID');
+      }
+
+      // 提取 execution.project - 项目ID，用于表单的 project 字段
+      console.log('[Background] 提取 execution.project...');
+      const executionProjectMatch = html.match(/"project"\s*:\s*"(\d+)"/);
+      if (executionProjectMatch) {
+        projectId = executionProjectMatch[1];
+        console.log('[Background] ✓ 找到 execution.project:', projectId);
+      } else {
+        console.log('[Background] ✗ 未找到 execution.project');
+      }
+
+      // 提取 regions 或 kanbanData
+      console.log('[Background] 提取 regions/kanbanData...');
+
+      // 辅助函数：提取嵌套对象
+      function extractNestedObject(html, varName) {
+        const startPattern = new RegExp(varName + '\\s*=\\s*(\\{)');
+        const startMatch = html.match(startPattern);
+        if (!startMatch) return null;
+
+        const startPos = startMatch.index + startMatch[0].length - 1;
+        let depth = 1;
+        let endPos = startPos + 1;
+
+        while (depth > 0 && endPos < html.length) {
+          if (html[endPos] === '{') depth++;
+          else if (html[endPos] === '}') depth--;
+          endPos++;
+        }
+
+        if (depth !== 0) return null;
+        return html.substring(startPos, endPos);
+      }
+
+      const regionsStr = extractNestedObject(html, 'regions');
+      const kanbanDataStr = extractNestedObject(html, 'kanbanData');
+
+      if (regionsStr || kanbanDataStr) {
+        const dataStr = regionsStr || kanbanDataStr;
+        console.log('[Background] ✓ 找到 regions/kanbanData，长度:', dataStr.length);
+        try {
+          // 替换 Unicode 转义序列
+          const unescapedStr = dataStr.replace(/\\u([\d\w]{4})/gi, (match, grp) => {
+            return String.fromCharCode(parseInt(grp, 16));
+          });
+
+          const data = JSON.parse(unescapedStr);
+          console.log('[Background] ✓ 解析 regions/kanbanData 成功，keys:', Object.keys(data));
+
+          // 提取 regionId
+          const regionKeys = Object.keys(data);
+          if (regionKeys.length > 0) {
+            regionId = regionKeys[0];
+            console.log('[Background] ✓ 找到 regionId:', regionId);
+
+            const region = data[regionId];
+            if (region.groups && region.groups.length > 0) {
+              for (const group of region.groups) {
+                // 提取 laneId
+                if (!laneId && group.lanes && group.lanes.length > 0) {
+                  for (const lane of group.lanes) {
+                    if (lane.type === laneType) {
+                      laneId = lane.id;
+                      console.log('[Background] ✓ 找到 laneId (type=' + laneType + '):', laneId);
+                      break;
+                    }
                   }
                 }
+
+                // 提取 columnId
+                if (!columnId && group.columns && group.columns.length > 0) {
+                  for (const column of group.columns) {
+                    if (column.type === columnType) {
+                      columnId = column.id;
+                      console.log('[Background] ✓ 找到 columnId (type=' + columnType + '):', columnId);
+                      break;
+                    }
+                  }
+                }
+
+                if (laneId && columnId) break;
               }
-
-              const columnElem = kanbanElem.querySelector('.kanban-col[data-type="wait"]');
-              const columnId = columnElem?.getAttribute('data-id');
-
-              resolve({
-                success: !!(regionId && laneId && columnId),
-                regionId, laneId, columnId,
-                reason: !(regionId && laneId && columnId) ? 'params_incomplete' : null
-              });
-              return;
             }
-
-            // 从 iframe 获取参数
-            console.log('[Background Content] 从 iframe 获取参数');
-            const doc = iframe.contentDocument;
-            console.log('[Background Content] iframe URL:', doc.location?.href);
-
-            // 等待 iframe 加载完成，使用轮询方式，最多重试 30 次（3 秒）
-            let retryCount = 0;
-            const maxRetries = 30;
-            const retryInterval = 100; // 100ms
-
-            const checkIframeReady = () => {
-              const region = doc.querySelector('.region');
-              const lanes = doc.querySelectorAll('.kanban-lane');
-              const column = doc.querySelector('.kanban-col[data-type="wait"]');
-
-              if (region && lanes.length > 0 && column) {
-                // 获取 regionId
-                const regionId = region?.getAttribute('data-id');
-
-                // 获取 laneId（title="任务"）
-                let laneId;
-                for (const lane of lanes) {
-                  const name = lane.querySelector('.kanban-lane-name');
-                  if (name?.getAttribute('title') === '任务') {
-                    laneId = lane.getAttribute('data-id');
-                    break;
-                  }
-                }
-
-                // 获取 columnId
-                const columnId = column?.getAttribute('data-id');
-
-                console.log('[Background Content] 从 iframe 获取到参数:', { regionId, laneId, columnId });
-
-                if (regionId && laneId && columnId) {
-                  resolve({ success: true, regionId, laneId, columnId });
-                } else {
-                  resolve({ success: false, reason: 'params_incomplete', debug: { regionId, laneId, columnId } });
-                }
-              } else if (retryCount < maxRetries) {
-                // 如果还没加载完成，快速重试
-                retryCount++;
-                setTimeout(checkIframeReady, retryInterval);
-              } else {
-                // 超时，返回失败
-                console.log('[Background Content] 获取参数超时');
-                resolve({
-                  success: false,
-                  reason: 'timeout',
-                  debug: {
-                    regionExists: !!region,
-                    lanesCount: lanes.length,
-                    columnExists: !!column
-                  }
-                });
-              }
-            };
-
-            checkIframeReady();
-
-          } catch (err) {
-            console.error('[Background Content] 获取参数异常:', err);
-            resolve({ success: false, reason: err.message });
           }
-        });
-      },
-      args: []
-    });
+        } catch (parseErr) {
+          console.error('[Background] 解析 regions/kanbanData 失败:', parseErr);
+        }
+      } else {
+        console.log('[Background] ✗ 未找到 regions 或 kanbanData');
+      }
 
-    const result = results[0]?.result;
-    console.log('[Background] 获取看板参数结果:', result);
+      // 参数提取结果总结
+      console.log('[Background] ========== 参数提取总结 ==========');
+      console.log('[Background] 📋 参数提取状态：');
+      console.log('[Background]   - productId (产品ID):', productId ? '✓ ' + productId : '✗ 未找到');
+      console.log('[Background]   - projectId (项目ID):', projectId ? '✓ ' + projectId : '✗ 未找到');
+      console.log('[Background]   - regionId:', regionId ? '✓ ' + regionId : '✗ 未找到');
+      console.log('[Background]   - laneId (type=' + laneType + '):', laneId ? '✓ ' + laneId : '✗ 未找到');
+      console.log('[Background]   - columnId (type=' + columnType + '):', columnId ? '✓ ' + columnId : '✗ 未找到');
+
+      // ========== 严格参数验证：所有必需参数必须存在 ==========
+      const requiredParams = {
+        productId: !!productId,
+        regionId: !!regionId,
+        laneId: !!laneId,
+        columnId: !!columnId
+      };
+
+      const missingParams = Object.keys(requiredParams).filter(key => !requiredParams[key]);
+
+      if (missingParams.length > 0) {
+        console.error('[Background] ✗ 参数提取失败，缺少必需参数:', missingParams);
+        return {
+          success: false,
+          reason: 'missing_required_params',
+          missing: missingParams,
+          message: '缺少必需参数: ' + missingParams.join(', ')
+        };
+      }
+
+      console.log('[Background] ✓ 所有必需参数提取成功:', {
+        productId,
+        projectId,
+        regionId,
+        laneId,
+        columnId
+      });
+
+      return {
+        success: true,
+        productId,
+        projectId,
+        regionId,
+        laneId,
+        columnId
+      };
+    } catch (err) {
+      console.error('[Background] ✗ 获取参数异常:', err);
+      return { success: false, reason: err.message };
+    }
+
+    // 二次验证：确保所有必需参数都存在
+    const requiredParams = ['productId', 'regionId', 'laneId', 'columnId'];
+    const missing = requiredParams.filter(param => !result[param]);
+
+    if (missing.length > 0) {
+      console.error('[Background] ✗ 参数验证失败，缺少必需参数:', missing);
+      return {
+        success: false,
+        reason: 'missing_required_params',
+        missing,
+        message: '缺少必需参数: ' + missing.join(', ')
+      };
+    }
+
+    console.log('[Background] ✓ 所有必需参数验证通过:', {
+      productId: result.productId,
+      projectId: result.projectId,
+      regionId: result.regionId,
+      laneId: result.laneId,
+      columnId: result.columnId
+    });
 
     if (!result) {
       return { success: false, reason: 'no_result', logs };
@@ -251,9 +383,10 @@ async function fetchKanbanPage(params) {
     }
 
     return result;
-  } catch (err) {
-    console.error('[Background] fetchKanbanPage 异常:', err.message);
-    return { success: false, reason: err.message };
+  } catch (outerErr) {
+    console.error('[Background] fetchKanbanPage 外层异常:', outerErr.message);
+    console.error('[Background] 错误堆栈:', outerErr.stack);
+    return { success: false, reason: outerErr.message };
   }
 }
 
@@ -375,6 +508,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // 保持异步返回
   }
 
+  if (request.action === 'executeBugInZentaoPage') {
+    executeBugInZentaoPage(request)
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, reason: err.message }));
+    return true;
+  }
+
   if (request.action === 'updateZentaoTaskStatus') {
     updateZentaoTaskStatus(request)
       .then(sendResponse)
@@ -447,6 +587,127 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
+// 在禅道页面中执行请求创建 Bug
+async function executeBugInZentaoPage(params) {
+  const { baseUrl, productId, bugData } = params;
+  const executionId = bugData.executionId || '';
+  const projectId = bugData.projectId || '';
+
+  console.log('[Background] 尝试在禅道页面中执行创建 Bug');
+
+  const targetTab = await ensureZentaoTab(baseUrl);
+  if (!targetTab) {
+    return { success: false, reason: 'no_zentao_tab' };
+  }
+
+  // 构建端点 URL（在 background.js 中构建，避免 window 未定义问题）
+  let endpoint;
+  if (bugData.regionId && bugData.laneId && bugData.columnId) {
+    endpoint = `${baseUrl}/zentao/bug-create-${productId}-0-regionID=${bugData.regionId},laneID=${bugData.laneId},columnID=${bugData.columnId},executionID=${executionId}.html?onlybody=yes`;
+  } else {
+    endpoint = `${baseUrl}/zentao/bug-create-${productId}-${executionId}.html`;
+  }
+
+  console.log('[Background] Bug 创建端点:', endpoint);
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: targetTab.id },
+    func: (productId, executionId, projectId, bugData, endpoint) => {
+      return new Promise((resolve) => {
+        console.log('[Bug Create] 准备创建 Bug:', { productId, executionId, projectId, title: bugData.title });
+        console.log('[Bug Create] 请求端点:', endpoint);
+
+        const formData = new FormData();
+        formData.append('product', productId);
+        formData.append('module', '0');
+        if (projectId) formData.append('project', projectId);
+        if (executionId) formData.append('execution', executionId);
+        formData.append('openedBuild[]', bugData.openedBuild || 'trunk');
+        if (bugData.assignedTo) formData.append('assignedTo', bugData.assignedTo);
+        formData.append('deadline', '');
+        formData.append('feedbackBy', '');
+        formData.append('notifyEmail', '');
+        formData.append('type', bugData.type || 'codeerror');
+
+        // 看板相关参数
+        if (bugData.regionId) formData.append('region', bugData.regionId);
+        if (bugData.laneId) formData.append('lane', bugData.laneId);
+
+        formData.append('title', bugData.title);
+        formData.append('color', '');
+        formData.append('severity', String(bugData.severity || 3));
+        formData.append('pri', String(bugData.pri || 3));
+        formData.append('steps', bugData.steps || '');
+        formData.append('story', '');
+        formData.append('task', '');
+        formData.append('keywords', '');
+        formData.append('status', 'active');
+        formData.append('issueKey', '');
+        formData.append('uid', Math.random().toString(36).substring(2, 14));
+        formData.append('case', '0');
+        formData.append('caseVersion', '0');
+        formData.append('result', '0');
+        formData.append('testtask', '0');
+
+        fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+          body: formData
+        })
+        .then(async r => {
+          console.log('[Bug Create] 响应 HTTP 状态:', r.status);
+          const text = await r.text();
+          return { status: r.status, text };
+        })
+        .then(({ status, text }) => {
+          console.log('[Bug Create] ========== 响应分析 ==========');
+          console.log('[Bug Create] 响应 HTTP 状态:', status);
+          console.log('[Bug Create] 响应内容长度:', text.length);
+          console.log('[Bug Create] 响应内容 (前1000字符):', text.substring(0, 1000));
+          if (text.length > 1000) {
+            console.log('[Bug Create] 响应内容 (后500字符):', text.substring(text.length - 500));
+          }
+          console.log('[Bug Create] 响应完整内容:', text);
+
+          try {
+            const data = JSON.parse(text);
+            console.log('[Bug Create] ✓ JSON 解析成功');
+            console.log('[Bug Create] data.result:', data.result);
+            console.log('[Bug Create] data.message:', data.message);
+            console.log('[Bug Create] data.locate:', data.locate);
+            console.log('[Bug Create] data.id:', data.id);
+            console.log('[Bug Create] data.bug?.id:', data.bug?.id);
+            console.log('[Bug Create] data.data?.id:', data.data?.id);
+            console.log('[Bug Create] data.callback (存在?):', !!data.callback);
+            if (data.callback) {
+              console.log('[Bug Create] data.callback 长度:', data.callback.length);
+              console.log('[Bug Create] data.callback (前500字符):', data.callback.substring(0, 500));
+              console.log('[Bug Create] data.callback (后500字符):', data.callback.substring(data.callback.length - 500));
+            }
+            console.log('[Bug Create] 完整 data 对象:', JSON.stringify(data, null, 2));
+            resolve({ success: true, data });
+          } catch (e) {
+            console.error('[Bug Create] ✗ JSON 解析失败:', e);
+            console.error('[Bug Create] 解析错误详情:', e.message);
+            resolve({ success: false, reason: 'invalid_json', responseText: text.substring(0, 1000) });
+          }
+          console.log('[Bug Create] ========== 响应分析结束 ==========');
+        })
+        .catch(err => {
+          console.error('[Bug Create] 请求失败:', err);
+          resolve({ success: false, reason: err.message });
+        });
+      });
+    },
+    args: [productId, executionId, projectId, bugData, endpoint]
+  });
+
+  return results[0].result;
+}
+
 // 在禅道页面中执行请求（使用 content script）
 async function executeInZentaoPage(params) {
   const { baseUrl, executionId, username, taskData } = params;
@@ -488,6 +749,8 @@ async function executeInZentaoPage(params) {
     target: { tabId: targetTab.id },
     func: (executionId, username, taskData, uid) => {
       return new Promise((resolve) => {
+        console.log('[Task Create] 准备创建任务:', { executionId, username, title: taskData.title });
+
         const formData = new FormData();
         formData.append('execution', executionId);
         formData.append('type', 'test');
@@ -517,6 +780,7 @@ async function executeInZentaoPage(params) {
         }
 
         const endpoint = `${window.location.origin}/zentao/task-create-${executionId}-0-0.html`;
+        console.log('[Task Create] 请求端点:', endpoint);
 
         fetch(endpoint, {
           method: 'POST',
@@ -526,16 +790,23 @@ async function executeInZentaoPage(params) {
           },
           body: formData
         })
-        .then(r => r.text())
+        .then(r => {
+          console.log('[Task Create] 响应状态:', r.status);
+          return r.text();
+        })
         .then(text => {
+          console.log('[Task Create] 响应内容 (前200字符):', text.substring(0, 200));
           try {
             const data = JSON.parse(text);
+            console.log('[Task Create] 解析成功:', data);
             resolve({ success: true, data });
           } catch (e) {
+            console.error('[Task Create] JSON 解析失败:', e);
             resolve({ success: false, reason: 'invalid_json', responseText: text.substring(0, 500) });
           }
         })
         .catch(err => {
+          console.error('[Task Create] 请求失败:', err);
           resolve({ success: false, reason: err.message });
         });
       });
@@ -632,7 +903,28 @@ async function ensureZentaoTab(baseUrl, kanbanId) {
   );
 
   if (zentaoTab) {
-    console.log('[Background] 使用禅道页面:', zentaoTab.url);
+    console.log('[Background] 使用禅道页面:', zentaoTab.url, '状态:', zentaoTab.status);
+
+    // 如果页面还在加载中，等待它完成
+    if (zentaoTab.status !== 'complete') {
+      console.log('[Background] 禅道页面还在加载中，等待完成...');
+      await new Promise(resolve => {
+        const listener = (tabId, changeInfo) => {
+          if (tabId === zentaoTab.id && changeInfo.status === 'complete') {
+            chrome.tabs.onUpdated.removeListener(listener);
+            console.log('[Background] 禅道页面加载完成');
+            setTimeout(resolve, 300); // 额外等待确保页面稳定
+          }
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+        // 超时保护
+        setTimeout(() => {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }, 5000);
+      });
+    }
+
     return zentaoTab;
   }
 

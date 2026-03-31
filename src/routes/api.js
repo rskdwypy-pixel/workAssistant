@@ -920,90 +920,35 @@ router.post('/zentao/config', async (req, res) => {
   }
 });
 
-// ==================== 禅道代理接口 ====================
-
-// 存储 cookie（内存中）
-let zentaoCookies = null;
-let zentaoCookieExpiry = null;
+// ==================== 禅道代理接口（已废弃） ====================
+// 注意：所有禅道操作已迁移到浏览器端，通过 ZentaoBrowserClient 完成
+// 以下函数和接口已废弃，保留仅为向后兼容，不再使用后端 cookie
 
 /**
- * 登录禅道获取 cookie
+ * @deprecated 已废弃，请使用浏览器端 ZentaoBrowserClient
+ * 登录禅道获取 cookie（已废弃）
  */
 async function loginZentao(baseUrl, username, password) {
-  const loginUrl = `${baseUrl}/zentao/user-login.html`;
-
-  // 首先获取登录页面，提取必要的参数
-  const loginPageResp = await fetch(loginUrl);
-  const loginPageHtml = await loginPageResp.text();
-
-  // 提取 verify 参数（如果有）
-  const verifyMatch = loginPageHtml.match(/name="verify"[^>]*value="([^"]+)"/);
-  const verify = verifyMatch ? verifyMatch[1] : '';
-
-  // 提交登录表单
-  const formResp = await fetch(`${baseUrl}/zentao/user-login.json`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({
-      account: username,
-      password: password,
-      verify: verify || '',
-      keepLogin: 'on',
-    }),
-    redirect: 'manual'
-  });
-
-  // 获取响应的 set-cookie
-  const setCookieHeaders = formResp.headers.getSetCookie();
-  const cookies = {};
-  for (const header of setCookieHeaders) {
-    const match = header.match(/^([^=]+)=([^;]+)/);
-    if (match) {
-      cookies[match[1]] = match[2];
-    }
-  }
-
-  if (cookies.zentaosid) {
-    console.log('[API] 禅道登录成功, session:', cookies.zentaosid.substring(0, 8) + '...');
-    return cookies;
-  }
-
-  throw new Error('登录失败，未获取到 session cookie');
+  console.warn('[API] loginZentao 已废弃，请使用浏览器端 ZentaoBrowserClient');
+  throw new Error('已废弃：请使用浏览器端 ZentaoBrowserClient');
 }
 
 /**
- * 获取有效的禅道 cookie
+ * @deprecated 已废弃，请使用浏览器端 ZentaoBrowserClient
+ * 获取有效的禅道 cookie（已废弃）
  */
 async function getZentaoCookies() {
-  const configModule = await import('../config.js');
-  const config = configModule.config.zentao;
-
-  // 检查配置
-  if (!config.url || !config.username || !config.password) {
-    throw new Error('禅道未配置');
-  }
-
-  // 检查 cookie 是否有效（1小时过期）
-  if (zentaoCookies && zentaoCookieExpiry && Date.now() < zentaoCookieExpiry) {
-    return zentaoCookies;
-  }
-
-  // 重新登录
-  console.log('[API] 禅道 cookie 过期或不存在，重新登录...');
-  zentaoCookies = await loginZentao(config.url, config.username, config.password);
-  zentaoCookieExpiry = Date.now() + 60 * 60 * 1000; // 1小时后过期
-  return zentaoCookies;
+  console.warn('[API] getZentaoCookies 已废弃，请使用浏览器端 ZentaoBrowserClient');
+  throw new Error('已废弃：请使用浏览器端 ZentaoBrowserClient');
 }
 
 /**
- * 将 cookie 对象转换为 Cookie header 字符串
+ * @deprecated 已废弃，请使用浏览器端 ZentaoBrowserClient
+ * 将 cookie 对象转换为 Cookie header 字符串（已废弃）
  */
 function cookiesToString(cookies) {
-  return Object.entries(cookies)
-    .map(([name, value]) => `${name}=${value}`)
-    .join('; ');
+  console.warn('[API] cookiesToString 已废弃');
+  return '';
 }
 
 // ==================== 项目相关接口 ====================
@@ -1316,8 +1261,15 @@ router.post('/bug', async (req, res) => {
       }
     }
 
-    const bug = await createBugWithSync(bugData);
-    res.json({ success: true, data: bug, message: 'Bug 已创建' });
+    const result = await createBugWithSync(bugData);
+    
+    if (result.syncResult && result.syncResult.needRelogin) {
+      res.json({ success: true, data: result.localBug, needRelogin: true, message: 'Bug 已在本地创建，但在向禅道同步时登录超时，请重新登录' });
+    } else if (result.syncResult && !result.syncResult.success) {
+      res.json({ success: true, data: result.localBug, message: 'Bug已经本地创建，但同步到禅道失败: ' + result.syncResult.message });
+    } else {
+      res.json({ success: true, data: result.localBug, message: 'Bug 已创建并同步至禅道' });
+    }
   } catch (err) {
     console.error('[API] 创建 Bug 失败:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -1349,6 +1301,19 @@ router.delete('/bug/:id', async (req, res) => {
     const { deleteBug } = await import('../services/bugManager.js');
     await deleteBug(id);
     res.json({ success: true, message: 'Bug 已删除' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/bugs/all - 删除所有 Bug
+ */
+router.delete('/bugs/all', async (req, res) => {
+  try {
+    const { deleteAllBugs } = await import('../services/bugManager.js');
+    const result = await deleteAllBugs();
+    res.json({ success: true, deletedCount: result.deletedCount, message: `已删除 ${result.deletedCount} 个 Bug` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1491,115 +1456,29 @@ router.post('/executions/favorites/remove', async (req, res) => {
 });
 
 /**
- * POST /api/zentao/task/create - 代理创建禅道任务
+ * @deprecated POST /api/zentao/task/create - 代理创建禅道任务（已废弃）
+ * 请使用浏览器端 ZentaoBrowserClient.createTask()
  */
 router.post('/zentao/task/create', async (req, res) => {
-  try {
-    const { executionId, username, taskData } = req.body;
-
-    if (!executionId || !taskData || !taskData.title) {
-      return res.status(400).json({ success: false, error: '缺少必要参数' });
-    }
-
-    // 获取 cookie
-    const cookies = await getZentaoCookies();
-
-    const configModule = await import('../config.js');
-    const baseUrl = configModule.config.zentao.url;
-    const endpoint = `${baseUrl}/zentao/task-create-${executionId}-0-0.html`;
-
-    console.log('[API] 代理创建任务:', taskData.title);
-
-    // 构建 FormData
-    const formData = new FormData();
-    formData.append('execution', executionId);
-    formData.append('type', 'test');
-    formData.append('module', '0');
-    formData.append('assignedTo[]', username);
-    formData.append('teamMember', '');
-    formData.append('mode', 'linear');
-    formData.append('status', 'wait');
-    formData.append('story', '');
-    formData.append('color', '');
-    formData.append('name', taskData.title);
-    formData.append('storyEstimate', '');
-    formData.append('storyDesc', '');
-    formData.append('storyPri', '');
-    formData.append('pri', '3');
-    formData.append('estimate', '');
-    formData.append('desc', taskData.content || taskData.title);
-    formData.append('estStarted', '');
-    formData.append('deadline', taskData.dueDate || '');
-    formData.append('after', 'toTaskList');
-    formData.append('uid', Math.random().toString(36).substring(2, 14));
-
-    for (let i = 0; i < 5; i++) {
-      formData.append('team[]', '');
-      formData.append('teamSource[]', '');
-      formData.append('teamEstimate[]', '');
-    }
-
-    // 发送请求到禅道
-    const zentaoResp = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Cookie': cookiesToString(cookies),
-      },
-      body: formData,
-    });
-
-    const responseText = await zentaoResp.text();
-    console.log('[API] 禅道响应状态:', zentaoResp.status);
-
-    if (!zentaoResp.ok) {
-      throw new Error(`HTTP ${zentaoResp.status}`);
-    }
-
-    // 解析响应
-    let data;
-    try {
-      data = JSON.parse(responseText);
-    } catch (e) {
-      console.error('[API] 响应不是有效的 JSON:', responseText.substring(0, 200));
-      return res.status(500).json({ success: false, error: '响应解析失败', responseText: responseText.substring(0, 500) });
-    }
-
-    res.json({ success: true, data });
-  } catch (err) {
-    console.error('[API] 创建禅道任务失败:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
+  console.warn('[API] /api/zentao/task/create 已废弃，请使用浏览器端 ZentaoBrowserClient');
+  res.status(410).json({
+    success: false,
+    error: '此接口已废弃，请使用浏览器端 ZentaoBrowserClient.createTask()',
+    message: '所有禅道操作已迁移到浏览器端，通过注入脚本到禅道标签页完成'
+  });
 });
 
 /**
- * GET /api/zentao/kanban/params - 从看板页面解析 regionId、laneId、columnId
- * Query 参数:
- *   - executionId: 执行ID
- *   - laneType: 泳道类型 ('task'=任务, 'story'=研发需求, 'bug'=Bug)
- *   - columnType: 列类型 ('wait'=未开始, 'developing'=研发中 等)
+ * @deprecated GET /api/zentao/kanban/params - 从看板页面解析参数（已废弃）
+ * 请使用浏览器端 ZentaoBrowserClient.getKanbanParamsFromHtml()
  */
 router.get('/zentao/kanban/params', async (req, res) => {
-  try {
-    const { executionId, laneType = 'task', columnType = 'wait' } = req.query;
-
-    if (!executionId) {
-      return res.status(400).json({ success: false, error: '缺少 executionId 参数' });
-    }
-
-    const { getKanbanParams } = await import('../services/zentaoService.js');
-    const params = await getKanbanParams(executionId, laneType, columnType);
-
-    if (!params) {
-      return res.status(404).json({ success: false, error: '无法解析看板参数' });
-    }
-
-    res.json({ success: true, data: params });
-  } catch (err) {
-    console.error('[API] 获取看板参数失败:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
+  console.warn('[API] /api/zentao/kanban/params 已废弃，请使用浏览器端 ZentaoBrowserClient');
+  res.status(410).json({
+    success: false,
+    error: '此接口已废弃，请使用浏览器端 ZentaoBrowserClient.getKanbanParamsFromHtml()',
+    message: '所有禅道操作已迁移到浏览器端，通过注入脚本到禅道标签页完成'
+  });
 });
 
 export default router;

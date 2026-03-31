@@ -2445,9 +2445,28 @@ async function updateTaskProgress(taskId, progress) {
     const result = await response.json();
 
     if (result.success) {
-      // 只重新渲染任务列表，不重新加载
-      await loadTasks();
-      console.log('[Progress] 进度更新成功，返回 true');
+      // 直接在本地更新任务状态和进度
+      const localTask = allTasks.find(t => t.id === taskId);
+      if (localTask) {
+        localTask.progress = progress;
+        // 根据进度更新状态
+        if (progress === 100) {
+          localTask.status = 'done';
+        } else if (progress > 0 && progress < 100) {
+          localTask.status = 'in_progress';
+        } else if (progress === 0) {
+          localTask.status = 'todo';
+        }
+        // 更新累计消耗工时
+        if (consumedTime > 0) {
+          localTask.totalConsumedTime = (localTask.totalConsumedTime || 0) + consumedTime;
+        }
+      }
+      // 重新渲染任务列表
+      renderTasks();
+      // 更新统计数据
+      await updateTaskStats();
+      console.log('[Progress] 进度更新成功，本地状态已更新');
       return true;
     } else {
       Toast.error('更新进度失败');
@@ -4867,7 +4886,10 @@ const ZentaoBrowserClient = {
     }
 
     const baseUrl = this.getBaseUrl();
-    const kanbanUrl = `${baseUrl}/zentao/execution-kanban-${executionId}.html`;
+    // 根据类型访问不同的看板页面：bug 类型访问 bug 看板，task 类型访问主看板
+    const kanbanUrl = laneType === 'bug'
+      ? `${baseUrl}/zentao/execution-kanban-${executionId}-bug.html`
+      : `${baseUrl}/zentao/execution-kanban-${executionId}.html`;
 
     console.log('[ZentaoBrowser] 从看板页面DOM获取参数:', { executionId, laneType, columnType, url: kanbanUrl });
 
@@ -4876,7 +4898,9 @@ const ZentaoBrowserClient = {
       const result = await new Promise((resolve) => {
         chrome.runtime.sendMessage({
           action: 'fetchKanbanPage',
-          url: kanbanUrl
+          url: kanbanUrl,
+          laneType: laneType,
+          columnType: columnType
         }, (response) => {
           if (chrome.runtime.lastError) {
             console.warn('[ZentaoBrowser] Background 通信失败:', chrome.runtime.lastError.message);
@@ -4896,10 +4920,16 @@ const ZentaoBrowserClient = {
       }
 
       // 新的格式直接返回解析好的参数
-      const { regionId, laneId, columnId } = result;
-      console.log('[ZentaoBrowser] 解析成功:', { regionId, laneId, columnId });
+      const { productId, projectId, regionId, laneId, columnId } = result;
+      console.log('[ZentaoBrowser] 解析成功:', {
+        productId,    // 产品ID，用于URL (67)
+        projectId,    // 项目ID，用于表单 (130)
+        regionId, laneId, columnId
+      });
 
       return {
+        productId: productId ? String(productId) : null,    // 产品ID
+        projectId: projectId ? String(projectId) : null,    // 项目ID
         regionId: String(regionId),
         laneId: String(laneId),
         columnId: String(columnId)
@@ -5916,25 +5946,64 @@ const BugManager = {
 
   async loadBugs() {
     // 从本地或后端加载 Bug 列表
+    console.log('[BugManager] ========== loadBugs 开始 ==========');
     try {
       const response = await fetch(`${API_BASE_URL}/api/bugs`);
       const result = await response.json();
+      console.log('[BugManager] API 响应 success:', result.success);
+
       if (result.success) {
         this.bugs = result.data || [];
+        console.log('[BugManager] 获取到的 Bug 数量:', this.bugs.length);
+
+        // 详细打印每个 Bug 的信息
+        this.bugs.forEach((bug, index) => {
+          console.log(`[BugManager] Bug ${index + 1}:`, {
+            id: bug.id,
+            title: bug.title,
+            type: bug.type,
+            zentaoId: bug.zentaoId,
+            status: bug.status,
+            executionId: bug.executionId,
+            projectId: bug.projectId
+          });
+        });
+
+        // 统计不同类型的任务
+        const bugCount = this.bugs.filter(t => t.type === 'bug').length;
+        const taskCount = this.bugs.filter(t => t.type !== 'bug').length;
+        console.log('[BugManager] type=bug 的数量:', bugCount);
+        console.log('[BugManager] type!=bug 的数量:', taskCount);
+
         this.renderBugs();
+      } else {
+        console.error('[BugManager] API 返回失败:', result.error);
       }
     } catch (err) {
       console.error('[BugManager] 加载 Bug 列表失败:', err);
     }
+    console.log('[BugManager] ========== loadBugs 结束 ==========');
   },
 
   renderBugs() {
+    console.log('[BugManager] ========== renderBugs 开始 ==========');
+    console.log('[BugManager] 待渲染的 Bug 数量:', this.bugs.length);
+
     // 渲染 Bug 到各个列
     const unconfirmedList = document.getElementById('bugUnconfirmedList');
     const activatedList = document.getElementById('bugActivatedList');
     const closedList = document.getElementById('bugClosedList');
 
-    if (!unconfirmedList || !activatedList || !closedList) return;
+    console.log('[BugManager] 列容器查找结果:', {
+      unconfirmed: !!unconfirmedList,
+      activated: !!activatedList,
+      closed: !!closedList
+    });
+
+    if (!unconfirmedList || !activatedList || !closedList) {
+      console.error('[BugManager] ✗ Bug 列容器未找到，无法渲染');
+      return;
+    }
 
     // 清空列表
     unconfirmedList.innerHTML = '';
@@ -5946,20 +6015,49 @@ const BugManager = {
     let activatedCount = 0;
     let closedCount = 0;
 
-    this.bugs.forEach(bug => {
+    console.log('[BugManager] 开始遍历 Bug 并渲染...');
+    this.bugs.forEach((bug, index) => {
+      console.log(`[BugManager] 处理 Bug ${index + 1}:`, {
+        id: bug.id,
+        title: bug.title,
+        type: bug.type,
+        status: bug.status,
+        zentaoId: bug.zentaoId
+      });
+
+      // 检查 Bug 的 type 字段
+      if (bug.type !== 'bug') {
+        console.warn(`[BugManager] ⚠ Bug ${index + 1} 的 type 不是 'bug':`, bug.type, bug.title);
+      }
+
       const card = this.createBugCard(bug);
 
       if (bug.status === 'unconfirmed') {
         unconfirmedList.appendChild(card);
         unconfirmedCount++;
+        console.log(`[BugManager] → Bug "${bug.title}" 渲染到未确认列`);
       } else if (bug.status === 'activated') {
         activatedList.appendChild(card);
         activatedCount++;
+        console.log(`[BugManager] → Bug "${bug.title}" 渲染到已激活列`);
       } else if (bug.status === 'closed') {
         closedList.appendChild(card);
         closedCount++;
+        console.log(`[BugManager] → Bug "${bug.title}" 渲染到已关闭列`);
+      } else {
+        console.log(`[BugManager] → Bug "${bug.title}" 状态未知: ${bug.status}`);
       }
     });
+
+    console.log('[BugManager] 渲染统计:', {
+      unconfirmed: unconfirmedCount,
+      activated: activatedCount,
+      closed: closedCount,
+      total: unconfirmedCount + activatedCount + closedCount
+    });
+    console.log('[BugManager] ========== renderBugs 结束 ==========');
+
+    // 更新计数
 
     // 更新计数
     document.getElementById('bugUnconfirmedListCount').textContent = unconfirmedCount;
@@ -6264,18 +6362,257 @@ const BugManager = {
     console.log('[BugManager] 准备提交 Bug 数据:', bugData);
 
     try {
-      console.log('[BugManager] 发送请求到后端...');
-      const response = await fetch(`${API_BASE_URL}/api/bug`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bugData)
-      });
-      const result = await response.json();
+      console.log('[BugManager] 准备通过浏览器扩展前端推送禅道 Bug...');
 
-      console.log('[BugManager] 后端响应:', result);
+      const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
+      const configResult = await configResp.json();
+      const baseUrl = configResult.data?.url?.replace(/\/$/, '') || null;
+      let needRelogin = false;
 
-      // 检查是否需要重新登录禅道
-      if (result.needRelogin) {
+      if (baseUrl) {
+        // 如果有执行ID，尝试获取看板参数（看板Bug必需）
+        if (executionId) {
+          try {
+            console.log('[BugManager] 尝试获取看板参数, executionId:', executionId);
+            const kanbanParams = await ZentaoBrowserClient.getKanbanParamsFromHtml(executionId, 'bug', 'unconfirmed');
+
+            if (!kanbanParams) {
+              console.error('[BugManager] ✗ 无法获取看板参数');
+              Toast.error('无法获取看板参数，请确保已打开禅道Bug看板页面');
+              return;
+            }
+
+            console.log('[BugManager] 获取到看板参数:', kanbanParams);
+
+            // ========== 严格参数验证：所有必需参数必须存在 ==========
+            const requiredParams = ['productId', 'regionId', 'laneId', 'columnId'];
+            const missingParams = requiredParams.filter(param => !kanbanParams[param]);
+
+            if (missingParams.length > 0) {
+              console.error('[BugManager] ✗ 看板参数不完整，缺少必需参数:', missingParams);
+              console.error('[BugManager] 获取到的参数:', kanbanParams);
+              Toast.error('看板参数获取失败，缺少: ' + missingParams.join(', ') + '。请刷新禅道页面后重试。');
+              return;
+            }
+
+            // 所有必需参数都存在，继续处理
+            bugData.productId = kanbanParams.productId;
+            bugData.projectId = kanbanParams.projectId || bugData.projectId; // projectId 可选，优先使用看板解析的
+            bugData.regionId = kanbanParams.regionId;
+            bugData.laneId = kanbanParams.laneId;
+            bugData.columnId = kanbanParams.columnId;
+
+            console.log('[BugManager] ✓ 所有看板参数验证通过:', {
+              productId: bugData.productId,
+              projectId: bugData.projectId,
+              regionId: bugData.regionId,
+              laneId: bugData.laneId,
+              columnId: bugData.columnId
+            });
+          } catch (e) {
+            console.error('[BugManager] 获取看板参数异常:', e);
+            Toast.error('获取看板参数失败: ' + e.message);
+            return;
+          }
+        } else {
+          // 没有 executionId，无法创建看板Bug
+          console.error('[BugManager] ✗ 缺少 executionId，无法创建看板Bug');
+          Toast.error('缺少执行ID，无法创建Bug');
+          return;
+        }
+
+        const syncResponse = await new Promise(resolve => {
+          chrome.runtime.sendMessage({
+            action: 'executeBugInZentaoPage',
+            baseUrl,
+            // productId 是必需的，不允许使用默认值
+            productId: bugData.productId,
+            bugData
+          }, resolve);
+        });
+
+        if (syncResponse && syncResponse.success) {
+          // 适配返回结构，提取 bugId
+          const data = syncResponse.data;
+
+          // ========== 添加详细日志：响应数据结构 ==========
+          console.log('[BugManager] ========== Bug 创建响应分析 ==========');
+          console.log('[BugManager] 完整响应数据:', JSON.stringify(data, null, 2));
+          console.log('[BugManager] data.id:', data?.id);
+          console.log('[BugManager] data.bug?.id:', data?.bug?.id);
+          console.log('[BugManager] data.data?.id:', data?.data?.id);
+          console.log('[BugManager] data.callback (前500字符):', data?.callback?.substring(0, 500));
+          console.log('[BugManager] data.callback (后500字符):', data?.callback?.substring(data.callback.length - 500));
+          console.log('[BugManager] data.locate:', data?.locate);
+
+          let bugId = data?.id || data?.bug?.id || data?.data?.id;
+
+          // 如果响应中包含看板回调数据，尝试从中提取 Bug ID
+          if (!bugId && data?.callback) {
+            console.log('[BugManager] ========== 尝试从 callback 中提取 Bug ID ==========');
+            console.log('[BugManager] callback 长度:', data.callback.length);
+            console.log('[BugManager] 查找的 Bug 标题:', bugData.title);
+
+            // 方法1: 从 callback 中解析 updateKanban 的参数
+            try {
+              // 提取 parent.updateKanban(...) 中的 JSON
+              const kanbanMatch = data.callback.match(/parent\.updateKanban\((.+)\)\)/);
+              console.log('[BugManager] updateKanban 匹配结果:', kanbanMatch ? '成功' : '失败');
+              if (kanbanMatch) {
+                const kanbanJson = kanbanMatch[1];
+                console.log('[BugManager] 提取到 kanban JSON (前500字符):', kanbanJson.substring(0, 500));
+
+                // 解析 JSON
+                const kanbanData = JSON.parse(kanbanJson);
+                console.log('[BugManager] 解析 kanbanData 成功，顶层键:', Object.keys(kanbanData));
+
+                // 遍历所有 region
+                let regionCount = 0;
+                let groupCount = 0;
+                let columnCount = 0;
+                let itemCount = 0;
+
+                for (const regionKey in kanbanData) {
+                  regionCount++;
+                  const region = kanbanData[regionKey];
+                  console.log('[BugManager] Region ' + regionCount + ':', regionKey, 'groups 数量:', region.groups?.length);
+
+                  if (region.groups) {
+                    // 遍历所有 groups
+                    for (const group of region.groups) {
+                      groupCount++;
+                      console.log('[BugManager]   Group ' + groupCount + ':', group.id, 'columns 数量:', group.columns?.length);
+
+                      if (group.columns) {
+                        // 遍历所有 columns
+                        for (const column of group.columns) {
+                          columnCount++;
+                          console.log('[BugManager]     Column ' + columnCount + ': type=' + column.type + ', items 数量:', column.items?.length);
+
+                          // 查找 unconfirmed 类型的 column
+                          if (column.type === 'unconfirmed' && column.items && column.items.length > 0) {
+                            console.log('[BugManager]       ✓ 找到 unconfirmed column，包含 ' + column.items.length + ' 个 items');
+
+                            // 遍历 items，根据标题匹配查找 Bug ID
+                            for (const item of column.items) {
+                              itemCount++;
+                              console.log('[BugManager]         Item ' + itemCount + ': id=' + item.id + ', title="' + item.title + '"');
+
+                              if (item.title === bugData.title) {
+                                bugId = item.id;
+                                console.log('[BugManager]         ✓✓✓ 标题匹配找到 Bug ID:', bugId);
+                                break;
+                              }
+                            }
+
+                            if (bugId) break;
+                          }
+                        }
+                      }
+                      if (bugId) break;
+                    }
+                  }
+                  if (bugId) break;
+                }
+                console.log('[BugManager] 遍历统计: region=' + regionCount + ', group=' + groupCount + ', column=' + columnCount + ', item=' + itemCount);
+              }
+            } catch (parseErr) {
+              console.error('[BugManager] ✗ 解析 callback JSON 失败:', parseErr.message);
+              console.error('[BugManager] 错误堆栈:', parseErr.stack);
+            }
+
+            // 方法2: 如果方法1失败，尝试用正则匹配 Bug ID（回退方案）
+            if (!bugId) {
+              console.log('[BugManager] ========== 方法1失败，尝试正则匹配 ==========');
+
+              // 尝试多种正则模式
+              const patterns = [
+                { name: 'items.unconfirmed.id', pattern: /"items":\{[^}]*"unconfirmed":\s*\[\{[^}]*"id":\s*"(\d+)"/ },
+                { name: 'unconfirmed array', pattern: /"unconfirmed":\s*\[\s*\{[^}]*"id":\s*"(\d+)"/ },
+                { name: 'generic id in callback', pattern: /"id":\s*"(\d+)"/g },
+                { name: 'bug-view in callback', pattern: /bug-view-(\d+)/ }
+              ];
+
+              for (const { name, pattern } of patterns) {
+                const match = data.callback.match(pattern);
+                if (match) {
+                  if (match.length > 1 && match[1]) {
+                    bugId = parseInt(match[1]);
+                    console.log('[BugManager] ✓ 通过 ' + name + ' 匹配到 Bug ID:', bugId);
+                    break;
+                  }
+                  // 对于全局匹配，取最后一个（最新的）
+                  if (name === 'generic id in callback') {
+                    const allMatches = [...data.callback.matchAll(pattern)];
+                    if (allMatches.length > 0) {
+                      bugId = parseInt(allMatches[allMatches.length - 1][1]);
+                      console.log('[BugManager] ✓ 通过 ' + name + ' 匹配到 Bug ID (最后匹配):', bugId);
+                      break;
+                    }
+                  }
+                }
+              }
+
+              if (!bugId) {
+                console.log('[BugManager] ✗ 所有正则模式都未匹配到 Bug ID');
+              }
+            }
+            console.log('[BugManager] ========== callback 提取结束 ==========');
+          }
+
+          if (!bugId && data?.locate) {
+            console.log('[BugManager] ========== 尝试从 locate 提取 Bug ID ==========');
+            console.log('[BugManager] locate:', data.locate);
+            const match = data.locate.match(/bug-view-(\d+)/);
+            if (match) {
+              bugId = parseInt(match[1]);
+              console.log('[BugManager] ✓ 从 locate 匹配到 Bug ID:', bugId);
+            } else {
+              console.log('[BugManager] ✗ locate 中未找到 bug-view-XXX 模式');
+            }
+          }
+
+          console.log('[BugManager] ========== 最终结果 ==========');
+          console.log('[BugManager] 最终提取的 Bug ID:', bugId);
+          if (!bugId) {
+            console.error('[BugManager] ✗✗✗ Bug ID 提取失败 ✗✗✗');
+            console.error('[BugManager] 可用字段:', {
+              'data.id': data?.id,
+              'data.bug?.id': data?.bug?.id,
+              'data.data?.id': data?.data?.id,
+              'data.locate': data?.locate,
+              'data.callback 存在': !!data?.callback,
+              'data.callback 长度': data?.callback?.length
+            });
+          }
+          console.log('[BugManager] ========== 响应分析结束 ==========');
+
+          if (bugId) {
+            bugData.zentaoId = bugId;
+            console.log('[BugManager] ✓ 禅道 Bug 创建成功，ID:', bugId);
+            console.log('[BugManager] Bug 数据（保存前）:', {
+              title: bugData.title,
+              zentaoId: bugData.zentaoId,
+              executionId: bugData.executionId,
+              projectId: bugData.projectId
+            });
+          } else {
+             console.log('[BugManager] ✗ 禅道 Bug 可能创建成功，但无法提取 ID', data);
+          }
+        } else if (syncResponse) {
+          console.warn('[BugManager] 禅道 Bug 同步失败, success:', syncResponse.success, 'reason:', syncResponse.reason, 'data:', syncResponse.data);
+          if (syncResponse.reason === 'no_zentao_tab') {
+             Toast.error('未找到禅道标签页，请先在浏览器中登录禅道');
+             return;
+          } else if (typeof syncResponse.reason === 'string' && (syncResponse.reason.includes('超时') || syncResponse.reason.includes('登录'))) {
+             needRelogin = true;
+          } else {
+             Toast.warning('禅道同步失败，将在本地保存 (' + (syncResponse.reason || '未知错误') + ')');
+          }
+        }
+      }
+
+      if (needRelogin) {
         console.log('[BugManager] 需要重新登录禅道');
         Toast.warning('禅道登录已超时，正在重新登录...');
 
@@ -6284,18 +6621,43 @@ const BugManager = {
           const refreshSuccess = await ZentaoBrowser.refreshCookies();
           if (refreshSuccess) {
             Toast.success('禅道登录成功，请重新提交 Bug');
-            return; // 用户需要重新点击提交
+            return;
           } else {
-            Toast.error('禅道登录失败，请手动在禅道标签页登录');
+            Toast.error('禅道自动登录失败，请手动在浏览器标签页登录');
             return;
           }
         } else {
-          Toast.error('请手动在禅道标签页登录后重试');
+          Toast.error('请手动在浏览器中重新登录禅道标签页');
           return;
         }
       }
 
+      // 保存到本地
+      console.log('[BugManager] ========== 保存 Bug 到本地 ==========');
+      console.log('[BugManager] 准备保存的 Bug 数据:', JSON.stringify(bugData, null, 2));
+      console.log('[BugManager] Bug 数据关键字段:', {
+        title: bugData.title,
+        zentaoId: bugData.zentaoId,
+        executionId: bugData.executionId,
+        projectId: bugData.projectId,
+        type: typeof bugData.type,
+        severity: bugData.severity
+      });
+
+      const response = await fetch(`${API_BASE_URL}/api/bug`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bugData)
+      });
+      const result = await response.json();
+
+      console.log('[BugManager] 本地保存响应:', result);
+      console.log('[BugManager] 本地保存 success:', result.success);
+
       if (result.success) {
+        console.log('[BugManager] ✓ Bug 保存到本地成功');
+        console.log('[BugManager] 返回的 Bug 数据:', result.data);
+
         Toast.success('Bug 已创建');
         this.clearDraft();
         this.hideBugModal();
@@ -6304,10 +6666,17 @@ const BugManager = {
           delete modal.dataset.executionId;
           delete modal.dataset.executionName;
         }
-        this.loadBugs(); // 重新加载 Bug 列表
+
+        // 延迟一下再加载，确保数据已保存
+        setTimeout(() => {
+          console.log('[BugManager] 准备重新加载 Bug 列表...');
+          this.loadBugs(); // 重新加载 Bug 列表
+        }, 100);
       } else {
+        console.error('[BugManager] ✗ Bug 保存到本地失败:', result.error);
         Toast.error('创建失败: ' + (result.error || '未知错误'));
       }
+      console.log('[BugManager] ========== 本地保存结束 ==========');
     } catch (err) {
       console.error('[BugManager] 创建 Bug 失败:', err);
       Toast.error('创建失败: ' + err.message);
@@ -6372,6 +6741,47 @@ const BugManager = {
     document.getElementById('bugSeverity').value = '3';
     document.getElementById('bugType').value = 'codeerror';
     document.getElementById('bugSteps').value = '';
+  },
+
+  /**
+   * 删除所有 Bug 卡片
+   */
+  async deleteAllBugs() {
+    if (!confirm('确定要删除所有 Bug 卡片吗？此操作不可恢复！')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/bugs/all`, {
+        method: 'DELETE'
+      });
+      const result = await response.json();
+
+      if (result.success) {
+        Toast.success(`已删除 ${result.deletedCount} 个 Bug`);
+        // 重新加载 Bug 列表
+        await this.loadBugs();
+      } else {
+        Toast.error('删除失败: ' + (result.error || '未知错误'));
+      }
+    } catch (err) {
+      console.error('[BugManager] 删除所有 Bug 失败:', err);
+      Toast.error('删除失败: ' + err.message);
+    }
+  }
+};
+
+// ==================== 全局工具函数 ====================
+
+/**
+ * 删除所有 Bug 卡片（全局函数）
+ * 在控制台调用: deleteAllBugs()
+ */
+window.deleteAllBugs = function() {
+  if (typeof BugManager !== 'undefined') {
+    BugManager.deleteAllBugs();
+  } else {
+    console.error('BugManager 未初始化');
   }
 };
 
