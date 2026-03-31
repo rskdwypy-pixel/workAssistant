@@ -8059,7 +8059,7 @@ const BugManager = {
   async updateBugStatus(bugId, newStatus) {
     console.log('[BugManager] updateBugStatus:', bugId, '->', newStatus);
 
-    // 直接在内存中更新 Bug 状态
+    // 先在内存中更新 Bug 状态
     const bug = this.bugs.find(b => b.id === bugId);
     if (bug) {
       console.log('[BugManager] 更新前状态:', bug.status);
@@ -8071,6 +8071,26 @@ const BugManager = {
       console.log('[BugManager] Bug 列表已重新渲染');
     } else {
       console.error('[BugManager] 未找到 Bug:', bugId);
+      return;
+    }
+
+    // 同步状态到后端数据库
+    try {
+      console.log('[BugManager] 同步 Bug 状态到后端...');
+      const response = await fetch(`${API_BASE_URL}/api/bug/${bugId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        console.log('[BugManager] ✓ Bug 状态已同步到后端');
+      } else {
+        console.error('[BugManager] ✗ 同步 Bug 状态到后端失败:', result.error);
+      }
+    } catch (err) {
+      console.error('[BugManager] ✗ 同步 Bug 状态到后端异常:', err.message);
     }
   }
 };
