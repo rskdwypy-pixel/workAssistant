@@ -7731,11 +7731,11 @@ const BugManager = {
   },
 
   /**
-   * 加载修复表单的用户选项（原生 select）
+   * 加载修复表单的用户选项（自定义多选组件）
    */
   async loadResolveUserOptions() {
-    const select = document.getElementById('resolveAssignee');
-    if (!select) return;
+    const container = document.getElementById('resolveAssigneeContainer');
+    if (!container) return;
 
     // 获取用户列表
     let users = await ZentaoBrowserClient.getUsers();
@@ -7752,16 +7752,8 @@ const BugManager = {
 
     console.log('[BugManager] 加载用户列表到修复表单，用户数量:', Object.keys(users).length);
 
-    // 清空现有选项
-    select.innerHTML = '<option value="">请选择指派人</option>';
-
-    // 填充用户选项
-    Object.entries(users).forEach(([account, name]) => {
-      const option = document.createElement('option');
-      option.value = account;
-      option.textContent = `${name} (${account})`;
-      select.appendChild(option);
-    });
+    // 初始化单选组件
+    this.initSingleSelect(container, users);
 
     console.log('[BugManager] 修复表单用户选项加载完成');
   },
@@ -8033,7 +8025,11 @@ const BugManager = {
 
     const modal = document.getElementById('bugResolveModal');
     const resolution = document.getElementById('resolveResolution').value;
-    const assignedTo = document.getElementById('resolveAssignee').value;
+
+    // 从自定义多选组件获取指派人
+    const assigneeDisplay = document.getElementById('resolveAssigneeDisplay');
+    const assignedTo = assigneeDisplay?.dataset.value || '';
+
     const comment = document.getElementById('resolveComment').value;
 
     Toast.info('正在修复 Bug...');

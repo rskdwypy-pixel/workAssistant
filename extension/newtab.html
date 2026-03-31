@@ -457,9 +457,16 @@
         </div>
         <div class="form-group" style="margin-bottom: 16px;">
           <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">指派人</label>
-          <select id="resolveAssignee" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
-            <option value="">请选择指派人</option>
-          </select>
+          <div class="multi-select-container" id="resolveAssigneeContainer">
+            <div class="multi-select-display" id="resolveAssigneeDisplay">
+              <span class="multi-select-placeholder">请选择指派人</span>
+            </div>
+            <div class="multi-select-dropdown" id="resolveAssigneeDropdown" style="display: none;">
+              <div class="multi-select-options" id="resolveAssigneeOptions">
+                <!-- 用户选项将通过 JS 动态生成 -->
+              </div>
+            </div>
+          </div>
         </div>
         <div class="form-group" style="margin-bottom: 16px;">
           <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">备注</label>
