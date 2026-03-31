@@ -7624,7 +7624,14 @@ const BugManager = {
       modal.style.display = 'none';
       // 清空表单
       document.getElementById('resolveResolution').value = 'fixed';
-      document.getElementById('resolveAssignee').value = '';
+
+      // 清空自定义多选组件的指派人选择
+      const assigneeDisplay = document.getElementById('resolveAssigneeDisplay');
+      if (assigneeDisplay) {
+        assigneeDisplay.dataset.value = '';
+        assigneeDisplay.innerHTML = '<span class="multi-select-placeholder">请选择指派人</span>';
+      }
+
       document.getElementById('resolveComment').value = '';
     }
   },
@@ -7694,6 +7701,24 @@ const BugManager = {
     const modal = document.getElementById('bugActivateModal');
     if (modal) {
       modal.style.display = 'none';
+
+      // 清空表单
+      document.getElementById('activatePri').value = '3';
+      document.getElementById('activateType').value = 'codeerror';
+      document.getElementById('activateComment').value = '';
+
+      // 清空自定义多选组件
+      const assigneeDisplay = document.getElementById('activateAssigneeDisplay');
+      if (assigneeDisplay) {
+        assigneeDisplay.dataset.value = '';
+        assigneeDisplay.innerHTML = '<span class="multi-select-placeholder">请选择指派人</span>';
+      }
+
+      const ccDisplay = document.getElementById('activateCcDisplay');
+      if (ccDisplay && ccDisplay._selectedUsers) {
+        ccDisplay._selectedUsers.clear();
+        ccDisplay.innerHTML = '<span class="multi-select-placeholder">请选择抄送人</span>';
+      }
     }
   },
 
