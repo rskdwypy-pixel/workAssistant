@@ -6234,6 +6234,24 @@ const BugManager = {
         }
       });
     }
+
+    // Bug 激活弹窗关闭按钮
+    const closeBugActivateBtn = document.getElementById('closeBugActivateModal');
+    if (closeBugActivateBtn) {
+      closeBugActivateBtn.addEventListener('click', () => this.hideActivateModal());
+    }
+
+    // 取消激活按钮
+    const cancelActivateBtn = document.getElementById('cancelActivateBtn');
+    if (cancelActivateBtn) {
+      cancelActivateBtn.addEventListener('click', () => this.hideActivateModal());
+    }
+
+    // 确认激活按钮
+    const confirmActivateBtn = document.getElementById('confirmActivateBtn');
+    if (confirmActivateBtn) {
+      confirmActivateBtn.addEventListener('click', () => this.confirmActivation());
+    }
   },
 
   async loadBugs() {
@@ -7522,6 +7540,286 @@ const BugManager = {
       return;
     }
 
+    // 显示激活表单
+    this.showActivateModal(bugId);
+  },
+
+  /**
+   * 显示激活弹窗
+   */
+  async showActivateModal(bugId) {
+    const bug = this.bugs.find(b => b.id === bugId);
+    if (!bug) return;
+
+    const modal = document.getElementById('bugActivateModal');
+    if (!modal) return;
+
+    // 隐藏详情弹窗
+    this.hideBugDetail();
+
+    // 加载用户列表到下拉框
+    await this.loadActivateUserOptions();
+
+    // 保存当前操作的 Bug ID
+    modal.dataset.bugId = bugId;
+    modal.dataset.zentaoBugId = bug.zentaoId;
+    modal.dataset.executionId = bug.executionId;
+
+    // 重置表单
+    document.getElementById('activatePri').value = '3';
+    document.getElementById('activateType').value = 'codeerror';
+    document.getElementById('activateComment').value = '';
+
+    modal.style.display = 'flex';
+  },
+
+  /**
+   * 隐藏激活弹窗
+   */
+  hideActivateModal() {
+    const modal = document.getElementById('bugActivateModal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
+  },
+
+  /**
+   * 加载激活表单的用户选项
+   */
+  async loadActivateUserOptions() {
+    const assigneeContainer = document.getElementById('activateAssigneeContainer');
+    const ccContainer = document.getElementById('activateCcContainer');
+
+    if (!assigneeContainer || !ccContainer) return;
+
+    // 获取用户列表
+    let users = ZentaoBrowserClient.getUsers();
+    if (!users || Object.keys(users).length === 0) {
+      console.warn('[BugManager] 用户列表未加载，尝试加载...');
+      await ZentaoBrowserClient.loadUsersFromTeamPage();
+      users = ZentaoBrowserClient.getUsers();
+    }
+
+    if (!users || Object.keys(users).length === 0) {
+      console.warn('[BugManager] 无法获取用户列表');
+      return;
+    }
+
+    console.log('[BugManager] 加载用户列表到激活表单，用户数量:', Object.keys(users).length);
+
+    // 填充指派人下拉框（单选）
+    const assigneeSelect = document.getElementById('activateAssigneeDisplay');
+    this.initSingleSelect(assigneeContainer, users);
+
+    // 填充抄送人下拉框（多选）
+    const ccSelect = document.getElementById('activateCcDisplay');
+    this.initMultiSelectById('activateCc', users);
+  },
+
+  /**
+   * 初始化单选组件
+   */
+  initSingleSelect(container, users) {
+    const display = container.querySelector('.multi-select-display');
+    const dropdown = container.querySelector('.multi-select-dropdown');
+    const optionsContainer = container.querySelector('.multi-select-options');
+
+    if (!display || !dropdown || !optionsContainer) return;
+
+    const selectedValue = display.dataset.value || '';
+
+    // 填充选项
+    optionsContainer.innerHTML = '';
+    Object.entries(users).forEach(([account, name]) => {
+      const option = document.createElement('div');
+      option.className = 'multi-select-option';
+      option.dataset.value = account;
+      option.innerHTML = `
+        <div class="multi-select-option-text">${name} (${account})</div>
+        <div class="multi-select-option-check"></div>
+      `;
+
+      option.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // 清除其他选中状态
+        optionsContainer.querySelectorAll('.multi-select-option').forEach(opt => {
+          opt.classList.remove('selected');
+        });
+        option.classList.add('selected');
+        display.dataset.value = account;
+        display.innerHTML = `<span class="multi-select-tag"><span class="multi-select-tag-name">${name}</span></span>`;
+        dropdown.style.display = 'none';
+        display.classList.remove('active');
+      });
+
+      optionsContainer.appendChild(option);
+    });
+
+    // 显示/隐藏下拉列表
+    display.addEventListener('click', (e) => {
+      dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+      display.classList.toggle('active', dropdown.style.display !== 'none');
+    });
+
+    // 点击其他地方关闭下拉
+    document.addEventListener('click', (e) => {
+      if (!container.contains(e.target)) {
+        dropdown.style.display = 'none';
+        display.classList.remove('active');
+      }
+    });
+
+    // 如果有选中的值，恢复显示
+    if (selectedValue) {
+      display.innerHTML = `<span class="multi-select-tag"><span class="multi-select-tag-name">${users[selectedValue]}</span></span>`;
+    }
+  },
+
+  /**
+   * 根据 ID 初始化多选组件
+   */
+  initMultiSelectById(fieldId, users) {
+    const container = document.getElementById(`${fieldId}Container`);
+    if (!container) return;
+
+    const display = container.querySelector(`#${fieldId}Display`);
+    const dropdown = container.querySelector(`#${fieldId}Dropdown`);
+    const optionsContainer = container.querySelector(`#${fieldId}Options`);
+
+    if (!display || !dropdown || !optionsContainer) return;
+
+    const selectedUsers = new Set();
+
+    const renderOptions = () => {
+      optionsContainer.innerHTML = '';
+      Object.entries(users).forEach(([account, name]) => {
+        const option = document.createElement('div');
+        option.className = 'multi-select-option';
+        if (selectedUsers.has(account)) {
+          option.classList.add('selected');
+        }
+
+        option.innerHTML = `
+          <div class="multi-select-option-text">
+            ${name}
+            <span class="multi-select-option-account">(${account})</span>
+          </div>
+          <div class="multi-select-option-check"></div>
+        `;
+
+        option.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (selectedUsers.has(account)) {
+            selectedUsers.delete(account);
+            option.classList.remove('selected');
+          } else {
+            selectedUsers.add(account);
+            option.classList.add('selected');
+          }
+          this.updateMultiSelectDisplayById(fieldId, selectedUsers, users);
+        });
+
+        optionsContainer.appendChild(option);
+      });
+    };
+
+    // 更新显示区域
+    this.updateMultiSelectDisplayById = (fieldId, selectedUsers, users) => {
+      const display = document.getElementById(`${fieldId}Display`);
+      if (!display) return;
+
+      if (selectedUsers.size === 0) {
+        display.innerHTML = '<span class="multi-select-placeholder">请选择用户</span>';
+      } else {
+        display.innerHTML = '';
+        selectedUsers.forEach(account => {
+          const name = users[account] || account;
+          const tag = document.createElement('span');
+          tag.className = 'multi-select-tag';
+          tag.innerHTML = `
+            <span class="multi-select-tag-name">${name}</span>
+            <span class="multi-select-tag-remove" data-account="${account}">×</span>
+          `;
+
+          tag.querySelector('.multi-select-tag-remove').addEventListener('click', (e) => {
+            e.stopPropagation();
+            selectedUsers.delete(account);
+            this.updateMultiSelectDisplayById(fieldId, selectedUsers, users);
+
+            // 更新下拉列表中的选中状态
+            const options = optionsContainer.querySelectorAll('.multi-select-option');
+            options.forEach(option => {
+              if (option.dataset.value === account) {
+                option.classList.remove('selected');
+              }
+            });
+          });
+
+          display.appendChild(tag);
+        });
+      }
+    };
+
+    // 显示/隐藏下拉列表
+    display.addEventListener('click', (e) => {
+      dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+      display.classList.toggle('active', dropdown.style.display !== 'none');
+    });
+
+    // 点击其他地方关闭下拉
+    document.addEventListener('click', (e) => {
+      if (!container.contains(e.target)) {
+        dropdown.style.display = 'none';
+        display.classList.remove('active');
+      }
+    });
+
+    // 初始化渲染选项
+    renderOptions();
+
+    // 保存引用
+    container._selectedUsers = selectedUsers;
+    container._users = users;
+  },
+
+  /**
+   * 确认激活 Bug
+   */
+  async confirmActivation() {
+    const modal = document.getElementById('bugActivateModal');
+    if (!modal) return;
+
+    const bugId = modal.dataset.bugId;
+    const zentaoBugId = modal.dataset.zentaoBugId;
+    const executionId = modal.dataset.executionId;
+
+    if (!bugId || !zentaoBugId) {
+      Toast.error('Bug 信息不完整');
+      return;
+    }
+
+    // 获取表单数据
+    const assigneeDisplay = document.getElementById('activateAssigneeDisplay');
+    const assignedTo = assigneeDisplay?.dataset.value || '';
+
+    const ccContainer = document.getElementById('activateCcContainer');
+    const ccList = ccContainer && ccContainer._selectedUsers ? Array.from(ccContainer._selectedUsers) : [];
+
+    const pri = document.getElementById('activatePri').value;
+    const type = document.getElementById('activateType').value;
+    const comment = document.getElementById('activateComment').value;
+
+    console.log('[BugManager] 确认激活，参数:', {
+      bugId,
+      zentaoBugId,
+      executionId,
+      assignedTo,
+      ccList,
+      pri,
+      type,
+      comment
+    });
+
     Toast.info('正在激活 Bug...');
 
     try {
@@ -7529,49 +7827,37 @@ const BugManager = {
       const configResult = await configResp.json();
       const baseUrl = configResult.data?.url?.replace(/\/$/, '');
 
-      console.log('[BugManager] 禅道地址:', baseUrl);
-
       if (!baseUrl) {
         Toast.error('禅道未配置');
         return;
       }
 
       // 构造看板页面 URL
-      const kanbanUrl = `${baseUrl}/zentao/execution-kanban-${bug.executionId}-bug.html`;
-      console.log('[BugManager] 看板页面 URL:', kanbanUrl);
+      const kanbanUrl = `${baseUrl}/zentao/execution-kanban-${executionId}-bug.html`;
 
-      // 调用 background.js 激活 Bug（使用看板页面）
-      console.log('[BugManager] 发送激活消息到 background:', {
-        action: 'activateBugInZentao',
-        baseUrl,
-        kanbanUrl,
-        bugId: bug.zentaoId,
-        assignedTo: '',
-        comment: ''
-      });
-
+      // 调用 background.js 激活 Bug
       const response = await chrome.runtime.sendMessage({
         action: 'activateBugInZentao',
         baseUrl,
         kanbanUrl,
-        bugId: bug.zentaoId,
-        assignedTo: '',
-        comment: ''
+        bugId: zentaoBugId,
+        assignedTo,
+        ccList,
+        pri,
+        type,
+        comment
       });
-
-      console.log('[BugManager] Background 响应:', response);
 
       if (response && response.success) {
         Toast.success('Bug 已激活');
-        console.log('[BugManager] ✓ 激活成功，更新本地状态');
         // 更新本地 Bug 状态
         await this.updateBugStatus(bugId, 'activated');
+        this.hideActivateModal();
         this.hideBugDetail();
       } else {
         console.error('[BugManager] ✗ 激活失败:', response);
         Toast.error('激活失败: ' + (response?.reason || '未知错误'));
       }
-      console.log('[BugManager] ========== 激活 Bug 结束 ==========');
     } catch (err) {
       console.error('[BugManager] 激活 Bug 异常:', err);
       Toast.error('激活失败: ' + err.message);

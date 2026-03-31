@@ -469,6 +469,78 @@
   </div>
 
 
+  <!-- Bug 激活弹窗 -->
+  <div id="bugActivateModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>⚡ 激活 Bug</h3>
+        <button class="close-btn" id="closeBugActivateModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">指派人</label>
+          <div class="multi-select-container" id="activateAssigneeContainer">
+            <div class="multi-select-display" id="activateAssigneeDisplay">
+              <span class="multi-select-placeholder">请选择指派人</span>
+            </div>
+            <div class="multi-select-dropdown" id="activateAssigneeDropdown" style="display: none;">
+              <div class="multi-select-options" id="activateAssigneeOptions">
+                <!-- 用户选项将通过 JS 动态生成 -->
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">抄送人</label>
+          <div class="multi-select-container" id="activateCcContainer">
+            <div class="multi-select-display" id="activateCcDisplay">
+              <span class="multi-select-placeholder">请选择抄送人</span>
+            </div>
+            <div class="multi-select-dropdown" id="activateCcDropdown" style="display: none;">
+              <div class="multi-select-options" id="activateCcOptions">
+                <!-- 用户选项将通过 JS 动态生成 -->
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">备注</label>
+          <textarea id="activateComment" rows="3" class="form-control" placeholder="填写备注信息..." style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical;"></textarea>
+        </div>
+        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="flex: 1;">
+            <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">优先级</label>
+            <select id="activatePri" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+              <option value="0">0 - 挂起</option>
+              <option value="1">1 - 致命</option>
+              <option value="2">2 - 严重</option>
+              <option value="3" selected>3 - 一般</option>
+              <option value="4">4 - 提示</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">Bug 类型</label>
+            <select id="activateType" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+              <option value="codeerror" selected>代码错误</option>
+              <option value="config">配置相关</option>
+              <option value="install">安装部署</option>
+              <option value="security">安全相关</option>
+              <option value="performance">性能问题</option>
+              <option value="standard">标准规范</option>
+              <option value="automation">测试脚本</option>
+              <option value="designdefect">设计缺陷</option>
+              <option value="others">其他</option>
+            </select>
+          </div>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px;">
+          <button id="cancelActivateBtn" class="btn-secondary">取消</button>
+          <button id="confirmActivateBtn" class="btn-primary">确认激活</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- 任务详情弹窗 -->
   <div id="taskModal" class="modal">
     <div class="modal-content">

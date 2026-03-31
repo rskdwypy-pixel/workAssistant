@@ -2097,9 +2097,9 @@ async function getKanbanView(params) {
  * 激活 Bug
  */
 async function activateBugInZentao(params) {
-  const { baseUrl, kanbanUrl, bugId, assignedTo, comment } = params;
+  const { baseUrl, kanbanUrl, bugId, assignedTo, pri, type, ccList, comment } = params;
   console.log('[Background] ========== 激活 Bug 开始 ==========');
-  console.log('[Background] 参数:', { baseUrl, kanbanUrl, bugId, assignedTo, comment });
+  console.log('[Background] 参数:', { baseUrl, kanbanUrl, bugId, assignedTo, pri, type, ccList, comment });
 
   // 如果提供了看板 URL，确保使用看板页面
   let targetTab;
@@ -2120,21 +2120,28 @@ async function activateBugInZentao(params) {
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId: targetTab.id },
-      func: (bugId, assignedTo, comment) => {
+      func: (bugId, assignedTo, pri, type, ccList, comment) => {
         console.log('[Bug Activate] 注入脚本开始执行，当前页面:', window.location.href);
         return new Promise((resolve) => {
           const formData = new URLSearchParams();
           formData.append('assignedTo', assignedTo || '');
-          formData.append('type', 'codeerror');
-          formData.append('pri', '3');
+          formData.append('type', type || 'codeerror');
+          formData.append('pri', pri || '3');
           formData.append('status', 'active');
           if (assignedTo) formData.append('mailto[]', assignedTo);
+          // 添加抄送人
+          if (ccList && Array.isArray(ccList)) {
+            ccList.forEach(cc => {
+              if (cc) formData.append('mailto[]', cc);
+            });
+          }
           formData.append('comment', comment || '');
           formData.append('uid', Math.random().toString(36).substring(2, 14));
 
           const endpoint = `${window.location.origin}/zentao/bug-confirmbug-${bugId}.html?onlybody=yes`;
           console.log('[Bug Activate] 请求端点:', endpoint);
           console.log('[Bug Activate] 表单数据:', formData.toString());
+          console.log('[Bug Activate] 完整参数:', { bugId, assignedTo, pri, type, ccList, comment, status: 'active' });
 
           fetch(endpoint, {
             method: 'POST',
@@ -2145,18 +2152,14 @@ async function activateBugInZentao(params) {
             body: formData.toString()
           })
           .then(r => {
-            console.log('[Bug Activate] 响应状态:', r.status);
-            return r.text();
-          })
-          .then(text => {
-            console.log('[Bug Activate] 响应内容（前500字符）:', text.substring(0, 500));
-            // 检查响应中的 updateKanban 调用
-            if (text.includes('updateKanban') || text.includes('refresh') || text.includes('success')) {
-              console.log('[Bug Activate] ✓ 激活成功');
+            console.log('[Bug Activate] 响应状态:', r.status, r.statusText);
+            // 只检查HTTP状态码，2xx都认为成功
+            if (r.ok || (r.status >= 200 && r.status < 300)) {
+              console.log('[Bug Activate] ✓ 激活成功（HTTP状态码正常）');
               resolve({ success: true });
             } else {
-              console.error('[Bug Activate] ✗ 激活失败，响应中未找到成功标识');
-              resolve({ success: false, reason: 'no_success_indicator', responseText: text.substring(0, 500) });
+              console.error('[Bug Activate] ✗ 激活失败（HTTP状态码异常）');
+              resolve({ success: false, reason: 'http_error', status: r.status });
             }
           })
           .catch(err => {
@@ -2165,7 +2168,7 @@ async function activateBugInZentao(params) {
           });
         });
       },
-      args: [bugId, assignedTo, comment]
+      args: [bugId, assignedTo, pri, type, ccList, comment]
     });
 
     console.log('[Background] executeScript 结果:', results);
@@ -2261,13 +2264,15 @@ async function resolveBugInZentao(params) {
           },
           body: formData
         })
-        .then(r => r.text())
-        .then(text => {
-          console.log('[Bug Resolve] 响应:', text.substring(0, 200));
-          if (text.includes('updateKanban') || text.includes('refresh')) {
+        .then(r => {
+          console.log('[Bug Resolve] 响应状态:', r.status, r.statusText);
+          // 只检查HTTP状态码，2xx都认为成功
+          if (r.ok || (r.status >= 200 && r.status < 300)) {
+            console.log('[Bug Resolve] ✓ 修复成功（HTTP状态码正常）');
             resolve({ success: true });
           } else {
-            resolve({ success: false, reason: 'unknown', responseText: text.substring(0, 200) });
+            console.error('[Bug Resolve] ✗ 修复失败（HTTP状态码异常）');
+            resolve({ success: false, reason: 'http_error', status: r.status });
           }
         })
         .catch(err => resolve({ success: false, reason: err.message }));
