@@ -7479,13 +7479,20 @@ const BugManager = {
     if (!bug) return;
 
     const modal = document.getElementById('bugDetailModal');
+    const headerInfo = document.getElementById('bugDetailHeaderInfo');
     const content = document.getElementById('bugDetailContent');
     const actions = document.getElementById('bugDetailActions');
 
-    if (!modal || !content || !actions) return;
+    if (!modal || !headerInfo || !content || !actions) return;
 
     const severityText = ['', '致命', '严重', '一般', '提示'][bug.severity || 3];
     const statusText = { unconfirmed: '未确认', activated: '激活', closed: '已关闭' }[bug.status] || bug.status;
+
+    // 在标题栏显示优先级和状态
+    headerInfo.innerHTML = `
+      <span class="bug-severity bug-severity-${bug.severity || 3}" style="font-size: 12px; padding: 2px 8px;">${severityText}</span>
+      <span style="font-size: 12px; color: var(--text-secondary);">${statusText}</span>
+    `;
 
     // 获取用户列表用于显示名称
     const users = ZentaoBrowserClient.getUsers() || {};
@@ -7511,16 +7518,28 @@ const BugManager = {
 
     content.innerHTML = `
       <div style="margin-bottom: 16px;">
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-          <span class="bug-severity bug-severity-${bug.severity || 3}">${severityText}</span>
-          <span style="font-size: 13px; color: var(--text-secondary);">${statusText}</span>
-        </div>
-        <h4 style="margin: 0 0 12px 0;">${escapeHtml(bug.title)}</h4>
         ${bug.projectName ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">项目: ${escapeHtml(bug.projectName)}</p>` : ''}
-        ${assigneeText ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">指派人: ${escapeHtml(assigneeText)}</p>` : ''}
-        ${ccText ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">抄送人: ${escapeHtml(ccText)}</p>` : ''}
-        ${bug.steps ? `<div style="margin-top: 12px; padding: 12px; background: var(--bg-secondary); border-radius: 6px;"><p style="margin: 0; font-size: 13px; white-space: pre-wrap;">${escapeHtml(bug.steps)}</p></div>` : ''}
-        ${bug.comment ? `<div style="margin-top: 12px; padding: 12px; background: var(--bg-secondary); border-radius: 6px;"><p style="margin: 0 0 4px 0; font-size: 12px; color: var(--text-muted);">备注:</p><p style="margin: 0; font-size: 13px; white-space: pre-wrap;">${escapeHtml(bug.comment)}</p></div>` : ''}
+        <p style="margin: 8px 0 4px 0; font-size: 13px; font-weight: 500;">标题: ${escapeHtml(bug.title)}</p>
+        ${bug.steps ? `
+          <div style="margin-top: 12px;">
+            <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 500;">复现步骤:</p>
+            <div style="padding: 12px; background: var(--bg-secondary); border-radius: 6px;">
+              <p style="margin: 0; font-size: 13px; white-space: pre-wrap;">${escapeHtml(bug.steps)}</p>
+            </div>
+          </div>
+        ` : ''}
+        ${bug.comment ? `
+          <div style="margin-top: 12px;">
+            <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 500;">备注:</p>
+            <div style="padding: 12px; background: var(--bg-secondary); border-radius: 6px;">
+              <p style="margin: 0; font-size: 13px; white-space: pre-wrap;">${escapeHtml(bug.comment)}</p>
+            </div>
+          </div>
+        ` : ''}
+        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
+          ${assigneeText ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">指派人: ${escapeHtml(assigneeText)}</p>` : ''}
+          ${ccText ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">抄送人: ${escapeHtml(ccText)}</p>` : ''}
+        </div>
       </div>
     `;
 

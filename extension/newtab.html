@@ -416,7 +416,12 @@
   <div id="bugDetailModal" class="modal">
     <div class="modal-content" style="max-width: 500px;">
       <div class="modal-header">
-        <h3>🐛 Bug 详情</h3>
+        <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
+          <h3 style="margin: 0;">🐛 Bug 详情</h3>
+          <div id="bugDetailHeaderInfo" style="display: flex; align-items: center; gap: 8px;">
+            <!-- 优先级和状态动态填充 -->
+          </div>
+        </div>
         <button class="close-btn" id="closeBugDetailModal">&times;</button>
       </div>
       <div class="modal-body">
