@@ -7487,6 +7487,28 @@ const BugManager = {
     const severityText = ['', '致命', '严重', '一般', '提示'][bug.severity || 3];
     const statusText = { unconfirmed: '未确认', activated: '激活', closed: '已关闭' }[bug.status] || bug.status;
 
+    // 获取用户列表用于显示名称
+    const users = ZentaoBrowserClient.getUsers() || {};
+
+    // 格式化指派人
+    let assigneeText = '';
+    if (bug.assignedTo) {
+      const assignedTo = bug.assignedTo;
+      if (Array.isArray(assignedTo)) {
+        if (assignedTo.length > 0) {
+          assigneeText = assignedTo.map(acc => users[acc] || acc).join(', ');
+        }
+      } else {
+        assigneeText = users[assignedTo] || assignedTo;
+      }
+    }
+
+    // 格式化抄送人
+    let ccText = '';
+    if (bug.cc && Array.isArray(bug.cc) && bug.cc.length > 0) {
+      ccText = bug.cc.map(cc => users[cc] || cc).join(', ');
+    }
+
     content.innerHTML = `
       <div style="margin-bottom: 16px;">
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
@@ -7495,8 +7517,10 @@ const BugManager = {
         </div>
         <h4 style="margin: 0 0 12px 0;">${escapeHtml(bug.title)}</h4>
         ${bug.projectName ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">项目: ${escapeHtml(bug.projectName)}</p>` : ''}
-        ${bug.type ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">类型: ${this.getBugTypeText(bug.type)}</p>` : ''}
+        ${assigneeText ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">指派人: ${escapeHtml(assigneeText)}</p>` : ''}
+        ${ccText ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">抄送人: ${escapeHtml(ccText)}</p>` : ''}
         ${bug.steps ? `<div style="margin-top: 12px; padding: 12px; background: var(--bg-secondary); border-radius: 6px;"><p style="margin: 0; font-size: 13px; white-space: pre-wrap;">${escapeHtml(bug.steps)}</p></div>` : ''}
+        ${bug.comment ? `<div style="margin-top: 12px; padding: 12px; background: var(--bg-secondary); border-radius: 6px;"><p style="margin: 0 0 4px 0; font-size: 12px; color: var(--text-muted);">备注:</p><p style="margin: 0; font-size: 13px; white-space: pre-wrap;">${escapeHtml(bug.comment)}</p></div>` : ''}
       </div>
     `;
 
