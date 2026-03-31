@@ -7596,7 +7596,7 @@ const BugManager = {
   /**
    * 显示修复弹窗
    */
-  showResolveModal(bugId) {
+  async showResolveModal(bugId) {
     const bug = this.bugs.find(b => b.id === bugId);
     if (!bug) return;
 
@@ -7607,7 +7607,7 @@ const BugManager = {
     if (!modal) return;
 
     // 加载用户列表到指派人下拉框
-    this.loadAssigneeOptions();
+    await this.loadResolveUserOptions();
 
     // 保存当前操作的 Bug ID
     modal.dataset.bugId = bugId;
@@ -7728,6 +7728,42 @@ const BugManager = {
     // 填充抄送人下拉框（多选）
     const ccSelect = document.getElementById('activateCcDisplay');
     this.initMultiSelectById('activateCc', users);
+  },
+
+  /**
+   * 加载修复表单的用户选项（原生 select）
+   */
+  async loadResolveUserOptions() {
+    const select = document.getElementById('resolveAssignee');
+    if (!select) return;
+
+    // 获取用户列表
+    let users = await ZentaoBrowserClient.getUsers();
+    if (!users || Object.keys(users).length === 0) {
+      console.warn('[BugManager] 用户列表未加载，尝试加载...');
+      await ZentaoBrowserClient.loadUsersFromTeamPage();
+      users = await ZentaoBrowserClient.getUsers();
+    }
+
+    if (!users || Object.keys(users).length === 0) {
+      console.warn('[BugManager] 无法获取用户列表');
+      return;
+    }
+
+    console.log('[BugManager] 加载用户列表到修复表单，用户数量:', Object.keys(users).length);
+
+    // 清空现有选项
+    select.innerHTML = '<option value="">请选择指派人</option>';
+
+    // 填充用户选项
+    Object.entries(users).forEach(([account, name]) => {
+      const option = document.createElement('option');
+      option.value = account;
+      option.textContent = `${name} (${account})`;
+      select.appendChild(option);
+    });
+
+    console.log('[BugManager] 修复表单用户选项加载完成');
   },
 
   /**
