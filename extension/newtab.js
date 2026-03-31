@@ -6457,6 +6457,16 @@ const BugManager = {
     const severityClass = `bug-severity-${bug.severity || 3}`;
     const severityText = ['', '致命', '严重', '一般', '提示'][bug.severity || 3];
 
+    // 获取用户列表用于显示名称
+    const users = ZentaoBrowserClient.getUsers() || {};
+
+    // 格式化指派人显示
+    let assigneeDisplay = '';
+    if (bug.assignedTo) {
+      const assigneeName = users[bug.assignedTo] || bug.assignedTo;
+      assigneeDisplay = `<span class="bug-assignee">👤 ${escapeHtml(assigneeName)}</span>`;
+    }
+
     // Bug ID 显示和链接（直接在标题后面）
     let bugIdSuffix = '';
     if (bug.zentaoId) {
@@ -6477,6 +6487,8 @@ const BugManager = {
         <span class="task-title-text">${escapeHtml(bug.title)}${bugIdSuffix}</span>
       </div>
       ${bug.projectName ? `<span class="execution-tag">${escapeHtml(bug.projectName)}</span>` : ''}
+      ${assigneeDisplay ? `<div class="bug-meta">${assigneeDisplay}</div>` : ''}
+      ${bug.comment ? `<div class="bug-comment-preview">${escapeHtml(bug.comment.substring(0, 50))}${bug.comment.length > 50 ? '...' : ''}</div>` : ''}
       <div class="bug-card-actions">
         ${quickActionButton}
       </div>
@@ -8017,8 +8029,13 @@ const BugManager = {
 
       if (response && response.success) {
         Toast.success('Bug 已激活');
-        // 更新本地 Bug 状态
-        await this.updateBugStatus(bugId, 'activated');
+        // 更新本地 Bug 状态和数据
+        await this.updateBugStatus(bugId, 'activated', {
+          assignedTo,
+          assignedToList: assignedTo ? [assignedTo] : [],
+          cc: ccList,
+          comment
+        });
         this.hideActivateModal();
         this.hideBugDetail();
       } else {
@@ -8085,8 +8102,12 @@ const BugManager = {
 
       if (response && response.success) {
         Toast.success('Bug 已修复');
-        // 更新本地 Bug 状态
-        await this.updateBugStatus(bugId, 'closed');
+        // 更新本地 Bug 状态和数据
+        await this.updateBugStatus(bugId, 'closed', {
+          assignedTo,
+          cc: [],  // 修复时没有抄送人字段
+          comment
+        });
         this.hideResolveModal();
         this.hideBugDetail(); // 同时关闭详情弹窗
       } else {
@@ -8155,15 +8176,31 @@ const BugManager = {
 
   /**
    * 更新 Bug 状态
+   * @param {string} bugId - Bug ID
+   * @param {string} newStatus - 新状态
+   * @param {Object} extraData - 额外数据 { assignedTo, assignedToList, cc, comment }
    */
-  async updateBugStatus(bugId, newStatus) {
-    console.log('[BugManager] updateBugStatus:', bugId, '->', newStatus);
+  async updateBugStatus(bugId, newStatus, extraData = {}) {
+    console.log('[BugManager] updateBugStatus:', bugId, '->', newStatus, extraData);
 
-    // 先在内存中更新 Bug 状态
+    // 先在内存中更新 Bug 状态和数据
     const bug = this.bugs.find(b => b.id === bugId);
     if (bug) {
       console.log('[BugManager] 更新前状态:', bug.status);
       bug.status = newStatus;
+
+      // 更新额外数据
+      if (extraData.assignedTo !== undefined) {
+        bug.assignedTo = extraData.assignedTo;
+        bug.assignedToList = extraData.assignedToList || [];
+      }
+      if (extraData.cc !== undefined) {
+        bug.cc = extraData.cc;
+      }
+      if (extraData.comment !== undefined) {
+        bug.comment = extraData.comment;
+      }
+
       console.log('[BugManager] 更新后状态:', bug.status);
 
       // 重新渲染 Bug 列表
@@ -8180,7 +8217,10 @@ const BugManager = {
       const response = await fetch(`${API_BASE_URL}/api/bug/${bugId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus })
+        body: JSON.stringify({
+          status: newStatus,
+          ...extraData
+        })
       });
 
       const result = await response.json();

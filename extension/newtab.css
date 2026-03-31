@@ -1947,6 +1947,36 @@ body {
   border-color: var(--success);
 }
 
+/* ==================== Bug 卡片元信息 ==================== */
+.bug-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.bug-assignee {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-base);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.bug-comment-preview {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.4;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ==================== Bug 详情弹窗 ==================== */
 .bug-detail-actions {
   display: flex;

@@ -22,11 +22,16 @@ async function createBug(bugData) {
     productId: bugData.productId || '',
     executionId: bugData.executionId || '',
     executionName: bugData.executionName || '',
+    projectName: bugData.projectName || '',
     steps: bugData.steps || '',
     os: bugData.os || '',
     browser: bugData.browser || '',
     openedBuild: bugData.openedBuild || 'trunk',
     priority: bugData.priority || 3,
+    assignedTo: bugData.assignedTo || '',
+    assignedToList: bugData.assignedToList || [],
+    cc: bugData.cc || [],
+    comment: bugData.comment || '',
     zentaoId: bugData.zentaoId || null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -112,8 +117,11 @@ async function getBugs(filters = {}) {
 
 /**
  * 更新 Bug 状态
+ * @param {string} bugId - Bug ID
+ * @param {string} newStatus - 新状态
+ * @param {Object} extraData - 额外数据 { assignedTo, cc, comment }
  */
-async function updateBugStatus(bugId, newStatus) {
+async function updateBugStatus(bugId, newStatus, extraData = {}) {
   const data = await readTasks();
   const tasks = data.tasks || [];
 
@@ -124,6 +132,18 @@ async function updateBugStatus(bugId, newStatus) {
 
   bug.status = newStatus;
   bug.updatedAt = new Date().toISOString();
+
+  // 保存额外数据
+  if (extraData.assignedTo !== undefined) {
+    bug.assignedTo = extraData.assignedTo;
+    bug.assignedToList = extraData.assignedToList || [];
+  }
+  if (extraData.cc !== undefined) {
+    bug.cc = extraData.cc;
+  }
+  if (extraData.comment !== undefined) {
+    bug.comment = extraData.comment;
+  }
 
   await writeTasks({ tasks });
   return bug;

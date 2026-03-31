@@ -1345,9 +1345,15 @@ router.put('/bug/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { updateBugStatus } = await import('../services/bugManager.js');
-    const { status } = req.body;
+    const { status, assignedTo, assignedToList, cc, comment } = req.body;
 
-    const bug = await updateBugStatus(id, status);
+    const extraData = {};
+    if (assignedTo !== undefined) extraData.assignedTo = assignedTo;
+    if (assignedToList !== undefined) extraData.assignedToList = assignedToList;
+    if (cc !== undefined) extraData.cc = cc;
+    if (comment !== undefined) extraData.comment = comment;
+
+    const bug = await updateBugStatus(id, status, extraData);
     res.json({ success: true, data: bug, message: 'Bug 已更新' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
