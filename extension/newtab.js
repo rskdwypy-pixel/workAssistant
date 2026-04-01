@@ -8182,6 +8182,7 @@ const BugManager = {
       Object.entries(users).forEach(([account, name]) => {
         const option = document.createElement('div');
         option.className = 'multi-select-option';
+        option.dataset.value = account;  // 保存 account 到 dataset
         if (selectedUsers.has(account)) {
           option.classList.add('selected');
         }
