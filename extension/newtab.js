@@ -4354,29 +4354,45 @@ const ZentaoBrowserClient = {
       }
 
       if (data && data.status === 'success' && data.data) {
-        this.users = data.data;
-        this.usersLoaded = true;
-        const userCount = Object.keys(this.users).length;
-        console.log('[ZentaoBrowser] 从禅道页面加载用户列表成功:', userCount, '个用户');
-        console.log('[ZentaoBrowser] 用户列表:', this.users);
-        if (data.list) {
-          console.log('[ZentaoBrowser] 用户详细信息:', data.list);
-        }
+        const newUserCount = Object.keys(data.data).length;
+        const existingUserCount = Object.keys(this.users).length;
 
-        // 保存用户列表到后端
-        await this.saveUsersToBackend(this.users);
+        // 只有当新加载的用户数量大于已有数量时才更新
+        if (newUserCount > existingUserCount) {
+          this.users = data.data;
+          this.usersLoaded = true;
+          console.log('[ZentaoBrowser] 从禅道页面加载用户列表成功:', newUserCount, '个用户 (之前:', existingUserCount, '个)');
+          console.log('[ZentaoBrowser] 用户列表:', this.users);
+          if (data.list) {
+            console.log('[ZentaoBrowser] 用户详细信息:', data.list);
+          }
+
+          // 保存用户列表到后端
+          await this.saveUsersToBackend(this.users);
+        } else {
+          console.log('[ZentaoBrowser] 新加载的用户数量(', newUserCount, ') 不多于已有数量(', existingUserCount, ')，保留现有数据');
+        }
       } else if (data && data.status === 'error') {
         console.warn('[ZentaoBrowser] 提取用户失败:', data.message);
-        this.users = {};
-        this.usersLoaded = true;
+        // 不覆盖已有数据
+        if (Object.keys(this.users).length === 0) {
+          this.users = {};
+          this.usersLoaded = true;
+        }
       } else if (data && data.status === 'fatal') {
         console.error('[ZentaoBrowser] 提取过程发生致命错误:', data.message);
-        this.users = {};
-        this.usersLoaded = true;
+        // 不覆盖已有数据
+        if (Object.keys(this.users).length === 0) {
+          this.users = {};
+          this.usersLoaded = true;
+        }
       } else {
         console.warn('[ZentaoBrowser] 返回数据格式异常:', data);
-        this.users = {};
-        this.usersLoaded = true;
+        // 不覆盖已有数据
+        if (Object.keys(this.users).length === 0) {
+          this.users = {};
+          this.usersLoaded = true;
+        }
       }
     } else {
       console.warn('[ZentaoBrowser] 用户列表加载失败，无结果');
@@ -7970,6 +7986,26 @@ const BugManager = {
     document.getElementById('activateType').value = 'codeerror';
     document.getElementById('activateComment').value = '';
 
+    // 如果 Bug 缺少 assignedTo 或 cc 字段（用户手动添加的 BugID），从禅道获取 Bug 详情
+    if (!bug.assignedTo || !bug.cc) {
+      console.log('[BugManager] Bug 缺少指派人或抄送人信息，尝试从禅道获取...');
+      const bugDetail = await this.fetchBugDetailFromZentao(bug.zentaoId);
+      if (bugDetail) {
+        // 更新 Bug 对象
+        if (bugDetail.assignedTo) {
+          bug.assignedTo = bugDetail.assignedTo;
+          console.log('[BugManager] 从禅道获取到指派人:', bugDetail.assignedTo);
+        }
+        if (bugDetail.cc) {
+          bug.cc = bugDetail.cc;
+          console.log('[BugManager] 从禅道获取到抄送人:', bug.cc);
+        }
+
+        // 保存更新后的 Bug 数据
+        await this.updateBugData(bug);
+      }
+    }
+
     // 设置默认指派人（使用 Bug 创建时的指派人）
     if (bug.assignedTo) {
       const assigneeDisplay = document.getElementById('activateAssigneeDisplay');
@@ -8053,8 +8089,17 @@ const BugManager = {
 
     // 获取用户列表
     let users = await ZentaoBrowserClient.getUsers();
-    if (!users || Object.keys(users).length === 0) {
-      console.warn('[BugManager] 用户列表未加载，尝试加载...');
+    const userCount = users ? Object.keys(users).length : 0;
+    console.log('[BugManager] 获取到用户列表，用户数量:', userCount);
+
+    // 如果用户列表为空或数量太少（可能加载失败），尝试重新加载
+    if (!users || userCount === 0) {
+      console.warn('[BugManager] 用户列表未加载，尝试从禅道加载...');
+      await ZentaoBrowserClient.loadUsersFromTeamPage();
+      users = await ZentaoBrowserClient.getUsers();
+    } else if (userCount < 5) {
+      // 用户列表数量太少，可能是加载不完整，尝试重新加载
+      console.warn('[BugManager] 用户列表数量过少(', userCount, '个)，可能加载不完整，尝试重新加载...');
       await ZentaoBrowserClient.loadUsersFromTeamPage();
       users = await ZentaoBrowserClient.getUsers();
     }
@@ -8268,6 +8313,100 @@ const BugManager = {
     // 保存引用
     container._selectedUsers = selectedUsers;
     container._users = users;
+  },
+
+  /**
+   * 从禅道获取 Bug 详情
+   */
+  async fetchBugDetailFromZentao(zentaoBugId) {
+    try {
+      const config = await ZentaoBrowserClient.initConfig();
+      const baseUrl = config?.url?.replace(/\/$/, '');
+      if (!baseUrl) {
+        console.warn('[BugManager] 无法获取 baseUrl');
+        return null;
+      }
+
+      // 创建临时标签页获取 Bug 详情
+      const tab = await chrome.tabs.create({ url: `${baseUrl}/zentao/bug-view-${zentaoBugId}.html`, active: false });
+
+      // 等待页面加载完成
+      await new Promise(resolve => {
+        const listener = (tabId, changeInfo) => {
+          if (tabId === tab.id && changeInfo.status === 'complete') {
+            chrome.tabs.onUpdated.removeListener(listener);
+            setTimeout(resolve, 500);
+          }
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+        setTimeout(() => {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }, 10000);
+      });
+
+      // 注入脚本提取 Bug 详情
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          // 提取指派人
+          const assignedToElement = document.querySelector('#openedBy');
+          const assignedTo = assignedToElement ? assignedToElement.value.trim() : '';
+
+          // 提取抄送人列表
+          const ccList = [];
+          const ccElements = document.querySelectorAll('input[name="cc[]"]');
+          ccElements.forEach(element => {
+            if (element.value) {
+              ccList.push(element.value.trim());
+            }
+          });
+
+          return {
+            assignedTo,
+            cc: ccList
+          };
+        }
+      });
+
+      // 关闭标签页
+      await chrome.tabs.remove(tab.id);
+
+      if (results && results.length > 0 && results[0].result) {
+        console.log('[BugManager] 从禅道获取到 Bug 详情:', results[0].result);
+        return results[0].result;
+      }
+
+      return null;
+    } catch (err) {
+      console.error('[BugManager] 获取 Bug 详情失败:', err);
+      return null;
+    }
+  },
+
+  /**
+   * 更新 Bug 数据
+   */
+  async updateBugData(bug) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/bug/${bug.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assignedTo: bug.assignedTo,
+          cc: bug.cc || []
+        })
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        console.log('[BugManager] Bug 数据已更新');
+      } else {
+        console.warn('[BugManager] 更新 Bug 数据失败:', result.error);
+      }
+    } catch (err) {
+      console.error('[BugManager] 更新 Bug 数据异常:', err);
+    }
   },
 
   /**
