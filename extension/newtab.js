@@ -4447,14 +4447,28 @@ const ZentaoBrowserClient = {
 
   /**
    * 获取用户列表（供外部调用）
-   * 优先从后端加载，如果没有则从内存获取
+   * 优先从内存获取，如果没有则尝试从 localStorage 和后端加载
    */
   async getUsers() {
-    // 如果内存中没有用户列表，先尝试从后端加载
+    // 如果内存中没有用户列表，尝试从 localStorage 恢复
     if (!this.usersLoaded || Object.keys(this.users).length === 0) {
-      const backendUsers = await this.loadUsersFromBackend();
-      if (Object.keys(backendUsers).length > 0) {
-        return backendUsers;
+      try {
+        const cachedUsers = localStorage.getItem('zentao_users');
+        if (cachedUsers) {
+          this.users = JSON.parse(cachedUsers);
+          this.usersLoaded = true;
+          console.log('[ZentaoBrowser] 从 localStorage 恢复用户列表:', Object.keys(this.users).length, '个用户');
+        }
+      } catch (e) {
+        console.warn('[ZentaoBrowser] 从 localStorage 恢复用户列表失败:', e);
+      }
+
+      // 如果 localStorage 也没有，尝试从后端加载
+      if (Object.keys(this.users).length === 0) {
+        const backendUsers = await this.loadUsersFromBackend();
+        if (Object.keys(backendUsers).length > 0) {
+          return backendUsers;
+        }
       }
     }
     return this.users;
