@@ -6542,6 +6542,7 @@ const BugManager = {
       <div class="task-title">
         <span class="bug-severity ${severityClass}">${severityText}</span>
         <span class="task-title-text">${escapeHtml(bug.title)}${bugIdSuffix}</span>
+        <button class="bug-edit-id-btn" title="编辑禅道BugID" data-bug-id="${bug.id}">✏️</button>
       </div>
       ${bug.projectName ? `<span class="execution-tag">${escapeHtml(bug.projectName)}</span>` : ''}
       ${assigneeDisplay ? `<div class="bug-meta">${assigneeDisplay}</div>` : ''}
@@ -6559,6 +6560,16 @@ const BugManager = {
         e.stopPropagation();
         const zentaoBugId = bugIdLink.dataset.bugId;
         this.openBugDetailInZentao(zentaoBugId);
+      });
+    }
+
+    // 编辑 BugID 按钮事件
+    const editIdBtn = card.querySelector('.bug-edit-id-btn');
+    if (editIdBtn) {
+      editIdBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.showEditBugIdModal(bug.id, bug.zentaoId);
       });
     }
 
@@ -6586,6 +6597,105 @@ const BugManager = {
     }
 
     return card;
+  },
+
+  /**
+   * 显示编辑 BugID 弹窗
+   */
+  showEditBugIdModal(bugId, currentZentaoId) {
+    const bug = this.bugs.find(b => b.id === bugId);
+    if (!bug) return;
+
+    // 创建弹窗
+    const modal = document.createElement('div');
+    modal.id = 'editBugIdModal';
+    modal.className = 'modal';
+    modal.style.display = 'flex';
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width: 400px;">
+        <h3>编辑禅道 BugID</h3>
+        <p style="margin-bottom: 16px; color: var(--text-secondary);">
+          Bug标题: <strong>${escapeHtml(bug.title)}</strong>
+        </p>
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 8px; font-weight: 500;">禅道 BugID:</label>
+          <input type="number" id="editBugZentaoIdInput" class="form-input" value="${currentZentaoId || ''}" placeholder="请输入禅道BugID" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px; font-size: 14px;">
+          <small style="display: block; margin-top: 4px; color: var(--text-muted);">
+            ${currentZentaoId ? '当前BugID: ' + currentZentaoId : '当前未关联禅道Bug'}
+          </small>
+        </div>
+        <div style="text-align: right; gap: 8px;">
+          <button id="cancelEditBugIdBtn" class="btn-secondary">取消</button>
+          <button id="saveEditBugIdBtn" class="btn-primary">保存</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // 取消按钮
+    document.getElementById('cancelEditBugIdBtn').addEventListener('click', () => {
+      document.body.removeChild(modal);
+    });
+
+    // 保存按钮
+    document.getElementById('saveEditBugIdBtn').addEventListener('click', async () => {
+      const input = document.getElementById('editBugZentaoIdInput');
+      const newZentaoId = input.value.trim();
+
+      if (!newZentaoId) {
+        Toast.warning('请输入禅道BugID');
+        return;
+      }
+
+      // 更新到后端
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/bug/${bugId}/zentaoId`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ zentaoId: newZentaoId })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+          // 更新本地数据
+          bug.zentaoId = newZentaoId;
+          bug.updatedAt = new Date().toISOString();
+
+          // 重新渲染 Bug 卡片
+          await this.loadBugs();
+
+          document.body.removeChild(modal);
+          Toast.success('BugID已更新');
+        } else {
+          Toast.error('更新失败: ' + (result.error || '未知错误'));
+        }
+      } catch (err) {
+        console.error('[BugManager] 更新BugID失败:', err);
+        Toast.error('更新失败: ' + err.message);
+      }
+    });
+
+    // 点击背景关闭
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        document.body.removeChild(modal);
+      }
+    });
+
+    // 输入框回车保存
+    const input = document.getElementById('editBugZentaoIdInput');
+    input.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        document.getElementById('saveEditBugIdBtn').click();
+      }
+    });
+
+    // 自动聚焦并选中文本
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 100);
   },
 
   /**

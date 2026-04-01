@@ -1419,6 +1419,38 @@ router.get('/bugs/stats', async (req, res) => {
 });
 
 /**
+ * PUT /api/bug/:id/zentaoId - 更新 Bug 的禅道ID
+ */
+router.put('/bug/:id/zentaoId', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { zentaoId } = req.body;
+
+    console.log('[API] 更新 Bug 禅道ID, BugID:', id, 'ZentaoID:', zentaoId);
+
+    const { readTasks, writeTasks } = await import('../utils/storage.js');
+    const data = await readTasks();
+    const tasks = data.tasks || [];
+
+    const bug = tasks.find(t => t.id === id);
+    if (!bug) {
+      return res.status(404).json({ success: false, error: 'Bug not found' });
+    }
+
+    bug.zentaoId = zentaoId;
+    bug.updatedAt = new Date().toISOString();
+
+    await writeTasks({ tasks });
+
+    console.log('[API] Bug 禅道ID已更新');
+    res.json({ success: true, data: bug });
+  } catch (err) {
+    console.error('[API] 更新 Bug 禅道ID失败:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
  * GET /api/executions - 获取执行列表（收藏的排在前面）
  */
 router.get('/executions', async (req, res) => {

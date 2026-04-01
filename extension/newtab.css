@@ -2267,3 +2267,29 @@ body {
 .bug-id-link-inline:active {
   transform: translateY(0);
 }
+
+.bug-edit-id-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  padding: 2px 6px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  opacity: 0.6;
+}
+
+.bug-edit-id-btn:hover {
+  opacity: 1;
+  background: var(--bg-secondary);
+  transform: scale(1.1);
+}
+
+.bug-edit-id-btn:active {
+  transform: scale(1);
+}
