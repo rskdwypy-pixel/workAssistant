@@ -872,6 +872,7 @@ async function executeNormalExecutionBugInZentaoPage(params) {
   const { baseUrl, productId, bugData } = params;
   const executionId = bugData.executionId || '';
   const projectId = bugData.projectId || '';
+  const bugTitle = bugData.title || '';
 
   console.log('[Background] 尝试在禅道页面中执行普通执行 Bug 创建');
 
@@ -884,6 +885,9 @@ async function executeNormalExecutionBugInZentaoPage(params) {
   const endpoint = `${baseUrl}/zentao/bug-create-${productId}-0-executionID=${executionId}.html`;
 
   console.log('[Background] 普通 Bug 创建端点:', endpoint);
+
+  // 记录创建时间
+  const createTime = Date.now();
 
   // 第一步：在当前页面中提交 Bug 创建请求
   const createResults = await chrome.scripting.executeScript({
@@ -1024,9 +1028,9 @@ async function executeNormalExecutionBugInZentaoPage(params) {
   // 第三步：从列表页面的 iframe DOM 中提取 BugID
   const bugIdResults = await chrome.scripting.executeScript({
     target: { tabId: targetTab.id },
-    func: () => {
+    func: (bugTitle, createTime) => {
       return new Promise((resolve) => {
-        console.log('[Get BugID] 从列表页面 DOM 中查找 BugID');
+        console.log('[Get BugID] 从列表页面 DOM 中查找 BugID, 标题:', bugTitle, '创建时间:', createTime);
 
         // 查找 iframe
         const iframe = document.getElementById('appIframe-execution');
@@ -1065,7 +1069,7 @@ async function executeNormalExecutionBugInZentaoPage(params) {
               return;
             }
 
-            // 从 iframe DOM 中查找 bugList 表格的第一个 tr
+            // 从 iframe DOM 中查找 bugList 表格
             const bugList = iframeDoc.getElementById('bugList');
             if (!bugList) {
               console.error('[Get BugID] 未找到 bugList 表格');
@@ -1075,7 +1079,7 @@ async function executeNormalExecutionBugInZentaoPage(params) {
 
             console.log('[Get BugID] 找到 bugList 表格');
 
-            // 获取第一个 tr（排除表头）
+            // 获取所有行（排除表头）
             const tbody = bugList.querySelector('tbody');
             if (!tbody) {
               console.error('[Get BugID] 未找到 tbody');
@@ -1083,29 +1087,94 @@ async function executeNormalExecutionBugInZentaoPage(params) {
               return;
             }
 
-            const firstRow = tbody.querySelector('tr');
-            if (!firstRow) {
+            const rows = tbody.querySelectorAll('tr');
+            console.log('[Get BugID] 找到', rows.length, '个 Bug');
+
+            if (rows.length === 0) {
               console.error('[Get BugID] 未找到任何行');
               resolve({ success: false, reason: 'no_rows_found' });
               return;
             }
 
-            const bugId = firstRow.getAttribute('data-id');
-            if (!bugId) {
-              console.error('[Get BugID] 第一行没有 data-id 属性');
-              resolve({ success: false, reason: 'no_data_id' });
+            // 遍历所有行，查找标题匹配且创建时间最接近的 Bug
+            let matchedBug = null;
+            let minTimeDiff = Infinity;
+
+            for (let i = 0; i < rows.length; i++) {
+              const row = rows[i];
+              const bugId = row.getAttribute('data-id');
+
+              // 提取标题
+              const titleCell = row.querySelector('.c-title');
+              if (!titleCell) continue;
+
+              const titleLink = titleCell.querySelector('a');
+              if (!titleLink) continue;
+
+              const title = titleLink.textContent.trim();
+              const titleAttr = titleLink.getAttribute('title');
+              const displayTitle = titleAttr || title;
+
+              // 提取创建时间
+              const dateCell = row.querySelector('.c-openedDate');
+              let createdTime = null;
+              if (dateCell) {
+                const dateText = dateCell.textContent.trim();
+                console.log('[Get BugID] Bug', bugId, '标题:', displayTitle, '日期:', dateText);
+
+                // 解析日期格式：04-01 10:11
+                const dateMatch = dateText.match(/(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
+                if (dateMatch) {
+                  const month = parseInt(dateMatch[1]) - 1; // 月份从0开始
+                  const day = parseInt(dateMatch[2]);
+                  const hour = parseInt(dateMatch[3]);
+                  const minute = parseInt(dateMatch[4]);
+
+                  const bugDate = new Date();
+                  bugDate.setMonth(month);
+                  bugDate.setDate(day);
+                  bugDate.setHours(hour);
+                  bugDate.setMinutes(minute);
+                  bugDate.setSeconds(0);
+                  bugDate.setMilliseconds(0);
+
+                  createdTime = bugDate.getTime();
+                  const timeDiff = Math.abs(createTime - createdTime);
+
+                  console.log('[Get BugID] Bug', bugId, '解析时间:', new Date(createdTime), '时间差:', timeDiff, 'ms');
+
+                  // 检查标题是否匹配
+                  if (displayTitle === bugTitle) {
+                    console.log('[Get BugID] ✓ Bug', bugId, '标题匹配');
+                    if (timeDiff < minTimeDiff) {
+                      minTimeDiff = timeDiff;
+                      matchedBug = { bugId, createdTime, title: displayTitle };
+                      console.log('[Get BugID] ✓✓ 更新匹配Bug:', matchedBug, '时间差:', minTimeDiff);
+                    }
+                  } else {
+                    console.log('[Get BugID] ✗ Bug', bugId, '标题不匹配, 期望:', bugTitle, '实际:', displayTitle);
+                  }
+                }
+              }
+            }
+
+            if (!matchedBug) {
+              console.error('[Get BugID] ✗ 未找到匹配的 Bug');
+              console.log('[Get BugID] 搜索标题:', bugTitle);
+              resolve({ success: false, reason: 'no_matching_bug', searchedTitle: bugTitle });
               return;
             }
 
-            console.log('[Get BugID] ✓✓✓ 成功提取 BugID:', bugId);
-            resolve({ success: true, bugId });
+            console.log('[Get BugID] ✓✓✓ 成功匹配 Bug, ID:', matchedBug.bugId, '标题:', matchedBug.title, '时间差:', minTimeDiff, 'ms');
+            resolve({ success: true, bugId: matchedBug.bugId });
           } catch (err) {
             console.error('[Get BugID] 提取 BugID 异常:', err);
             resolve({ success: false, reason: err.message });
           }
         }
       });
-    }
+    },
+    args: [bugTitle, createTime]
   });
 
   const bugIdResult = bugIdResults[0].result;
