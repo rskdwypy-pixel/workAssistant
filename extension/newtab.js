@@ -7724,6 +7724,47 @@ const BugManager = {
     document.getElementById('activateType').value = 'codeerror';
     document.getElementById('activateComment').value = '';
 
+    // 设置默认指派人（使用 Bug 创建时的指派人）
+    if (bug.assignedTo) {
+      const assigneeDisplay = document.getElementById('activateAssigneeDisplay');
+      if (assigneeDisplay) {
+        assigneeDisplay.dataset.value = bug.assignedTo;
+        // 获取用户列表来显示名称
+        const users = await ZentaoBrowserClient.getUsers();
+        if (users && users[bug.assignedTo]) {
+          assigneeDisplay.innerHTML = `<span class="multi-select-tag"><span class="multi-select-tag-name">${users[bug.assignedTo]}</span></span>`;
+        }
+      }
+    }
+
+    // 设置默认抄送人（使用 Bug 创建时的抄送人）
+    if (bug.cc && bug.cc.length > 0) {
+      const ccContainer = document.getElementById('activateCcContainer');
+      if (ccContainer && ccContainer._selectedUsers) {
+        // 清空现有选择
+        ccContainer._selectedUsers.clear();
+        // 添加 Bug 的抄送人
+        bug.cc.forEach(ccAccount => {
+          ccContainer._selectedUsers.add(ccAccount);
+        });
+        // 更新显示
+        const users = await ZentaoBrowserClient.getUsers();
+        this.updateMultiSelectDisplayById('activateCc', ccContainer._selectedUsers, users);
+        // 更新下拉列表中的选中状态
+        const optionsContainer = document.getElementById('activateCcOptions');
+        if (optionsContainer) {
+          optionsContainer.querySelectorAll('.multi-select-option').forEach(option => {
+            const account = option.dataset.value;
+            if (ccContainer._selectedUsers.has(account)) {
+              option.classList.add('selected');
+            } else {
+              option.classList.remove('selected');
+            }
+          });
+        }
+      }
+    }
+
     modal.style.display = 'flex';
   },
 
