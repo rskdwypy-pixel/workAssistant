@@ -3229,8 +3229,34 @@ async function syncFromZentaoInBackground(config) {
 
               const openedBy = row.querySelector('.c-user')?.textContent?.trim() || '';
 
+              // 从 data 属性获取预计工时
               const estimateNum = parseFloat(estimate) || 0;
-              const consumedNum = parseFloat(consumed) || 0;
+
+              // 从 .c-hours 单元格获取消耗工时和剩余工时
+              // 第2个 c-hours（索引1）是消耗工时，第3个（索引2）是剩余工时
+              const hoursCells = row.querySelectorAll('.c-hours');
+              let consumedNum = parseFloat(consumed) || 0;  // 默认使用 data-consumed
+              let leftNum = 0;
+
+              if (hoursCells.length >= 3) {
+                // 尝试从单元格提取工时数据
+                const consumedText = hoursCells[1]?.textContent?.trim() || '';  // 第2个：消耗工时
+                const leftText = hoursCells[2]?.textContent?.trim() || '';      // 第3个：剩余工时
+
+                // 移除 'h' 后缀并转换为数字
+                consumedNum = parseFloat(consumedText.replace('h', '')) || consumedNum;
+                leftNum = parseFloat(leftText.replace('h', '')) || 0;
+
+                console.log(`[Content] 任务${taskId} - 预计:${estimate}h, 消耗:${consumedNum}h, 剩余:${leftNum}h`);
+              } else {
+                console.log(`[Content] 任务${taskId} - 未找到足够的工时单元格，使用data属性`);
+                // 如果没有找到单元格，尝试使用 data-left
+                leftNum = parseFloat(row.dataset.left) || 0;
+              }
+
+              // 计算进度：消耗工时 / (消耗工时 + 剩余工时) * 100%
+              const totalHours = consumedNum + leftNum;
+              const progress = totalHours > 0 ? Math.round((consumedNum / totalHours) * 100) : 0;
 
               tasks.push({
                 zentaoId: parseInt(taskId),
@@ -3244,7 +3270,8 @@ async function syncFromZentaoInBackground(config) {
                 openedBy,
                 estimate: estimateNum,
                 consumed: consumedNum,
-                progress: estimateNum > 0 ? Math.round((consumedNum / estimateNum) * 100) : 0
+                left: leftNum,
+                progress
               });
             } catch (err) {
               console.error('[Content] 解析任务失败:', err);
