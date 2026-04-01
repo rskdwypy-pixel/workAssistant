@@ -7554,12 +7554,19 @@ const BugManager = {
             </div>
           </div>
         ` : ''}
-        ${bug.comment ? `
+        ${bug.comments && bug.comments.length > 0 ? `
           <div style="margin-top: 12px;">
             <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 500;">备注:</p>
-            <div style="padding: 12px; background: var(--bg-secondary); border-radius: 6px;">
-              <p style="margin: 0; font-size: 13px; white-space: pre-wrap;">${escapeHtml(bug.comment)}</p>
-            </div>
+            ${bug.comments.map((comment, index) => {
+              const date = new Date(comment.timestamp);
+              const dateStr = `${date.getMonth() + 1}月${date.getDate()}日 ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+              return `
+                <div key="${index}" style="padding: 12px; background: var(--bg-secondary); border-radius: 6px; margin-bottom: ${index < bug.comments.length - 1 ? '8px' : '0'};">
+                  <p style="margin: 0 0 4px 0; font-size: 11px; color: var(--text-muted);">${dateStr} ${comment.author || ''}</p>
+                  <p style="margin: 0; font-size: 13px; white-space: pre-wrap;">${escapeHtml(comment.content)}</p>
+                </div>
+              `;
+            }).join('')}
           </div>
         ` : ''}
         <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
@@ -8048,7 +8055,8 @@ const BugManager = {
           assignedTo,
           assignedToList: assignedTo ? [assignedTo] : [],
           cc: ccList,
-          comment
+          comment,
+          author: '当前用户'  // TODO: 获取真实用户名
         });
         this.hideActivateModal();
         this.hideBugDetail();
@@ -8120,7 +8128,8 @@ const BugManager = {
         await this.updateBugStatus(bugId, 'closed', {
           assignedTo,
           cc: [],  // 修复时没有抄送人字段
-          comment
+          comment,
+          author: '当前用户'  // TODO: 获取真实用户名
         });
         this.hideResolveModal();
         this.hideBugDetail(); // 同时关闭详情弹窗

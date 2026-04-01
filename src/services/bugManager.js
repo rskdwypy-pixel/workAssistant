@@ -31,7 +31,7 @@ async function createBug(bugData) {
     assignedTo: bugData.assignedTo || '',
     assignedToList: bugData.assignedToList || [],
     cc: bugData.cc || [],
-    comment: bugData.comment || '',
+    comments: bugData.comments || [],  // 改为数组，存储多条备注
     zentaoId: bugData.zentaoId || null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -81,8 +81,17 @@ async function migrateBugData() {
       bug.cc = [];
       needUpdate = true;
     }
-    if (bug.comment === undefined) {
-      bug.comment = '';
+    if (bug.comments === undefined) {
+      // 如果有旧的 comment 字段，转换为 comments 数组
+      if (bug.comment !== undefined && bug.comment !== '') {
+        bug.comments = [{
+          content: bug.comment,
+          timestamp: bug.createdAt || bug.updatedAt || new Date().toISOString()
+        }];
+        delete bug.comment;  // 删除旧字段
+      } else {
+        bug.comments = [];
+      }
       needUpdate = true;
     }
     if (bug.projectName === undefined) {
@@ -174,7 +183,7 @@ async function getBugs(filters = {}) {
  * 更新 Bug 状态
  * @param {string} bugId - Bug ID
  * @param {string} newStatus - 新状态
- * @param {Object} extraData - 额外数据 { assignedTo, cc, comment }
+ * @param {Object} extraData - 额外数据 { assignedTo, cc, comment, author }
  */
 async function updateBugStatus(bugId, newStatus, extraData = {}) {
   const data = await readTasks();
@@ -196,8 +205,17 @@ async function updateBugStatus(bugId, newStatus, extraData = {}) {
   if (extraData.cc !== undefined) {
     bug.cc = extraData.cc;
   }
-  if (extraData.comment !== undefined) {
-    bug.comment = extraData.comment;
+
+  // 添加新备注到数组（而不是覆盖）
+  if (extraData.comment !== undefined && extraData.comment !== '') {
+    if (!bug.comments) {
+      bug.comments = [];
+    }
+    bug.comments.push({
+      content: extraData.comment,
+      timestamp: new Date().toISOString(),
+      author: extraData.author || '系统'
+    });
   }
 
   await writeTasks({ tasks });
