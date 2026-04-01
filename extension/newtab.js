@@ -550,6 +550,9 @@ function setupProgressDragEvents() {
 
 // 初始化
 document.addEventListener('DOMContentLoaded', async () => {
+  // 初始化 ZentaoBrowserClient（从缓存加载用户列表）
+  ZentaoBrowserClient.init();
+
   // 初始化今日工时
   initTodayWorkTime();
   syncWorkHoursToBackend(); // 同步后端工时数据
@@ -3965,6 +3968,23 @@ const ZentaoBrowserClient = {
   usersLoaded: false, // 用户列表是否已加载
 
   /**
+   * 初始化（从 localStorage 加载缓存的用户列表）
+   */
+  init() {
+    // 尝试从 localStorage 加载用户列表
+    try {
+      const cachedUsers = localStorage.getItem('zentao_users');
+      if (cachedUsers) {
+        this.users = JSON.parse(cachedUsers);
+        this.usersLoaded = true;
+        console.log('[ZentaoBrowser] 从缓存加载用户列表成功:', Object.keys(this.users).length, '个用户');
+      }
+    } catch (e) {
+      console.warn('[ZentaoBrowser] 从缓存加载用户列表失败:', e);
+    }
+  },
+
+  /**
    * 初始化配置（每次都重新获取，确保使用最新配置）
    */
   async initConfig() {
@@ -4375,7 +4395,17 @@ const ZentaoBrowserClient = {
    */
   async saveUsersToBackend(users) {
     try {
-      console.log('[ZentaoBrowser] 保存用户列表到后端，用户数量:', Object.keys(users).length);
+      console.log('[ZentaoBrowser] 保存用户列表到后端和localStorage，用户数量:', Object.keys(users).length);
+
+      // 同时保存到 localStorage 作为缓存
+      try {
+        localStorage.setItem('zentao_users', JSON.stringify(users));
+        console.log('[ZentaoBrowser] ✓ 用户列表已保存到 localStorage');
+      } catch (e) {
+        console.warn('[ZentaoBrowser] 保存用户列表到 localStorage 失败:', e);
+      }
+
+      // 保存到后端
       const response = await fetch(`${API_BASE_URL}/api/zentao/users`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -6470,8 +6500,22 @@ const BugManager = {
     const severityClass = `bug-severity-${bug.severity || 3}`;
     const severityText = ['', '致命', '严重', '一般', '提示'][bug.severity || 3];
 
-    // 获取用户列表用于显示名称
-    const users = ZentaoBrowserClient.getUsers() || {};
+    // 获取用户列表用于显示名称，如果为空则尝试加载
+    let users = ZentaoBrowserClient.getUsers();
+    if (!users || Object.keys(users).length === 0) {
+      console.warn('[BugManager] 用户列表为空，尝试从缓存加载');
+      // 尝试从 localStorage 加载
+      try {
+        const cachedUsers = localStorage.getItem('zentao_users');
+        if (cachedUsers) {
+          users = JSON.parse(cachedUsers);
+          console.log('[BugManager] 从缓存加载用户列表成功:', Object.keys(users).length, '个用户');
+        }
+      } catch (e) {
+        console.warn('[BugManager] 从缓存加载用户列表失败:', e);
+      }
+      if (!users) users = {};
+    }
 
     // 格式化指派人显示
     let assigneeDisplay = '';
@@ -7597,8 +7641,22 @@ const BugManager = {
       <span style="font-size: 12px; color: var(--text-secondary);">${statusText}</span>
     `;
 
-    // 获取用户列表用于显示名称
-    const users = ZentaoBrowserClient.getUsers() || {};
+    // 获取用户列表用于显示名称，如果为空则尝试加载
+    let users = ZentaoBrowserClient.getUsers();
+    if (!users || Object.keys(users).length === 0) {
+      console.warn('[BugManager] 用户列表为空，尝试从缓存加载');
+      // 尝试从 localStorage 加载
+      try {
+        const cachedUsers = localStorage.getItem('zentao_users');
+        if (cachedUsers) {
+          users = JSON.parse(cachedUsers);
+          console.log('[BugManager] 从缓存加载用户列表成功:', Object.keys(users).length, '个用户');
+        }
+      } catch (e) {
+        console.warn('[BugManager] 从缓存加载用户列表失败:', e);
+      }
+      if (!users) users = {};
+    }
 
     // 格式化指派人
     let assigneeText = '';
