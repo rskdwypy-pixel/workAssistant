@@ -6616,19 +6616,19 @@ const BugManager = {
     modal.className = 'modal';
     modal.style.display = 'flex';
     modal.innerHTML = `
-      <div class="modal-content" style="max-width: 400px;">
+      <div class="modal-content" style="max-width: 400px; word-wrap: break-word; overflow-wrap: break-word;">
         <h3>编辑禅道 BugID</h3>
-        <p style="margin-bottom: 16px; color: var(--text-secondary);">
+        <div style="margin-bottom: 16px; color: var(--text-secondary); word-break: break-all;">
           Bug标题: <strong>${escapeHtml(bug.title)}</strong>
-        </p>
+        </div>
         <div style="margin-bottom: 16px;">
           <label style="display: block; margin-bottom: 8px; font-weight: 500;">禅道 BugID:</label>
-          <input type="number" id="editBugZentaoIdInput" class="form-input" value="${currentZentaoId || ''}" placeholder="请输入禅道BugID" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px; font-size: 14px;">
-          <small style="display: block; margin-top: 4px; color: var(--text-muted);">
+          <input type="number" id="editBugZentaoIdInput" class="form-input" value="${currentZentaoId || ''}" placeholder="请输入禅道BugID" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px; font-size: 14px; box-sizing: border-box;">
+          <small style="display: block; margin-top: 4px; color: var(--text-muted); word-break: break-all;">
             ${currentZentaoId ? '当前BugID: ' + currentZentaoId : '当前未关联禅道Bug'}
           </small>
         </div>
-        <div style="text-align: right; gap: 8px;">
+        <div style="display: flex; justify-content: flex-end; gap: 8px;">
           <button id="cancelEditBugIdBtn" class="btn-secondary">取消</button>
           <button id="saveEditBugIdBtn" class="btn-primary">保存</button>
         </div>
