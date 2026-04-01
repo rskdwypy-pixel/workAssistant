@@ -515,6 +515,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === 'getExecutionProductId') {
+    getExecutionProductId(request)
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, reason: err.message }));
+    return true;
+  }
+
+  if (request.action === 'executeNormalExecutionBugInZentaoPage') {
+    executeNormalExecutionBugInZentaoPage(request)
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, reason: err.message }));
+    return true;
+  }
+
   if (request.action === 'updateZentaoTaskStatus') {
     updateZentaoTaskStatus(request)
       .then(sendResponse)
@@ -718,6 +732,263 @@ async function executeBugInZentaoPage(params) {
         })
         .catch(err => {
           console.error('[Bug Create] 请求失败:', err);
+          resolve({ success: false, reason: err.message });
+        });
+      });
+    },
+    args: [productId, executionId, projectId, bugData, endpoint]
+  });
+
+  return results[0].result;
+}
+
+// 获取普通执行的 productID
+async function getExecutionProductId(params) {
+  const { baseUrl, executionId } = params;
+
+  console.log('[Background] 获取普通执行的 productID, executionId:', executionId);
+
+  const targetTab = await ensureZentaoTab(baseUrl);
+  if (!targetTab) {
+    return { success: false, reason: 'no_zentao_tab' };
+  }
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: targetTab.id },
+    func: (baseUrl, executionId) => {
+      return new Promise((resolve) => {
+        const url = `${baseUrl}/zentao/execution-bug-${executionId}.html`;
+
+        console.log('[Get ProductID] 访问执行页面:', url);
+
+        fetch(url)
+          .then(r => r.text())
+          .then(html => {
+            console.log('[Get ProductID] 页面加载成功，长度:', html.length);
+
+            // 查找 iframe
+            const iframeMatch = html.match(/<iframe[^>]*id="appIframe-execution"[^>]*>/i);
+            if (!iframeMatch) {
+              console.error('[Get ProductID] 未找到 appIframe-execution iframe');
+              resolve({ success: false, reason: 'iframe_not_found' });
+              return;
+            }
+
+            // 提取 iframe 的 src
+            const srcMatch = iframeMatch[0].match(/src="([^"]+)"/i);
+            if (!srcMatch) {
+              console.error('[Get ProductID] iframe 没有 src 属性');
+              resolve({ success: false, reason: 'iframe_src_not_found' });
+              return;
+            }
+
+            const iframeSrc = srcMatch[1];
+            console.log('[Get ProductID] iframe src:', iframeSrc);
+
+            // 获取 iframe 内容
+            return fetch(iframeSrc.startsWith('http') ? iframeSrc : `${baseUrl}${iframeSrc}`);
+          })
+          .then(r => r.text())
+          .then(iframeHtml => {
+            console.log('[Get ProductID] iframe 内容加载成功，长度:', iframeHtml.length);
+
+            // 查找提Bug链接
+            const linkMatch = iframeHtml.match(/<a[^>]*href="\/zentao\/bug-create-(\d+)-0-executionID=${executionId}\.html"[^>]*>/i);
+            if (!linkMatch) {
+              console.error('[Get ProductID] 未找到提Bug链接');
+              resolve({ success: false, reason: 'bug_create_link_not_found' });
+              return;
+            }
+
+            const productId = linkMatch[1];
+            console.log('[Get ProductID] 找到 productID:', productId);
+
+            resolve({ success: true, productId });
+          })
+          .catch(err => {
+            console.error('[Get ProductID] 请求失败:', err);
+            resolve({ success: false, reason: err.message });
+          });
+      });
+    },
+    args: [baseUrl, executionId]
+  });
+
+  return results[0].result;
+}
+
+// 在禅道页面中执行普通执行 Bug 创建
+async function executeNormalExecutionBugInZentaoPage(params) {
+  const { baseUrl, productId, bugData } = params;
+  const executionId = bugData.executionId || '';
+  const projectId = bugData.projectId || '';
+
+  console.log('[Background] 尝试在禅道页面中执行普通执行 Bug 创建');
+
+  const targetTab = await ensureZentaoTab(baseUrl);
+  if (!targetTab) {
+    return { success: false, reason: 'no_zentao_tab' };
+  }
+
+  // 构建端点 URL（普通执行不需要看板位置参数）
+  const endpoint = `${baseUrl}/zentao/bug-create-${productId}-0-executionID=${executionId}.html`;
+
+  console.log('[Background] 普通 Bug 创建端点:', endpoint);
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: targetTab.id },
+    func: (productId, executionId, projectId, bugData, endpoint) => {
+      return new Promise((resolve) => {
+        console.log('[Normal Bug Create] 准备创建 Bug:', { productId, executionId, projectId, title: bugData.title });
+        console.log('[Normal Bug Create] 请求端点:', endpoint);
+
+        const formData = new FormData();
+        formData.append('product', productId);
+        formData.append('module', '0');
+        formData.append('project', projectId || '');
+        formData.append('execution', executionId);
+        formData.append('openedBuild[]', bugData.openedBuild || 'trunk');
+
+        // 处理指派人
+        const assignedTo = bugData.assignedTo || (bugData.assignedToList && bugData.assignedToList.length > 0 ? bugData.assignedToList[0] : '');
+        if (assignedTo) formData.append('assignedTo', assignedTo);
+
+        formData.append('deadline', '');
+        formData.append('feedbackBy', '');
+        formData.append('notifyEmail', '');
+        formData.append('type', bugData.type || 'codeerror');
+        formData.append('os[]', '');
+        formData.append('browser[]', '');
+        formData.append('title', bugData.title);
+        formData.append('color', '');
+        formData.append('severity', String(bugData.severity || 3));
+        formData.append('pri', String(bugData.pri || 3));
+        formData.append('steps', bugData.steps || '');
+        formData.append('story', '');
+        formData.append('task', '');
+        formData.append('oldTaskID', '0');
+
+        // 处理抄送人列表
+        if (bugData.cc && Array.isArray(bugData.cc)) {
+          bugData.cc.forEach(ccAccount => {
+            if (ccAccount) formData.append('mailto[]', ccAccount);
+          });
+        }
+
+        formData.append('keywords', '');
+        formData.append('status', 'active');
+        formData.append('issueKey', '');
+        formData.append('uid', Math.random().toString(36).substring(2, 14));
+        formData.append('case', '0');
+        formData.append('caseVersion', '0');
+        formData.append('result', '0');
+        formData.append('testtask', '0');
+
+        fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+          body: formData
+        })
+        .then(async r => {
+          console.log('[Normal Bug Create] 响应 HTTP 状态:', r.status);
+          const text = await r.text();
+          return { status: r.status, text };
+        })
+        .then(({ status, text }) => {
+          console.log('[Normal Bug Create] 响应 HTTP 状态:', status);
+
+          if (status !== 200) {
+            resolve({ success: false, reason: 'http_error', status });
+            return;
+          }
+
+          try {
+            const data = JSON.parse(text);
+            console.log('[Normal Bug Create] 解析成功:', data);
+
+            if (data.result !== 'success') {
+              resolve({ success: false, reason: 'api_error', message: data.message });
+              return;
+            }
+
+            // 从 locate 中获取列表页面 URL
+            const locateUrl = data.locate;
+            console.log('[Normal Bug Create] locate URL:', locateUrl);
+
+            if (!locateUrl) {
+              resolve({ success: false, reason: 'no_locate_url' });
+              return;
+            }
+
+            // 访问列表页面获取 BugID
+            const fullLocateUrl = locateUrl.startsWith('http') ? locateUrl : `${window.location.origin}${locateUrl}`;
+
+            return fetch(fullLocateUrl);
+          } catch (e) {
+            console.error('[Normal Bug Create] JSON 解析失败:', e);
+            resolve({ success: false, reason: 'invalid_json', responseText: text.substring(0, 1000) });
+          }
+        })
+        .then(r => {
+          if (!r) return; // 已经在之前的 then 中处理了错误
+
+          return r.text();
+        })
+        .then(listHtml => {
+          if (!listHtml) return;
+
+          console.log('[Normal Bug Create] 列表页面加载成功，长度:', listHtml.length);
+
+          // 查找 iframe
+          const iframeMatch = listHtml.match(/<iframe[^>]*id="appIframe-execution"[^>]*>/i);
+          if (!iframeMatch) {
+            console.error('[Normal Bug Create] 未找到 appIframe-execution iframe');
+            resolve({ success: false, reason: 'iframe_not_found' });
+            return;
+          }
+
+          // 提取 iframe 的 src
+          const srcMatch = iframeMatch[0].match(/src="([^"]+)"/i);
+          if (!srcMatch) {
+            console.error('[Normal Bug Create] iframe 没有 src 属性');
+            resolve({ success: false, reason: 'iframe_src_not_found' });
+            return;
+          }
+
+          const iframeSrc = srcMatch[1];
+          console.log('[Normal Bug Create] iframe src:', iframeSrc);
+
+          // 获取 iframe 内容
+          const fullIframeSrc = iframeSrc.startsWith('http') ? iframeSrc : `${window.location.origin}${iframeSrc}`;
+          return fetch(fullIframeSrc);
+        })
+        .then(r => {
+          if (!r) return;
+          return r.text();
+        })
+        .then(iframeHtml => {
+          if (!iframeHtml) return;
+
+          console.log('[Normal Bug Create] iframe 内容加载成功，长度:', iframeHtml.length);
+
+          // 查找 bugList 表格的第一个 tr
+          const trMatch = iframeHtml.match(/<tr[^>]*data-id="(\d+)"[^>]*>/i);
+          if (!trMatch) {
+            console.error('[Normal Bug Create] 未找到 bugList 中的 bug');
+            resolve({ success: false, reason: 'bug_not_found' });
+            return;
+          }
+
+          const bugId = trMatch[1];
+          console.log('[Normal Bug Create] 找到 BugID:', bugId);
+
+          resolve({ success: true, data: { id: bugId } });
+        })
+        .catch(err => {
+          console.error('[Normal Bug Create] 请求失败:', err);
           resolve({ success: false, reason: err.message });
         });
       });

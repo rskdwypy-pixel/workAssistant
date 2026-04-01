@@ -7073,8 +7073,28 @@ const BugManager = {
       let needRelogin = false;
 
       if (baseUrl) {
-        // 如果有执行ID，尝试获取看板参数（看板Bug必需）
-        if (executionId) {
+        // 检查是否有执行ID
+        if (!executionId) {
+          console.error('[BugManager] ✗ 缺少 executionId，无法创建Bug');
+          Toast.error('缺少执行ID，无法创建Bug');
+          return;
+        }
+
+        // 获取执行类型（判断是否为看板）
+        let executionType = null;
+        try {
+          executionType = ExecutionFavorites.getExecutionType(executionId);
+          console.log('[BugManager] 执行类型:', executionId, '=>', executionType);
+        } catch (e) {
+          console.warn('[BugManager] 获取执行类型失败:', e);
+        }
+
+        let syncResponse;
+
+        if (executionType === 'kanban') {
+          // ========== 看板执行 Bug 创建 ==========
+          console.log('[BugManager] 使用看板逻辑创建 Bug');
+
           try {
             console.log('[BugManager] 尝试获取看板参数, executionId:', executionId);
             const kanbanParams = await ZentaoBrowserClient.getKanbanParamsFromHtml(executionId, 'bug', 'unconfirmed');
@@ -7117,22 +7137,51 @@ const BugManager = {
             Toast.error('获取看板参数失败: ' + e.message);
             return;
           }
-        } else {
-          // 没有 executionId，无法创建看板Bug
-          console.error('[BugManager] ✗ 缺少 executionId，无法创建看板Bug');
-          Toast.error('缺少执行ID，无法创建Bug');
-          return;
-        }
 
-        const syncResponse = await new Promise(resolve => {
-          chrome.runtime.sendMessage({
-            action: 'executeBugInZentaoPage',
-            baseUrl,
-            // productId 是必需的，不允许使用默认值
-            productId: bugData.productId,
-            bugData
-          }, resolve);
-        });
+          // 使用看板 Bug 创建接口
+          syncResponse = await new Promise(resolve => {
+            chrome.runtime.sendMessage({
+              action: 'executeBugInZentaoPage',
+              baseUrl,
+              // productId 是必需的，不允许使用默认值
+              productId: bugData.productId,
+              bugData
+            }, resolve);
+          });
+        } else {
+          // ========== 普通执行 Bug 创建 ==========
+          console.log('[BugManager] 使用普通执行逻辑创建 Bug');
+
+          // 获取 productID
+          const productIdResponse = await new Promise(resolve => {
+            chrome.runtime.sendMessage({
+              action: 'getExecutionProductId',
+              baseUrl,
+              executionId
+            }, resolve);
+          });
+
+          if (!productIdResponse || !productIdResponse.success) {
+            console.error('[BugManager] ✗ 获取 productID 失败:', productIdResponse?.reason);
+            Toast.error('获取 productID 失败: ' + (productIdResponse?.reason || '未知错误'));
+            return;
+          }
+
+          const productId = productIdResponse.productId;
+          console.log('[BugManager] ✓ 获取到 productID:', productId);
+
+          bugData.productId = productId;
+
+          // 使用普通执行 Bug 创建接口
+          syncResponse = await new Promise(resolve => {
+            chrome.runtime.sendMessage({
+              action: 'executeNormalExecutionBugInZentaoPage',
+              baseUrl,
+              productId,
+              bugData
+            }, resolve);
+          });
+        }
 
         if (syncResponse && syncResponse.success) {
           // 适配返回结构，提取 bugId
