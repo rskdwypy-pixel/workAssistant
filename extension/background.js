@@ -753,43 +753,69 @@ async function getExecutionProductId(params) {
     return { success: false, reason: 'no_zentao_tab' };
   }
 
+  // 导航到执行页面
+  const executionUrl = `${baseUrl}/zentao/execution-bug-${executionId}.html`;
+  console.log('[Background] 导航到执行页面:', executionUrl);
+
+  await chrome.tabs.update(targetTab.id, { url: executionUrl });
+
+  // 等待页面加载完成
+  await new Promise(resolve => {
+    const listener = (tabId, changeInfo) => {
+      if (tabId === targetTab.id && changeInfo.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(listener);
+        setTimeout(resolve, 500); // 额外等待确保页面稳定
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+
+    // 超时保护
+    setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, 15000);
+  });
+
+  console.log('[Background] 执行页面已加载，从 DOM 中提取 productID');
+
   const results = await chrome.scripting.executeScript({
     target: { tabId: targetTab.id },
-    func: (baseUrl, executionId) => {
+    func: (executionId) => {
       return new Promise((resolve) => {
-        const url = `${baseUrl}/zentao/execution-bug-${executionId}.html`;
+        console.log('[Get ProductID] 从页面 DOM 中查找提Bug链接');
 
-        console.log('[Get ProductID] 访问执行页面:', url);
+        // 直接从页面 DOM 中查找提Bug链接
+        const allLinks = document.querySelectorAll('a[href*="bug-create"]');
+        console.log('[Get ProductID] 找到', allLinks.length, '个 bug-create 链接');
 
-        fetch(url)
-          .then(r => r.text())
-          .then(html => {
-            console.log('[Get ProductID] 页面加载成功，长度:', html.length);
+        let productId = null;
+        for (const link of allLinks) {
+          const href = link.getAttribute('href');
+          console.log('[Get ProductID] 检查链接:', href);
 
-            // 直接从主页面 HTML 中查找提Bug链接（不依赖 iframe）
-            const linkMatch = html.match(/<a[^>]*href="\/zentao\/bug-create-(\d+)-0-executionID=${executionId}\.html"[^>]*>/i);
-            if (!linkMatch) {
-              console.error('[Get ProductID] 未找到提Bug链接');
-              console.log('[Get ProductID] 尝试搜索所有 bug-create 链接...');
-              // 打印前 1000 个字符用于调试
-              console.log('[Get ProductID] 页面内容 (前1000字符):', html.substring(0, 1000));
-              resolve({ success: false, reason: 'bug_create_link_not_found' });
-              return;
-            }
+          // 匹配格式：/zentao/bug-create-{productID}-0-executionID={executionId}.html
+          const match = href.match(/\/zentao\/bug-create-(\d+)-0-executionID=${executionId}\.html/i);
+          if (match) {
+            productId = match[1];
+            console.log('[Get ProductID] ✓ 找到匹配的链接, productID:', productId);
+            break;
+          }
+        }
 
-            const productId = linkMatch[1];
-            console.log('[Get ProductID] 找到 productID:', productId);
-            console.log('[Get ProductID] 提Bug链接:', linkMatch[0]);
+        if (!productId) {
+          console.error('[Get ProductID] ✗ 未找到匹配的提Bug链接');
+          console.log('[Get ProductID] 页面 URL:', window.location.href);
+          // 打印页面部分内容用于调试
+          console.log('[Get ProductID] 页面 body (前2000字符):', document.body.innerHTML.substring(0, 2000));
+          resolve({ success: false, reason: 'bug_create_link_not_found' });
+          return;
+        }
 
-            resolve({ success: true, productId });
-          })
-          .catch(err => {
-            console.error('[Get ProductID] 请求失败:', err);
-            resolve({ success: false, reason: err.message });
-          });
+        console.log('[Get ProductID] ✓✓✓ 成功提取 productID:', productId);
+        resolve({ success: true, productId });
       });
     },
-    args: [baseUrl, executionId]
+    args: [executionId]
   });
 
   return results[0].result;
@@ -1197,8 +1223,37 @@ async function ensureZentaoTab(baseUrl, kanbanId) {
     return zentaoTab;
   }
 
-  console.log('[Background] 未找到禅道页面，无法继续');
-  return null;
+  // 未找到禅道页面，自动创建一个
+  console.log('[Background] 未找到禅道页面，创建新页面');
+  const myUrl = `${baseUrl}/zentao/my.html`;
+  console.log('[Background] 创建禅道标签页 URL:', myUrl);
+  const newTab = await chrome.tabs.create({
+    url: myUrl,
+    active: false  // 设为不可见
+  });
+  console.log('[Background] 新禅道标签页已创建, ID:', newTab.id);
+
+  // 等待页面加载完成
+  await new Promise(resolve => {
+    const listener = (tabId, changeInfo) => {
+      if (tabId === newTab.id && changeInfo.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(listener);
+        setTimeout(resolve, 500);
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+
+    // 超时保护
+    setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, 10000);
+  });
+
+  // 重新获取 tab 信息以确保 URL 已更新
+  const updatedTab = await chrome.tabs.get(newTab.id);
+  console.log('[Background] 新禅道页面已加载，URL:', updatedTab.url);
+  return updatedTab;
 }
 
 // 更新禅道任务状态
