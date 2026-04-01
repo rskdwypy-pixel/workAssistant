@@ -1047,17 +1047,17 @@ async function executeNormalExecutionBugInZentaoPage(params) {
           console.log('[Get BugID] iframe 还未加载完成，等待...');
           iframe.addEventListener('load', () => {
             console.log('[Get BugID] iframe 加载完成');
-            extractBugId();
+            setTimeout(() => extractBugId(), 2000); // 额外等待2秒
           });
 
           // 超时保护
           setTimeout(() => {
             console.error('[Get BugID] iframe 加载超时');
             resolve({ success: false, reason: 'iframe_load_timeout' });
-          }, 5000);
+          }, 10000);
         } else {
           console.log('[Get BugID] iframe 已加载完成');
-          extractBugId();
+          setTimeout(() => extractBugId(), 2000); // 额外等待2秒让数据完全加载
         }
 
         function extractBugId() {
