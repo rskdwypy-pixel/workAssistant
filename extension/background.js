@@ -1060,10 +1060,10 @@ async function executeNormalExecutionBugInZentaoPage(params) {
           pollForBug();
         }
 
-        // 轮询查找 Bug，最多重试3次，每次间隔2秒
+        // 轮询查找 Bug，最多重试10次，每次间隔2秒
         function pollForBug() {
           let retryCount = 0;
-          const maxRetries = 3;
+          const maxRetries = 10;
 
           function tryExtract() {
             const result = extractBugId();
@@ -1074,29 +1074,26 @@ async function executeNormalExecutionBugInZentaoPage(params) {
               return;
             }
 
-            // 如果没找到且还有重试次数，刷新页面后重试
+            // 如果没找到且还有重试次数，继续等待后重试
             if (retryCount < maxRetries) {
               retryCount++;
-              console.log('[Get BugID] 未找到匹配的Bug，刷新页面后 ' + retryCount + '/' + maxRetries);
+              console.log('[Get BugID] 未找到匹配的Bug，2秒后重试 (' + retryCount + '/' + maxRetries + ')');
 
-              // 刷新页面
-              location.reload();
-
-              // 等待页面重新加载完成后再次尝试
+              // 等待2秒后再次尝试
               setTimeout(() => {
                 tryExtract();
-              }, 3000); // 等待3秒让页面完全重新加载
+              }, 2000);
             } else {
               console.error('[Get BugID] 达到最大重试次数，放弃查找');
               resolve(result);
             }
           }
 
-          // 首次尝试延迟2秒，让数据充分加载
+          // 首次尝试延迟3秒，让数据充分加载
           setTimeout(() => {
             console.log('[Get BugID] 首次尝试提取 BugID');
             tryExtract();
-          }, 2000);
+          }, 3000);
         }
 
         function extractBugId() {

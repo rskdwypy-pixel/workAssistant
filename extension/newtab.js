@@ -7193,7 +7193,7 @@ const BugManager = {
             const timeout = setTimeout(() => {
               console.error('[BugManager] 普通 Bug 创建请求超时');
               resolve({ success: false, reason: 'timeout', data: null });
-            }, 45000); // 45秒超时（包括刷新重试时间）
+            }, 60000); // 60秒超时（包括轮询等待时间）
 
             chrome.runtime.sendMessage({
               action: 'executeNormalExecutionBugInZentaoPage',
