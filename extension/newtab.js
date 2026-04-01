@@ -20,6 +20,214 @@ let draggingProgressOriginalValue = null; // 拖拽前的原始进度值
 let todayWorkHours = 0; // 今日已工作时长（小时）
 const DAILY_WORK_HOURS = 8; // 每日标准工时
 
+// ==================== 禅道同步状态 ====================
+const SYNC_INTERVAL = 24 * 60 * 60 * 1000; // 24小时
+const STORAGE_KEY_LAST_SYNC = 'zentao_last_sync_time';
+
+const ZentaoSync = {
+  _lastSyncTimestamp: null,
+  _lastFormattedTime: null,
+  _intervalId: null,
+
+  /**
+   * 获取最后同步时间（带缓存）
+   * @returns {Promise<number>} 上次同步的时间戳（毫秒）
+   */
+  async getLastSyncTime() {
+    const result = await chrome.storage.local.get([STORAGE_KEY_LAST_SYNC]);
+    this._lastSyncTimestamp = result[STORAGE_KEY_LAST_SYNC] || 0;
+    return this._lastSyncTimestamp;
+  },
+
+  /**
+   * 格式化显示最后同步时间
+   * @returns {Promise<string>} 格式化的时间字符串
+   */
+  async getFormattedLastSyncTime() {
+    const lastSync = await this.getLastSyncTime();
+    if (lastSync === 0) {
+      return '从未同步';
+    }
+
+    const now = Date.now();
+    const diff = now - lastSync;
+    const minutes = Math.floor(diff / (60 * 1000));
+    const hours = Math.floor(diff / (60 * 60 * 1000));
+    const days = Math.floor(diff / (24 * 60 * 60 * 1000));
+
+    if (minutes < 1) {
+      return '刚刚';
+    } else if (minutes < 60) {
+      return `${minutes} 分钟前`;
+    } else if (hours < 24) {
+      return `${hours} 小时前`;
+    } else if (days < 7) {
+      return `${days} 天前`;
+    } else {
+      const date = new Date(lastSync);
+      return date.toLocaleDateString('zh-CN');
+    }
+  },
+
+  /**
+   * 更新同步状态显示
+   */
+  async updateSyncStatusDisplay() {
+    const syncStatusElement = document.getElementById('zentaoSyncStatus');
+    if (!syncStatusElement) return;
+
+    // 使用缓存的值或获取新值
+    const lastSyncTimestamp = this._lastSyncTimestamp !== null
+      ? this._lastSyncTimestamp
+      : await this.getLastSyncTime();
+
+    const formattedTime = this._lastFormattedTime || this.formatRelativeTime(lastSyncTimestamp);
+    this._lastFormattedTime = formattedTime;
+
+    syncStatusElement.textContent = `上次同步: ${formattedTime}`;
+
+    // 检查是否可以同步
+    const now = Date.now();
+    const canSync = lastSyncTimestamp === 0 || (now - lastSyncTimestamp) >= SYNC_INTERVAL;
+    const syncButton = document.getElementById('manualSyncButton');
+
+    if (syncButton) {
+      if (canSync) {
+        syncButton.disabled = false;
+        syncButton.title = '立即从禅道同步数据';
+      } else {
+        const hoursUntilNextSync = Math.ceil((SYNC_INTERVAL - (now - lastSyncTimestamp)) / (60 * 60 * 1000));
+        syncButton.disabled = true;
+        syncButton.title = `还需等待 ${hoursUntilNextSync} 小时后才能再次同步`;
+      }
+    }
+  },
+
+  /**
+   * 格式化相对时间
+   */
+  formatRelativeTime(timestamp) {
+    if (timestamp === 0) return '从未同步';
+
+    const now = Date.now();
+    const diff = now - timestamp;
+    const minutes = Math.floor(diff / (60 * 1000));
+    const hours = Math.floor(diff / (60 * 60 * 1000));
+    const days = Math.floor(diff / (24 * 60 * 60 * 1000));
+
+    if (minutes < 1) return '刚刚';
+    if (minutes < 60) return `${minutes} 分钟前`;
+    if (hours < 24) return `${hours} 小时前`;
+    if (days < 7) return `${days} 天前`;
+    return new Date(timestamp).toLocaleDateString('zh-CN');
+  },
+
+  /**
+   * 手动触发同步
+   */
+  async manualSync() {
+    const syncButton = document.getElementById('manualSyncButton');
+    if (syncButton) {
+      syncButton.disabled = true;
+      syncButton.textContent = '同步中...';
+    }
+
+    try {
+      Toast.info('正在从禅道同步数据...');
+
+      // 通过 background.js 触发同步
+      const response = await chrome.runtime.sendMessage({
+        action: 'manualSyncFromZentao'
+      });
+
+      if (response && response.success) {
+        Toast.success(`同步完成！已同步 ${response.data.tasksSynced} 个任务和 ${response.data.bugsSynced} 个Bug`);
+
+        // 重新加载任务列表
+        await loadTasks();
+
+        // 更新同步状态显示
+        await this.updateSyncStatusDisplay();
+      } else {
+        const reason = response ? response.reason : '未知错误';
+        Toast.error(`同步失败: ${reason}`);
+      }
+    } catch (err) {
+      console.error('[ZentaoSync] 手动同步失败:', err);
+      Toast.error(`同步失败: ${err.message}`);
+    } finally {
+      if (syncButton) {
+        syncButton.disabled = false;
+        syncButton.textContent = '立即同步';
+      }
+
+      // 恢复按钮状态
+      await this.updateSyncStatusDisplay();
+    }
+  },
+
+  /**
+   * 初始化禅道同步状态显示
+   */
+  async init() {
+    // 更新同步状态显示
+    await this.updateSyncStatusDisplay();
+
+    // 绑定手动同步按钮事件
+    const syncButton = document.getElementById('manualSyncButton');
+    if (syncButton) {
+      syncButton.addEventListener('click', () => {
+        this.manualSync();
+      });
+    }
+
+    // 监听存储变化，而不是轮询
+    this._storageListener = (changes, areaName) => {
+      if (areaName === 'local' && changes[STORAGE_KEY_LAST_SYNC]) {
+        this._lastSyncTimestamp = changes[STORAGE_KEY_LAST_SYNC].newValue;
+        this._lastFormattedTime = this.formatRelativeTime(this._lastSyncTimestamp);
+        this.updateSyncStatusDisplay();
+      }
+    };
+    chrome.storage.onChanged.addListener(this._storageListener);
+
+    // 页面卸载时清理监听器
+    window.addEventListener('beforeunload', () => {
+      if (this._storageListener) {
+        chrome.storage.onChanged.removeListener(this._storageListener);
+      }
+    });
+  }
+};
+
+/**
+ * 在 newtab 页面打开时检查并执行禅道同步
+ */
+async function checkAndSyncZentaoOnNewTab() {
+  console.log('[NewTab] ========== newtab 页面打开，检查禅道同步 ==========');
+
+  try {
+    // 异步调用 background.js 检查同步
+    const response = await chrome.runtime.sendMessage({
+      action: 'checkAndSyncZentao',
+      force: false  // 不强制，遵守24小时限制
+    });
+
+    if (response && response.success) {
+      console.log('[NewTab] ✓ 禅道同步完成');
+      // 重新加载任务列表以显示同步的数据
+      await loadTasks();
+    } else if (response && response.reason === 'too_soon') {
+      console.log('[NewTab] 距离上次同步不足24小时，跳过自动同步');
+      console.log('[NewTab] 还需等待:', response.hoursUntilNextSync, '小时');
+    } else if (response && response.reason === 'zentao_not_enabled') {
+      console.log('[NewTab] 禅道未启用，跳过同步');
+    }
+  } catch (err) {
+    console.error('[NewTab] 禅道同步检查失败:', err);
+  }
+}
+
 // ==================== Toast 通知系统 ====================
 const Toast = {
   container: null,
@@ -626,6 +834,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     syncUI.init();
     window.syncUI = syncUI; // 保存到全局以便后续使用
   }
+
+  // 初始化禅道同步状态显示
+  ZentaoSync.init().catch(err => {
+    console.error('[ZentaoSync] 初始化失败:', err);
+  });
+
+  // 检查并执行禅道同步（在 newtab 页面打开时）
+  checkAndSyncZentaoOnNewTab().catch(err => {
+    console.error('[NewTab] 禅道同步检查失败:', err);
+  });
 
   // 绑定事件
   bindEvents();

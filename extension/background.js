@@ -1,6 +1,91 @@
 // API配置
 const API_BASE_URL = 'http://localhost:3721';
 
+// 同步频率控制常量
+const SYNC_INTERVAL = 24 * 60 * 60 * 1000; // 24小时
+const STORAGE_KEY_LAST_SYNC = 'zentao_last_sync_time';
+
+/**
+ * 获取上次同步时间
+ * @returns {Promise<number>} 上次同步的时间戳（毫秒）
+ */
+async function getLastSyncTime() {
+  const result = await chrome.storage.local.get([STORAGE_KEY_LAST_SYNC]);
+  return result[STORAGE_KEY_LAST_SYNC] || 0;
+}
+
+/**
+ * 更新同步时间戳
+ */
+async function updateLastSyncTime() {
+  await chrome.storage.local.set({
+    [STORAGE_KEY_LAST_SYNC]: Date.now()
+  });
+  console.log('[Background] 同步时间戳已更新');
+}
+
+/**
+ * 获取禅道配置
+ * @returns {Promise<Object>} 禅道配置
+ */
+async function fetchConfig() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/config`);
+    const data = await response.json();
+    return data.data || {};
+  } catch (err) {
+    console.error('[Background] 获取配置失败:', err);
+    return {};
+  }
+}
+
+/**
+ * 检查并执行禅道同步（由 newtab 页面调用）
+ * @param {boolean} force - 是否强制同步（跳过时间检查）
+ */
+async function checkAndSyncZentao(force = false) {
+  console.log('[Background] ========== newtab 页面请求检查禅道同步 ==========');
+  console.log('[Background] 强制同步:', force);
+
+  try {
+    // 1. 检查禅道配置
+    const config = await fetchConfig();
+    if (!config.zentao?.enabled) {
+      console.log('[Background] 禅道未启用，跳过同步');
+      return { success: false, reason: 'zentao_not_enabled' };
+    }
+
+    // 2. 检查上次同步时间（除非强制同步）
+    if (!force) {
+      const lastSyncTime = await getLastSyncTime();
+      const now = Date.now();
+      const timeSinceLastSync = now - lastSyncTime;
+
+      if (lastSyncTime > 0 && timeSinceLastSync < SYNC_INTERVAL) {
+        const hoursUntilNextSync = Math.ceil((SYNC_INTERVAL - timeSinceLastSync) / (60 * 60 * 1000));
+        console.log(`[Background] 距离上次同步不足24小时，还需等待 ${hoursUntilNextSync} 小时`);
+        console.log('[Background] 上次同步时间:', new Date(lastSyncTime).toLocaleString('zh-CN'));
+        return { success: false, reason: 'too_soon', hoursUntilNextSync };
+      }
+
+      if (lastSyncTime === 0) {
+        console.log('[Background] 首次同步，开始从禅道同步数据...');
+      } else {
+        console.log('[Background] 距离上次同步已超过24小时，开始同步...');
+        console.log('[Background] 上次同步时间:', new Date(lastSyncTime).toLocaleString('zh-CN'));
+      }
+    } else {
+      console.log('[Background] 强制同步模式，跳过时间检查');
+    }
+
+    // 3. 执行同步
+    return await syncFromZentaoInBackground(config);
+  } catch (err) {
+    console.error('[Background] 检查同步条件失败:', err);
+    return { success: false, reason: err.message };
+  }
+}
+
 // 创建右键菜单
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
@@ -2841,6 +2926,13 @@ async function deleteBugInZentao(params) {
 
 // 在消息监听器中添加对应的 action 处理
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'checkAndSyncZentao') {
+    checkAndSyncZentao(request.force)
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, reason: err.message }));
+    return true;
+  }
+
   if (request.action === 'activateBugInZentao') {
     activateBugInZentao(request)
       .then(sendResponse)
@@ -2861,5 +2953,721 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch(err => sendResponse({ success: false, reason: err.message }));
     return true;
   }
+
+  if (request.action === 'getLastSyncTime') {
+    getLastSyncTime().then(sendResponse);
+    return true;
+  }
+
+  if (request.action === 'manualSyncFromZentao') {
+    checkAndSyncZentao(true)  // 强制同步
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, reason: err.message }));
+    return true;
+  }
 });
+
+/**
+ * 从禅道同步数据到本地（后台任务）
+ * 正确流程：使用同一个标签页依次访问页面获取数据
+ * @param {Object} config - 禅道配置（可选，如果不提供则自动获取）
+ */
+async function syncFromZentaoInBackground(config) {
+  let zentaoTab = null;
+
+  try {
+    console.log('[Background] ========== 开始从禅道同步数据 ==========');
+
+    // 如果没有提供配置，则获取配置
+    if (!config) {
+      config = await fetchConfig();
+    }
+
+    if (!config.zentao?.enabled) {
+      console.log('[Background] 禅道未启用，取消同步');
+      return { success: false, reason: 'zentao_not_enabled' };
+    }
+
+    const zentaoConfig = config.zentao;
+    const baseUrl = zentaoConfig.url;
+
+    console.log('[Background] 禅道配置:', { baseUrl });
+
+    // 1. 先登录禅道获取 cookie
+    console.log('[Background] ========== 步骤1: 登录禅道 ==========');
+    const loginResult = await fetch(`${API_BASE_URL}/api/zentao/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    }).then(r => r.json());
+
+    if (!loginResult.success) {
+      throw new Error(loginResult.message || '登录禅道失败');
+    }
+
+    const cookies = loginResult.data;
+    const cookieString = Object.entries(cookies)
+      .map(([name, value]) => `${name}=${value}`)
+      .join('; ');
+
+    console.log('[Background] ✓ 登录成功');
+
+    // 2. 检查是否已有禅道标签页
+    console.log('[Background] ========== 步骤2: 检查禅道标签页 ==========');
+    const tabs = await chrome.tabs.query({ url: baseUrl + '/zentao/*' });
+    zentaoTab = tabs.find(tab => tab.url && tab.url.includes('/zentao/'));
+
+    if (zentaoTab) {
+      console.log('[Background] ✓ 找到现有禅道标签页:', zentaoTab.id);
+      console.log('[Background] 当前页面:', zentaoTab.url);
+
+      // 检查当前是否已经在我的地盘页面
+      if (!zentaoTab.url.includes('/zentao/my.html')) {
+        console.log('[Background] 当前不在我的地盘页面，导航到 my.html...');
+        await chrome.tabs.update(zentaoTab.id, {
+          url: `${baseUrl}/zentao/my.html`,
+          active: false
+        });
+        console.log('[Background] ✓ 已导航到我的地盘页面');
+      } else {
+        console.log('[Background] 当前已经在我的地盘页面');
+      }
+    } else {
+      console.log('[Background] 未找到禅道标签页，创建新标签页...');
+      // 创建新标签页，先打开我的地盘页面
+      zentaoTab = await chrome.tabs.create({
+        url: `${baseUrl}/zentao/my.html`,
+        active: false
+      });
+      console.log('[Background] ✓ 创建新标签页:', zentaoTab.id);
+    }
+
+    // 等待页面加载完成
+    await waitForTabLoad(zentaoTab.id);
+    console.log('[Background] ✓ 页面加载完成');
+
+    // 额外等待确保JavaScript执行完成
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // 3. 从我的地盘页面获取任务和Bug数量
+    console.log('[Background] ========== 步骤3: 获取任务和Bug数量 ==========');
+    const countResults = await chrome.scripting.executeScript({
+      target: { tabId: zentaoTab.id },
+      func: () => {
+        // 查找 iframe
+        const iframe = document.querySelector('#appIframe-my');
+        if (!iframe) {
+          console.log('[Content] 未找到 iframe');
+          return { taskCount: 0, bugCount: 0 };
+        }
+
+        // 从 iframe 内容中提取
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+        if (!iframeDoc) {
+          console.log('[Content] 无法访问 iframe document');
+          return { taskCount: 0, bugCount: 0 };
+        }
+
+        // 查找任务数量 - 尝试多种选择器
+        let taskCount = 0;
+        const taskLink1 = iframeDoc.querySelector('a[href="/zentao/my-work-task.html"]');
+        const taskLink2 = iframeDoc.querySelector('a[href*="my-work-task"]');
+        const taskLink3 = iframeDoc.querySelector('.text-primary[href*="task"]');
+        // 新增：尝试查找所有包含"task"的链接，且文本是数字
+        const allTaskLinks = Array.from(iframeDoc.querySelectorAll('a[href*="task"], a[href*="Task"]'));
+        const taskLinkWithNumber = allTaskLinks.find(link => {
+          const text = link.textContent.trim();
+          return !isNaN(text) && parseInt(text) > 0;
+        });
+
+        console.log('[Content] 任务链接选择器测试:');
+        console.log('  - a[href="/zentao/my-work-task.html"]:', taskLink1);
+        console.log('  - a[href*="my-work-task"]:', taskLink2);
+        console.log('  - .text-primary[href*="task"]:', taskLink3);
+        console.log('  - 包含数字的task链接:', taskLinkWithNumber);
+
+        if (taskLink1) {
+          taskCount = parseInt(taskLink1.textContent) || 0;
+        } else if (taskLink2) {
+          taskCount = parseInt(taskLink2.textContent) || 0;
+        } else if (taskLink3) {
+          taskCount = parseInt(taskLink3.textContent) || 0;
+        } else if (taskLinkWithNumber) {
+          taskCount = parseInt(taskLinkWithNumber.textContent) || 0;
+        }
+
+        // 查找Bug数量 - 尝试多种选择器
+        let bugCount = 0;
+        const bugLink1 = iframeDoc.querySelector('a[href="/zentao/my-work-bug.html"]');
+        const bugLink2 = iframeDoc.querySelector('a[href*="my-work-bug"]');
+        const bugLink3 = iframeDoc.querySelector('.text-primary[href*="bug"]');
+
+        console.log('[Content] Bug链接选择器测试:');
+        console.log('  - a[href="/zentao/my-work-bug.html"]:', bugLink1);
+        console.log('  - a[href*="my-work-bug"]:', bugLink2);
+        console.log('  - .text-primary[href*="bug"]:', bugLink3);
+
+        if (bugLink1) {
+          bugCount = parseInt(bugLink1.textContent) || 0;
+        } else if (bugLink2) {
+          bugCount = parseInt(bugLink2.textContent) || 0;
+        } else if (bugLink3) {
+          bugCount = parseInt(bugLink3.textContent) || 0;
+        }
+
+        // 如果还是找不到，尝试查找所有带数字的链接
+        if (taskCount === 0 || bugCount === 0) {
+          console.log('[Content] 使用通用方法查找所有带数字的链接:');
+          const allLinks = Array.from(iframeDoc.querySelectorAll('a'));
+          const numericLinks = allLinks.filter(link => {
+            const text = link.textContent.trim();
+            return text && !isNaN(text) && parseInt(text) > 0;
+          });
+
+          console.log('[Content] 找到', numericLinks.length, '个带数字的链接:');
+          numericLinks.forEach(link => {
+            const text = link.textContent.trim();
+            const href = link.getAttribute('href');
+            const className = link.className;
+            console.log(`  - href="${href}" class="${className}" text="${text}"`);
+
+            // 根据href或class判断是任务还是bug
+            if (taskCount === 0 && (href?.includes('task') || href?.includes('Task'))) {
+              taskCount = parseInt(text);
+              console.log('    → 识别为任务链接');
+            } else if (bugCount === 0 && (href?.includes('bug') || href?.includes('Bug'))) {
+              bugCount = parseInt(text);
+              console.log('    → 识别为Bug链接');
+            }
+          });
+        }
+
+        console.log('[Content] 最终结果 - 任务:', taskCount, 'Bug:', bugCount);
+
+        return { taskCount, bugCount };
+      }
+    });
+
+    const { taskCount, bugCount } = countResults[0]?.result || { taskCount: 0, bugCount: 0 };
+    console.log('[Background] ✓ 禅道数据统计 - 任务:', taskCount, 'Bug:', bugCount);
+
+    // 4. 跳转到任务列表页面并获取数据
+    console.log('[Background] ========== 步骤4: 获取任务列表 ==========');
+    let zentaoTasks = [];
+
+    if (taskCount > 0) {
+      const taskUrl = `${baseUrl}/zentao/my-work-task-assignedTo-myQueryID-status_asc-${taskCount}-500-1.html`;
+      console.log('[Background] 导航到任务列表:', taskUrl);
+
+      await chrome.tabs.update(zentaoTab.id, { url: taskUrl });
+      await waitForTabLoad(zentaoTab.id);
+      await new Promise(resolve => setTimeout(resolve, 5000));  // 等待AJAX加载（增加到5秒）
+
+      const taskResults = await chrome.scripting.executeScript({
+        target: { tabId: zentaoTab.id },
+        func: () => {
+          const tasks = [];
+
+          // 首先尝试直接查找 #myTaskList
+          let tbody = document.querySelector('#myTaskList');
+
+          // 如果没找到，尝试在 iframe 中查找
+          if (!tbody) {
+            const iframe = document.querySelector('#appIframe-my');
+            if (iframe) {
+              console.log('[Content] 在iframe中查找 #myTaskList');
+              const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+              if (iframeDoc) {
+                tbody = iframeDoc.querySelector('#myTaskList');
+              }
+            }
+          }
+
+          if (!tbody) {
+            console.log('[Content] 未找到 #myTaskList（主页面和iframe都没找到）');
+            return tasks;
+          }
+
+          const rows = tbody.querySelectorAll('tr[data-status="wait"], tr[data-status="doing"]');
+          console.log('[Content] 找到任务行数:', rows.length);
+
+          // 如果没找到，尝试查看所有行的状态
+          if (rows.length === 0) {
+            console.log('[Content] 未找到wait或doing状态的任务，检查所有行:');
+            const allRows = tbody.querySelectorAll('tr');
+            console.log('[Content] 总行数:', allRows.length);
+
+            // 列出前10行的状态
+            Array.from(allRows).slice(0, 10).forEach((row, i) => {
+              console.log(`[Content] 行${i}: data-status="${row.dataset.status}", data-id="${row.dataset.id}"`);
+            });
+          }
+
+          rows.forEach(row => {
+            try {
+              const taskId = row.dataset.id;
+              const status = row.dataset.status;
+              const estimate = row.dataset.estimate || '0';
+              const consumed = row.dataset.consumed || '0';
+
+              const titleLink = row.querySelector('.c-name a');
+              const title = titleLink?.textContent?.trim() || '';
+
+              const priSpan = row.querySelector('.c-pri .label-pri');
+              const priority = priSpan ? parseInt(priSpan.textContent) : 3;
+
+              const projectLinks = row.querySelectorAll('.c-project a');
+              const projectName = projectLinks[0]?.getAttribute('title') || '';
+              const projectHref = projectLinks[0]?.getAttribute('href') || '';
+              const projectIdMatch = projectHref.match(/project-index-(\d+)\.html/);
+              const projectId = projectIdMatch ? parseInt(projectIdMatch[1]) : null;
+
+              const executionName = projectLinks[1]?.getAttribute('title') || '';
+              const executionHref = projectLinks[1]?.getAttribute('href') || '';
+              const executionIdMatch = executionHref.match(/execution-task-(\d+)\.html/);
+              const executionId = executionIdMatch ? parseInt(executionIdMatch[1]) : null;
+
+              const openedBy = row.querySelector('.c-user')?.textContent?.trim() || '';
+
+              const estimateNum = parseFloat(estimate) || 0;
+              const consumedNum = parseFloat(consumed) || 0;
+
+              tasks.push({
+                zentaoId: parseInt(taskId),
+                title,
+                status: status === 'wait' ? 'todo' : 'in_progress',
+                priority,
+                projectId,
+                projectName,
+                executionId,
+                executionName,
+                openedBy,
+                estimate: estimateNum,
+                consumed: consumedNum,
+                progress: estimateNum > 0 ? Math.round((consumedNum / estimateNum) * 100) : 0
+              });
+            } catch (err) {
+              console.error('[Content] 解析任务失败:', err);
+            }
+          });
+
+          return tasks;
+        }
+      });
+
+      zentaoTasks = taskResults[0]?.result || [];
+      console.log('[Background] ✓ 解析到', zentaoTasks.length, '个任务');
+    } else {
+      console.log('[Background] 任务数量为0，跳过任务列表');
+    }
+
+    // 5. 跳转到Bug列表页面并获取数据
+    console.log('[Background] ========== 步骤5: 获取Bug列表 ==========');
+    let zentaoBugs = [];
+
+    if (bugCount > 0) {
+      const bugUrl = `${baseUrl}/zentao/my-work-bug-assignedTo-0-id_desc-${bugCount}-500-1.html`;
+      console.log('[Background] 导航到Bug列表:', bugUrl);
+
+      await chrome.tabs.update(zentaoTab.id, { url: bugUrl });
+      await waitForTabLoad(zentaoTab.id);
+      await new Promise(resolve => setTimeout(resolve, 5000));  // 等待AJAX加载（增加到5秒）
+
+      const bugResults = await chrome.scripting.executeScript({
+        target: { tabId: zentaoTab.id },
+        func: () => {
+          const bugs = [];
+
+          // 首先尝试直接查找 #bugList
+          let table = document.querySelector('#bugList');
+
+          // 如果没找到，尝试在 iframe 中查找
+          if (!table) {
+            const iframe = document.querySelector('#appIframe-my');
+            if (iframe) {
+              console.log('[Content] 在iframe中查找 #bugList');
+              const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+              if (iframeDoc) {
+                table = iframeDoc.querySelector('#bugList');
+              }
+            }
+          }
+
+          if (!table) {
+            console.log('[Content] 未找到 #bugList（主页面和iframe都没找到）');
+            console.log('[Content] 主页面表格数:', document.querySelectorAll('table').length);
+            return bugs;
+          }
+
+          const tbody = table.querySelector('tbody');
+          if (!tbody) {
+            console.log('[Content] 未找到 tbody');
+            return bugs;
+          }
+
+          const rows = tbody.querySelectorAll('tr');
+          console.log('[Content] 找到Bug行数:', rows.length);
+
+          rows.forEach(row => {
+            try {
+              const idInput = row.querySelector('input[name="bugIDList[]"]');
+              if (!idInput) return;
+
+              const zentaoId = parseInt(idInput.value);
+
+              const titleLink = row.querySelector('.c-id + td.text-left a, td.text-left.nobr a');
+              const title = titleLink?.getAttribute('title') || titleLink?.textContent?.trim() || '';
+
+              const severitySpan = row.querySelector('.c-severity .label-severity');
+              const severity = severitySpan ? parseInt(severitySpan.getAttribute('data-severity')) : 3;
+
+              const priSpan = row.querySelector('.c-pri .label-pri');
+              const priority = priSpan ? parseInt(priSpan.getAttribute('title')) : 3;
+
+              const typeCell = row.querySelector('.c-type');
+              const bugType = typeCell?.textContent?.trim() || 'codeerror';
+
+              const productLink = row.querySelector('.c-product a');
+              const productName = productLink?.getAttribute('title') || '';
+
+              const openedBy = row.querySelector('.c-user')?.textContent?.trim() || '';
+
+              const confirmSpan = row.querySelector('.c-confirmed span, .c-confirm span');
+              const confirmed = confirmSpan?.classList.contains('confirmed');
+
+              const userCells = row.querySelectorAll('.c-user');
+              const resolvedBy = userCells[1]?.textContent?.trim() || '';
+
+              const resolutionCell = row.querySelector('.c-resolution');
+              const resolution = resolutionCell?.textContent?.trim() || '';
+
+              let status = 'unconfirmed';
+              if (resolvedBy) {
+                status = 'resolved';
+              } else if (confirmed) {
+                status = 'activated';
+              }
+
+              bugs.push({
+                zentaoId,
+                title,
+                status,
+                severity,
+                priority,
+                bugType,
+                productName,
+                openedBy,
+                resolvedBy,
+                resolution,
+                confirmed
+              });
+            } catch (err) {
+              console.error('[Content] 解析Bug失败:', err);
+            }
+          });
+
+          return bugs;
+        }
+      });
+
+      zentaoBugs = bugResults[0]?.result || [];
+      console.log('[Background] ✓ 解析到', zentaoBugs.length, '个Bug');
+    } else {
+      console.log('[Background] Bug数量为0，跳过Bug列表');
+    }
+
+    // 6. 发送到后端API保存
+    console.log('[Background] ========== 步骤6: 保存到本地数据库 ==========');
+    const [tasksResult, bugsResult] = await Promise.all([
+      fetch(`${API_BASE_URL}/api/zentao/sync-tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tasks: zentaoTasks })
+      }).then(r => r.json()),
+      fetch(`${API_BASE_URL}/api/zentao/sync-bugs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bugs: zentaoBugs })
+      }).then(r => r.json())
+    ]);
+
+    console.log('[Background] ✓ 同步结果 - 任务:', tasksResult, 'Bug:', bugsResult);
+
+    // 7. 更新同步时间戳（只在成功时更新）
+    console.log('[Background] ========== 步骤7: 更新同步时间戳 ==========');
+    await updateLastSyncTime();
+    console.log('[Background] ✓ 同步时间戳已更新');
+
+    // 8. 显示通知
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: '工作助手 - 禅道同步',
+      message: `已从禅道同步 ${zentaoTasks.length} 个任务和 ${zentaoBugs.length} 个Bug`
+    });
+
+    console.log('[Background] ========== ✅ 禅道同步成功完成 ==========');
+
+    return {
+      success: true,
+      data: {
+        tasksSynced: zentaoTasks.length,
+        bugsSynced: zentaoBugs.length,
+        tasksResult,
+        bugsResult
+      }
+    };
+  } catch (err) {
+    console.error('[Background] ========== ❌ 禅道同步失败 ==========');
+    console.error('[Background] 错误详情:', err.message);
+    console.error('[Background] 错误堆栈:', err.stack);
+    console.log('[Background] 提示: 由于同步失败，未更新同步时间戳，可以立即重试');
+
+    // 显示错误通知
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: '工作助手 - 禅道同步失败',
+      message: `同步失败: ${err.message}，请检查网络或禅道配置`,
+      requireInteraction: true
+    });
+
+    return { success: false, reason: err.message };
+  } finally {
+    // 清理：不要关闭用户自己的禅道标签页
+    // 只关闭我们创建的临时标签页（如果用户原本没有禅道标签页）
+    // 这里暂时不关闭，让用户自己决定
+  }
+}
+
+/**
+ * 解析禅道我的地盘页面，获取任务和Bug数量
+ * @param {string} html - 页面HTML
+ * @returns {Object} { taskCount, bugCount }
+ */
+function parseMyDashboard(html) {
+  // 使用正则表达式提取
+  const taskMatch = html.match(/<a[^>]*href="\/zentao\/my-work-task\.html"[^>]*class="text-primary"[^>]*>(\d+)<\/a>/);
+  const bugMatch = html.match(/<a[^>]*href="\/zentao\/my-work-bug\.html"[^>]*class="text-primary"[^>]*>(\d+)<\/a>/);
+
+  return {
+    taskCount: taskMatch ? parseInt(taskMatch[1]) : 0,
+    bugCount: bugMatch ? parseInt(bugMatch[1]) : 0
+  };
+}
+
+/**
+ * 解析禅道任务列表页面（使用正则表达式，Service Worker 兼容）
+ * @param {string} html - 页面HTML
+ * @returns {Array} 任务列表
+ */
+function parseTaskList(html) {
+  const tasks = [];
+
+  // 找到 tbody 开始和结束位置
+  const tbodyStartMatch = html.match(/<tbody[^>]*id="myTaskList"[^>]*>/i);
+  if (!tbodyStartMatch) {
+    console.warn('[Background] 未找到 #myTaskList tbody');
+    return [];
+  }
+
+  const tbodyStartIndex = html.indexOf(tbodyStartMatch[0]);
+  const tbodyEndIndex = html.indexOf('</tbody>', tbodyStartIndex);
+  if (tbodyEndIndex === -1) return [];
+
+  const tbodyContent = html.substring(tbodyStartIndex, tbodyEndIndex);
+
+  // 匹配所有 data-status="wait" 或 data-status="doing" 的 tr 标签
+  const rowPattern = /<tr[^>]*\sdata-status="(wait|doing)"[^>]*>([\s\S]*?)<\/tr>/gi;
+  let match;
+
+  while ((match = rowPattern.exec(tbodyContent)) !== null) {
+    try {
+      const rowHtml = match[0];
+      const status = match[1];
+
+      // 提取 data-id
+      const idMatch = rowHtml.match(/data-id="(\d+)"/);
+      const zentaoId = idMatch ? parseInt(idMatch[1]) : null;
+      if (!zentaoId) continue;
+
+      // 提取 data-estimate, data-consumed, data-left
+      const estimateMatch = rowHtml.match(/data-estimate="(\d+(?:\.\d+)?)"/);
+      const consumedMatch = rowHtml.match(/data-consumed="(\d+(?:\.\d+)?)"/);
+      const leftMatch = rowHtml.match(/data-left="(\d+(?:\.\d+)?)"/);
+      const estimate = estimateMatch ? parseFloat(estimateMatch[1]) : 0;
+      const consumed = consumedMatch ? parseFloat(consumedMatch[1]) : 0;
+      const left = leftMatch ? parseFloat(leftMatch[1]) : 0;
+
+      // 提取任务标题
+      const titleMatch = rowHtml.match(/<td class="c-name[^"]*"[^>]*>\s*<a[^>]*href="[^"]*"[^>]*>([^<]+)<\/a>/);
+      const title = titleMatch ? titleMatch[1].trim() : '';
+
+      // 提取优先级
+      const priMatch = rowHtml.match(/<span class="label-pri[^"]*"[^>]*>(\d+)<\/span>/);
+      const priority = priMatch ? parseInt(priMatch[1]) : 3;
+
+      // 提取项目链接（第一个 c-project a 标签）
+      const projectMatch = rowHtml.match(/<td class="c-project"[^>]*>\s*<a[^>]*href="\/zentao\/project-index-(\d+)\.html"[^>]*title="([^"]+)"/);
+      const projectId = projectMatch ? parseInt(projectMatch[1]) : null;
+      const projectName = projectMatch ? projectMatch[2] : '';
+
+      // 提取执行链接（第二个 c-project a 标签）
+      const executionMatch = rowHtml.match(/<td class="c-project"[^>]*>.*?<a[^>]*href="\/zentao\/execution-task-(\d+)\.html"[^>]*title="([^"]+)"/);
+      const executionId = executionMatch ? parseInt(executionMatch[1]) : null;
+      const executionName = executionMatch ? executionMatch[2] : '';
+
+      // 提取创建人（第一个 c-user）
+      const openedByMatch = rowHtml.match(/<td class="c-user"[^>]*>([^<]+)<\/td>/);
+      const openedBy = openedByMatch ? openedByMatch[1].trim() : '';
+
+      // 提取截止日期
+      const deadlineMatch = rowHtml.match(/<td class="text-center delayed"[^>]*>\s*<span>([^<]+)<\/span>/);
+      const deadline = deadlineMatch ? deadlineMatch[1].trim() : '';
+
+      tasks.push({
+        zentaoId,
+        title,
+        status: status === 'wait' ? 'todo' : 'in_progress',
+        priority,
+        projectId,
+        projectName,
+        executionId,
+        executionName,
+        openedBy,
+        estimate,
+        consumed,
+        left,
+        deadline,
+        progress: estimate > 0 ? Math.round((consumed / estimate) * 100) : 0
+      });
+    } catch (err) {
+      console.error('[Background] 解析任务行失败:', err);
+    }
+  }
+
+  return tasks;
+}
+
+/**
+ * 解析禅道Bug列表页面（使用正则表达式，Service Worker 兼容）
+ * @param {string} html - 页面HTML
+ * @returns {Array} Bug列表
+ */
+function parseBugList(html) {
+  const bugs = [];
+
+  // 找到 table 开始和结束位置
+  const tableStartMatch = html.match(/<table[^>]*id="bugList"[^>]*>/i);
+  if (!tableStartMatch) {
+    console.warn('[Background] 未找到 #bugList table');
+    return [];
+  }
+
+  const tableStartIndex = html.indexOf(tableStartMatch[0]);
+  const tableEndIndex = html.indexOf('</table>', tableStartIndex);
+  if (tableEndIndex === -1) return [];
+
+  const tableContent = html.substring(tableStartIndex, tableEndIndex);
+
+  // 匹配所有包含 bugIDList 的 tr 标签
+  const rowPattern = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let match;
+
+  while ((match = rowPattern.exec(tableContent)) !== null) {
+    try {
+      const rowHtml = match[0];
+
+      // 检查是否包含 bugIDList（排除表头）
+      if (!rowHtml.includes('name="bugIDList[]"')) continue;
+
+      // 提取 Bug ID
+      const idMatch = rowHtml.match(/name="bugIDList\[\]"\s*value="(\d+)"/);
+      const zentaoId = idMatch ? parseInt(idMatch[1]) : null;
+      if (!zentaoId) continue;
+
+      // 提取Bug标题
+      const titleMatch = rowHtml.match(/<a[^>]*href="\/zentao\/bug-view-\d+\.html"[^>]*>([^<]+)<\/a>/);
+      const title = titleMatch ? titleMatch[1].trim() : '';
+
+      // 提取严重程度
+      const severityMatch = rowHtml.match(/<span class="label-severity"[^>]*data-severity="(\d+)"/);
+      const severity = severityMatch ? parseInt(severityMatch[1]) : 3;
+
+      // 提取优先级
+      const priMatch = rowHtml.match(/<span class="label-pri label-pri-\d+"[^>]*title="(\d+)"/);
+      const priority = priMatch ? parseInt(priMatch[1]) : 3;
+
+      // 提取Bug类型
+      const typeMatch = rowHtml.match(/<td class="c-type"[^>]*>([^<]+)<\/td>/);
+      const bugType = typeMatch ? typeMatch[1].trim() : 'codeerror';
+
+      // 提取产品名称
+      const productMatch = rowHtml.match(/<td class="c-product"[^>]*>\s*<a[^>]*title="([^"]+)"/);
+      const productName = productMatch ? productMatch[1] : '';
+
+      // 提取创建者
+      const openedByMatch = rowHtml.match(/<td class="c-user"[^>]*>([^<]+)<\/td>/);
+      const openedBy = openedByMatch ? openedByMatch[1].trim() : '';
+
+      // 检查确认状态
+      const confirmed = rowHtml.includes('<span class="confirmed"') ||
+                       rowHtml.includes('title="已确认"');
+
+      // 提取解决者（第二个 c-user）
+      const userMatches = rowHtml.match(/<td class="c-user"[^>]*>([^<]+)<\/td>/g);
+      const resolvedBy = userMatches && userMatches.length > 1 ? userMatches[1].replace(/<[^>]+>/g, '').trim() : '';
+
+      // 提取解决方案
+      const resolutionMatch = rowHtml.match(/<td class="c-resolution"[^>]*>([^<]*)<\/td>/);
+      const resolution = resolutionMatch ? resolutionMatch[1].trim() : '';
+
+      // 判断Bug状态
+      let status = 'unconfirmed';
+      if (resolvedBy) {
+        status = 'resolved';
+      } else if (confirmed) {
+        status = 'activated';
+      }
+
+      bugs.push({
+        zentaoId,
+        title,
+        status,
+        severity,
+        priority,
+        bugType,
+        productName,
+        openedBy,
+        resolvedBy,
+        resolution,
+        confirmed
+      });
+    } catch (err) {
+      console.error('[Background] 解析Bug行失败:', err);
+    }
+  }
+
+  return bugs;
+}
+
+async function waitForTabLoad(tabId) {
+  return new Promise((resolve) => {
+    const listener = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(listener);
+        // 额外等待确保DOM渲染完成
+        setTimeout(resolve, 1000);
+      }
+    };
+
+    chrome.tabs.onUpdated.addListener(listener);
+
+    // 超时保护（30秒）
+    setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, 30000);
+  });
+}
 

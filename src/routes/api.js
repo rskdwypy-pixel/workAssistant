@@ -568,6 +568,12 @@ router.get('/config', async (req, res) => {
           hasUrl: !!cfg.webhook.url,
           type: cfg.webhook.type || 'generic',
           urlPrefix: cfg.webhook.url ? cfg.webhook.url.substring(0, 30) + '...' : '(空)'
+        },
+        zentao: {
+          enabled: cfg.zentao.enabled,
+          url: cfg.zentao.url,
+          username: cfg.zentao.username,
+          hasPassword: !!cfg.zentao.password
         }
       }
     });
@@ -1570,6 +1576,129 @@ router.post('/executions/favorites/remove', async (req, res) => {
     res.json({ success: true, message: '已从收藏移除' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==================== 禅道双向同步接口 ====================
+
+/**
+ * POST /api/zentao/login - 登录禅道获取cookie
+ */
+router.post('/zentao/login', async (req, res) => {
+  try {
+    // 从后端配置读取，而不是从请求参数读取
+    const { config } = await import('../config.js');
+
+    if (!config.zentao.enabled) {
+      return res.status(400).json({
+        success: false,
+        message: '禅道未启用'
+      });
+    }
+
+    if (!config.zentao.url || !config.zentao.username || !config.zentao.password) {
+      return res.status(400).json({
+        success: false,
+        message: '禅道配置不完整'
+      });
+    }
+
+    const { loginZentao } = await import('../services/zentaoService.js');
+    const cookies = await loginZentao(
+      config.zentao.url,
+      config.zentao.username,
+      config.zentao.password
+    );
+
+    res.json({
+      success: true,
+      data: cookies,
+      message: '登录成功'
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+});
+
+/**
+ * POST /api/zentao/sync-tasks - 从禅道同步任务到本地
+ */
+router.post('/zentao/sync-tasks', async (req, res) => {
+  try {
+    const { tasks } = req.body;
+
+    if (!Array.isArray(tasks)) {
+      return res.status(400).json({
+        success: false,
+        message: 'tasks 必须是数组'
+      });
+    }
+
+    const { importZentaoTasks } = await import('../services/taskManager.js');
+    const result = await importZentaoTasks(tasks);
+
+    res.json({
+      success: true,
+      data: result,
+      message: `任务同步完成: 新增 ${result.added} 个，更新 ${result.updated} 个，跳过 ${result.skipped} 个`
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+});
+
+/**
+ * POST /api/zentao/sync-bugs - 从禅道同步Bug到本地
+ */
+router.post('/zentao/sync-bugs', async (req, res) => {
+  try {
+    const { bugs } = req.body;
+
+    if (!Array.isArray(bugs)) {
+      return res.status(400).json({
+        success: false,
+        message: 'bugs 必须是数组'
+      });
+    }
+
+    const { importZentaoBugs } = await import('../services/bugManager.js');
+    const result = await importZentaoBugs(bugs);
+
+    res.json({
+      success: true,
+      data: result,
+      message: `Bug同步完成: 新增 ${result.added} 个，更新 ${result.updated} 个，跳过 ${result.skipped} 个`
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+});
+
+/**
+ * POST /api/zentao/sync-all - 同步所有数据（手动触发）
+ */
+router.post('/zentao/sync-all', async (req, res) => {
+  try {
+    // 这个接口实际上由浏览器扩展的 background.js 处理
+    // 这里只是提供一个统一的后端接口入口
+    res.json({
+      success: false,
+      message: '请使用浏览器扩展的同步功能，或通过 chrome.runtime.sendMessage 触发'
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
   }
 });
 

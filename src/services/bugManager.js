@@ -370,6 +370,102 @@ async function createBugWithSync(bugData) {
   return { localBug, syncResult };
 }
 
+/**
+ * 批量导入禅道Bug（去重）
+ * @param {Array} zentaoBugs - 从禅道获取的Bug列表
+ * @returns {Promise<Object>} { added, updated, skipped }
+ */
+async function importZentaoBugs(zentaoBugs) {
+  console.log('[BugManager] ========== 批量导入禅道Bug ==========');
+  console.log('[BugManager] 导入Bug数量:', zentaoBugs.length);
+
+  const data = await readTasks();
+  const tasks = data.tasks || [];
+
+  // Build a Map for O(1) lookups instead of O(n²) find() in loop
+  const existingBugsMap = new Map();
+  tasks.forEach(t => {
+    if (t.type === 'bug' && t.zentaoId) {
+      existingBugsMap.set(t.zentaoId, t);
+    }
+  });
+
+  let added = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  for (const zentaoBug of zentaoBugs) {
+    try {
+      // O(1) lookup instead of O(n) find()
+      const existingBug = existingBugsMap.get(zentaoBug.zentaoId);
+
+      if (existingBug) {
+        // 更新现有Bug
+        console.log('[BugManager] 更新现有Bug:', zentaoBug.zentaoId, zentaoBug.title);
+
+        Object.assign(existingBug, {
+          title: zentaoBug.title,
+          content: zentaoBug.title,
+          status: zentaoBug.status,
+          severity: zentaoBug.severity,
+          priority: zentaoBug.priority,
+          bugType: zentaoBug.bugType,
+          productName: zentaoBug.productName || existingBug.productName,
+          openedBy: zentaoBug.openedBy || existingBug.openedBy,
+          resolvedBy: zentaoBug.resolvedBy || existingBug.resolvedBy,
+          resolution: zentaoBug.resolution || existingBug.resolution,
+          confirmed: zentaoBug.confirmed,
+          updatedAt: new Date().toISOString()
+        });
+
+        updated++;
+      } else {
+        // 创建新Bug
+        console.log('[BugManager] 创建新Bug:', zentaoBug.zentaoId, zentaoBug.title);
+
+        const newBug = {
+          id: uuidv4(),
+          type: 'bug',
+          title: zentaoBug.title,
+          content: zentaoBug.title,
+          status: zentaoBug.status,
+          severity: zentaoBug.severity,
+          priority: zentaoBug.priority,
+          bugType: zentaoBug.bugType,
+          productName: zentaoBug.productName || '',
+          openedBy: zentaoBug.openedBy || '',
+          resolvedBy: zentaoBug.resolvedBy || '',
+          resolution: zentaoBug.resolution || '',
+          confirmed: zentaoBug.confirmed,
+          assignedTo: '',
+          assignedToList: [],
+          cc: [],
+          comments: [],
+          zentaoId: zentaoBug.zentaoId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          progress: 0,
+          consumedTime: 0
+        };
+
+        tasks.unshift(newBug);
+        added++;
+      }
+    } catch (err) {
+      console.error('[BugManager] 导入Bug失败:', zentaoBug, err);
+      skipped++;
+    }
+  }
+
+  // 保存到文件
+  await writeTasks({ tasks });
+
+  console.log('[BugManager] ========== 导入完成 ==========');
+  console.log('[BugManager] 新增:', added, '更新:', updated, '跳过:', skipped);
+
+  return { added, updated, skipped };
+}
+
 export {
   createBug,
   createBugWithSync,
@@ -382,5 +478,6 @@ export {
   taskStatusToBugStatus,
   migrateBugData,
   createZentaoBug,
-  updateZentaoBugStatus
+  updateZentaoBugStatus,
+  importZentaoBugs
 };
