@@ -825,13 +825,17 @@ async function getExecutionProductId(params) {
             const allLinks = iframeDoc.querySelectorAll('a[href*="bug-create"]');
             console.log('[Get ProductID] 在 iframe 中找到', allLinks.length, '个 bug-create 链接');
 
+            // 构建动态正则表达式
+            const regexPattern = new RegExp(`/zentao/bug-create-(\\d+)-0-executionID=${executionId}\\.html`, 'i');
+            console.log('[Get ProductID] 使用正则:', regexPattern);
+
             let productId = null;
             for (const link of allLinks) {
               const href = link.getAttribute('href');
               console.log('[Get ProductID] 检查链接:', href);
 
               // 匹配格式：/zentao/bug-create-{productID}-0-executionID={executionId}.html
-              const match = href.match(/\/zentao\/bug-create-(\d+)-0-executionID=${executionId}\.html/i);
+              const match = href.match(regexPattern);
               if (match) {
                 productId = match[1];
                 console.log('[Get ProductID] ✓ 找到匹配的链接, productID:', productId);
