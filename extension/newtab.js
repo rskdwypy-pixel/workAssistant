@@ -6500,22 +6500,8 @@ const BugManager = {
     const severityClass = `bug-severity-${bug.severity || 3}`;
     const severityText = ['', '致命', '严重', '一般', '提示'][bug.severity || 3];
 
-    // 获取用户列表用于显示名称，如果为空则尝试加载
-    let users = ZentaoBrowserClient.getUsers();
-    if (!users || Object.keys(users).length === 0) {
-      console.warn('[BugManager] 用户列表为空，尝试从缓存加载');
-      // 尝试从 localStorage 加载
-      try {
-        const cachedUsers = localStorage.getItem('zentao_users');
-        if (cachedUsers) {
-          users = JSON.parse(cachedUsers);
-          console.log('[BugManager] 从缓存加载用户列表成功:', Object.keys(users).length, '个用户');
-        }
-      } catch (e) {
-        console.warn('[BugManager] 从缓存加载用户列表失败:', e);
-      }
-      if (!users) users = {};
-    }
+    // 获取用户列表用于显示名称
+    const users = ZentaoBrowserClient.getUsers() || {};
 
     // 格式化指派人显示
     let assigneeDisplay = '';
@@ -7755,22 +7741,8 @@ const BugManager = {
       <span style="font-size: 12px; color: var(--text-secondary);">${statusText}</span>
     `;
 
-    // 获取用户列表用于显示名称，如果为空则尝试加载
-    let users = ZentaoBrowserClient.getUsers();
-    if (!users || Object.keys(users).length === 0) {
-      console.warn('[BugManager] 用户列表为空，尝试从缓存加载');
-      // 尝试从 localStorage 加载
-      try {
-        const cachedUsers = localStorage.getItem('zentao_users');
-        if (cachedUsers) {
-          users = JSON.parse(cachedUsers);
-          console.log('[BugManager] 从缓存加载用户列表成功:', Object.keys(users).length, '个用户');
-        }
-      } catch (e) {
-        console.warn('[BugManager] 从缓存加载用户列表失败:', e);
-      }
-      if (!users) users = {};
-    }
+    // 获取用户列表用于显示名称
+    const users = ZentaoBrowserClient.getUsers() || {};
 
     // 格式化指派人
     let assigneeText = '';
