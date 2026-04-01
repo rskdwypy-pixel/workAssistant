@@ -362,6 +362,7 @@ export {
   getBugStats,
   bugToTaskStatus,
   taskStatusToBugStatus,
+  migrateBugData,
   createZentaoBug,
   updateZentaoBugStatus
 };
