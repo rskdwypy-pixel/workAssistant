@@ -7490,6 +7490,11 @@ const BugManager = {
     const bug = this.bugs.find(b => b.id === bugId);
     if (!bug) return;
 
+    console.log('[BugManager] showBugDetail - Bug对象:', bug);
+    console.log('[BugManager] assignedTo:', bug.assignedTo);
+    console.log('[BugManager] cc:', bug.cc);
+    console.log('[BugManager] comment:', bug.comment);
+
     const modal = document.getElementById('bugDetailModal');
     const headerInfo = document.getElementById('bugDetailHeaderInfo');
     const content = document.getElementById('bugDetailContent');
@@ -7527,6 +7532,9 @@ const BugManager = {
     if (bug.cc && Array.isArray(bug.cc) && bug.cc.length > 0) {
       ccText = bug.cc.map(cc => users[cc] || cc).join(', ');
     }
+
+    console.log('[BugManager] 格式化后 - assigneeText:', assigneeText);
+    console.log('[BugManager] 格式化后 - ccText:', ccText);
 
     content.innerHTML = `
       <div style="margin-bottom: 16px;">
