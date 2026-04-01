@@ -1046,18 +1046,57 @@ async function executeNormalExecutionBugInZentaoPage(params) {
         if (!iframe.contentDocument || !iframe.contentDocument.body) {
           console.log('[Get BugID] iframe 还未加载完成，等待...');
           iframe.addEventListener('load', () => {
-            console.log('[Get BugID] iframe 加载完成');
-            setTimeout(() => extractBugId(), 2000); // 额外等待2秒
+            console.log('[Get BugID] iframe 加载完成，开始轮询查找 Bug');
+            pollForBug();
           });
 
           // 超时保护
           setTimeout(() => {
             console.error('[Get BugID] iframe 加载超时');
             resolve({ success: false, reason: 'iframe_load_timeout' });
-          }, 10000);
+          }, 20000);
         } else {
-          console.log('[Get BugID] iframe 已加载完成');
-          setTimeout(() => extractBugId(), 2000); // 额外等待2秒让数据完全加载
+          console.log('[Get BugID] iframe 已加载完成，开始轮询查找 Bug');
+          pollForBug();
+        }
+
+        // 轮询查找 Bug，最多重试3次，每次间隔2秒
+        function pollForBug() {
+          let retryCount = 0;
+          const maxRetries = 3;
+
+          function tryExtract() {
+            const result = extractBugId();
+
+            // 如果找到了匹配的Bug，直接返回
+            if (result.success) {
+              resolve(result);
+              return;
+            }
+
+            // 如果没找到且还有重试次数，刷新页面后重试
+            if (retryCount < maxRetries) {
+              retryCount++;
+              console.log('[Get BugID] 未找到匹配的Bug，刷新页面后 ' + retryCount + '/' + maxRetries);
+
+              // 刷新页面
+              location.reload();
+
+              // 等待页面重新加载完成后再次尝试
+              setTimeout(() => {
+                tryExtract();
+              }, 3000); // 等待3秒让页面完全重新加载
+            } else {
+              console.error('[Get BugID] 达到最大重试次数，放弃查找');
+              resolve(result);
+            }
+          }
+
+          // 首次尝试延迟2秒，让数据充分加载
+          setTimeout(() => {
+            console.log('[Get BugID] 首次尝试提取 BugID');
+            tryExtract();
+          }, 2000);
         }
 
         function extractBugId() {
@@ -1065,16 +1104,14 @@ async function executeNormalExecutionBugInZentaoPage(params) {
             const iframeDoc = iframe.contentDocument;
             if (!iframeDoc) {
               console.error('[Get BugID] 无法访问 iframe contentDocument');
-              resolve({ success: false, reason: 'iframe_access_denied' });
-              return;
+              return { success: false, reason: 'iframe_access_denied' };
             }
 
             // 从 iframe DOM 中查找 bugList 表格
             const bugList = iframeDoc.getElementById('bugList');
             if (!bugList) {
               console.error('[Get BugID] 未找到 bugList 表格');
-              resolve({ success: false, reason: 'buglist_not_found' });
-              return;
+              return { success: false, reason: 'buglist_not_found' };
             }
 
             console.log('[Get BugID] 找到 bugList 表格');
@@ -1083,8 +1120,7 @@ async function executeNormalExecutionBugInZentaoPage(params) {
             const tbody = bugList.querySelector('tbody');
             if (!tbody) {
               console.error('[Get BugID] 未找到 tbody');
-              resolve({ success: false, reason: 'tbody_not_found' });
-              return;
+              return { success: false, reason: 'tbody_not_found' };
             }
 
             const rows = tbody.querySelectorAll('tr');
@@ -1092,8 +1128,7 @@ async function executeNormalExecutionBugInZentaoPage(params) {
 
             if (rows.length === 0) {
               console.error('[Get BugID] 未找到任何行');
-              resolve({ success: false, reason: 'no_rows_found' });
-              return;
+              return { success: false, reason: 'no_rows_found' };
             }
 
             // 遍历所有行，查找标题匹配且创建时间最接近的 Bug
@@ -1161,15 +1196,14 @@ async function executeNormalExecutionBugInZentaoPage(params) {
             if (!matchedBug) {
               console.error('[Get BugID] ✗ 未找到匹配的 Bug');
               console.log('[Get BugID] 搜索标题:', bugTitle);
-              resolve({ success: false, reason: 'no_matching_bug', searchedTitle: bugTitle });
-              return;
+              return { success: false, reason: 'no_matching_bug', searchedTitle: bugTitle };
             }
 
             console.log('[Get BugID] ✓✓✓ 成功匹配 Bug, ID:', matchedBug.bugId, '标题:', matchedBug.title, '时间差:', minTimeDiff, 'ms');
-            resolve({ success: true, bugId: matchedBug.bugId });
+            return { success: true, bugId: matchedBug.bugId };
           } catch (err) {
             console.error('[Get BugID] 提取 BugID 异常:', err);
-            resolve({ success: false, reason: err.message });
+            return { success: false, reason: err.message };
           }
         }
       });
