@@ -766,42 +766,20 @@ async function getExecutionProductId(params) {
           .then(html => {
             console.log('[Get ProductID] 页面加载成功，长度:', html.length);
 
-            // 查找 iframe
-            const iframeMatch = html.match(/<iframe[^>]*id="appIframe-execution"[^>]*>/i);
-            if (!iframeMatch) {
-              console.error('[Get ProductID] 未找到 appIframe-execution iframe');
-              resolve({ success: false, reason: 'iframe_not_found' });
-              return;
-            }
-
-            // 提取 iframe 的 src
-            const srcMatch = iframeMatch[0].match(/src="([^"]+)"/i);
-            if (!srcMatch) {
-              console.error('[Get ProductID] iframe 没有 src 属性');
-              resolve({ success: false, reason: 'iframe_src_not_found' });
-              return;
-            }
-
-            const iframeSrc = srcMatch[1];
-            console.log('[Get ProductID] iframe src:', iframeSrc);
-
-            // 获取 iframe 内容
-            return fetch(iframeSrc.startsWith('http') ? iframeSrc : `${baseUrl}${iframeSrc}`);
-          })
-          .then(r => r.text())
-          .then(iframeHtml => {
-            console.log('[Get ProductID] iframe 内容加载成功，长度:', iframeHtml.length);
-
-            // 查找提Bug链接
-            const linkMatch = iframeHtml.match(/<a[^>]*href="\/zentao\/bug-create-(\d+)-0-executionID=${executionId}\.html"[^>]*>/i);
+            // 直接从主页面 HTML 中查找提Bug链接（不依赖 iframe）
+            const linkMatch = html.match(/<a[^>]*href="\/zentao\/bug-create-(\d+)-0-executionID=${executionId}\.html"[^>]*>/i);
             if (!linkMatch) {
               console.error('[Get ProductID] 未找到提Bug链接');
+              console.log('[Get ProductID] 尝试搜索所有 bug-create 链接...');
+              // 打印前 1000 个字符用于调试
+              console.log('[Get ProductID] 页面内容 (前1000字符):', html.substring(0, 1000));
               resolve({ success: false, reason: 'bug_create_link_not_found' });
               return;
             }
 
             const productId = linkMatch[1];
             console.log('[Get ProductID] 找到 productID:', productId);
+            console.log('[Get ProductID] 提Bug链接:', linkMatch[0]);
 
             resolve({ success: true, productId });
           })
