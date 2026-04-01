@@ -1004,217 +1004,216 @@ async function executeNormalExecutionBugInZentaoPage(params) {
 
   // 第二步：导航到列表页面
   const fullLocateUrl = locateUrl.startsWith('http') ? locateUrl : `${baseUrl}${locateUrl}`;
-  await chrome.tabs.update(targetTab.id, { url: fullLocateUrl });
 
-  // 等待页面加载完成
-  await new Promise(resolve => {
-    const listener = (tabId, changeInfo) => {
-      if (tabId === targetTab.id && changeInfo.status === 'complete') {
+  // 第三步：尝试匹配BugID，最多刷新页面2次
+  const maxAttempts = 3; // 总共尝试3次（初始1次 + 刷新2次）
+  let bugId = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    console.log('[Background] ========== 第 ' + attempt + ' 次尝试匹配 BugID ==========');
+
+    // 导航到列表页面（首次或刷新）
+    if (attempt === 1) {
+      console.log('[Background] 导航到列表页面:', fullLocateUrl);
+      await chrome.tabs.update(targetTab.id, { url: fullLocateUrl });
+    } else {
+      console.log('[Background] 第 ' + attempt + ' 次刷新页面');
+      await chrome.tabs.reload(targetTab.id);
+    }
+
+    // 等待页面加载完成
+    await new Promise(resolve => {
+      const listener = (tabId, changeInfo) => {
+        if (tabId === targetTab.id && changeInfo.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          setTimeout(resolve, 1000); // 等待1秒让页面稳定
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+
+      // 超时保护
+      setTimeout(() => {
         chrome.tabs.onUpdated.removeListener(listener);
-        setTimeout(resolve, 500); // 额外等待确保页面稳定
-      }
-    };
-    chrome.tabs.onUpdated.addListener(listener);
+        resolve();
+      }, 15000);
+    });
 
-    // 超时保护
-    setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(listener);
-      resolve();
-    }, 15000);
-  });
+    // 再等待1秒让数据充分加载
+    await new Promise(r => setTimeout(r, 1000));
 
-  console.log('[Background] 列表页面已加载，从 iframe DOM 中提取 BugID');
+    console.log('[Background] 页面已加载，从 DOM 中提取 BugID');
 
-  // 第三步：从列表页面的 iframe DOM 中提取 BugID
-  const bugIdResults = await chrome.scripting.executeScript({
-    target: { tabId: targetTab.id },
-    func: (bugTitle, createTime) => {
-      return new Promise((resolve) => {
-        console.log('[Get BugID] 从列表页面 DOM 中查找 BugID, 标题:', bugTitle, '创建时间:', createTime);
+    // 从 DOM 中提取 BugID
+    const bugIdResults = await chrome.scripting.executeScript({
+      target: { tabId: targetTab.id },
+      func: (bugTitle, createTime) => {
+        return new Promise((resolve) => {
+          console.log('[Get BugID] 从列表页面 DOM 中查找 BugID, 标题:', bugTitle, '创建时间:', createTime);
 
-        // 查找 iframe
-        const iframe = document.getElementById('appIframe-execution');
-        if (!iframe) {
-          console.error('[Get BugID] 未找到 appIframe-execution iframe');
-          resolve({ success: false, reason: 'iframe_not_found' });
-          return;
-        }
-
-        console.log('[Get BugID] 找到 iframe');
-
-        // 等待 iframe 加载完成
-        if (!iframe.contentDocument || !iframe.contentDocument.body) {
-          console.log('[Get BugID] iframe 还未加载完成，等待...');
-          iframe.addEventListener('load', () => {
-            console.log('[Get BugID] iframe 加载完成，开始轮询查找 Bug');
-            pollForBug();
-          });
-
-          // 超时保护
-          setTimeout(() => {
-            console.error('[Get BugID] iframe 加载超时');
-            resolve({ success: false, reason: 'iframe_load_timeout' });
-          }, 20000);
-        } else {
-          console.log('[Get BugID] iframe 已加载完成，开始轮询查找 Bug');
-          pollForBug();
-        }
-
-        // 轮询查找 Bug，最多重试10次，每次间隔2秒
-        function pollForBug() {
-          let retryCount = 0;
-          const maxRetries = 10;
-
-          function tryExtract() {
-            const result = extractBugId();
-
-            // 如果找到了匹配的Bug，直接返回
-            if (result.success) {
-              resolve(result);
-              return;
-            }
-
-            // 如果没找到且还有重试次数，继续等待后重试
-            if (retryCount < maxRetries) {
-              retryCount++;
-              console.log('[Get BugID] 未找到匹配的Bug，2秒后重试 (' + retryCount + '/' + maxRetries + ')');
-
-              // 等待2秒后再次尝试
-              setTimeout(() => {
-                tryExtract();
-              }, 2000);
-            } else {
-              console.error('[Get BugID] 达到最大重试次数，放弃查找');
-              resolve(result);
-            }
+          // 查找 iframe
+          const iframe = document.getElementById('appIframe-execution');
+          if (!iframe) {
+            console.error('[Get BugID] 未找到 appIframe-execution iframe');
+            resolve({ success: false, reason: 'iframe_not_found' });
+            return;
           }
 
-          // 首次尝试延迟3秒，让数据充分加载
-          setTimeout(() => {
-            console.log('[Get BugID] 首次尝试提取 BugID');
-            tryExtract();
-          }, 3000);
-        }
+          console.log('[Get BugID] 找到 iframe');
 
-        function extractBugId() {
-          try {
-            const iframeDoc = iframe.contentDocument;
-            if (!iframeDoc) {
-              console.error('[Get BugID] 无法访问 iframe contentDocument');
-              return { success: false, reason: 'iframe_access_denied' };
-            }
+          // 等待 iframe 加载完成
+          if (!iframe.contentDocument || !iframe.contentDocument.body) {
+            console.log('[Get BugID] iframe 还未加载完成，等待...');
+            iframe.addEventListener('load', () => {
+              console.log('[Get BugID] iframe 加载完成');
+              setTimeout(() => extractBugId(), 1000); // 额外等待1秒
+            });
 
-            // 从 iframe DOM 中查找 bugList 表格
-            const bugList = iframeDoc.getElementById('bugList');
-            if (!bugList) {
-              console.error('[Get BugID] 未找到 bugList 表格');
-              return { success: false, reason: 'buglist_not_found' };
-            }
+            // 超时保护
+            setTimeout(() => {
+              console.error('[Get BugID] iframe 加载超时');
+              resolve({ success: false, reason: 'iframe_load_timeout' });
+            }, 10000);
+          } else {
+            console.log('[Get BugID] iframe 已加载完成');
+            setTimeout(() => extractBugId(), 1000); // 等待1秒让数据充分加载
+          }
 
-            console.log('[Get BugID] 找到 bugList 表格');
+          function extractBugId() {
+            try {
+              const iframeDoc = iframe.contentDocument;
+              if (!iframeDoc) {
+                console.error('[Get BugID] 无法访问 iframe contentDocument');
+                resolve({ success: false, reason: 'iframe_access_denied' });
+                return;
+              }
 
-            // 获取所有行（排除表头）
-            const tbody = bugList.querySelector('tbody');
-            if (!tbody) {
-              console.error('[Get BugID] 未找到 tbody');
-              return { success: false, reason: 'tbody_not_found' };
-            }
+              // 从 iframe DOM 中查找 bugList 表格
+              const bugList = iframeDoc.getElementById('bugList');
+              if (!bugList) {
+                console.error('[Get BugID] 未找到 bugList 表格');
+                resolve({ success: false, reason: 'buglist_not_found' });
+                return;
+              }
 
-            const rows = tbody.querySelectorAll('tr');
-            console.log('[Get BugID] 找到', rows.length, '个 Bug');
+              console.log('[Get BugID] 找到 bugList 表格');
 
-            if (rows.length === 0) {
-              console.error('[Get BugID] 未找到任何行');
-              return { success: false, reason: 'no_rows_found' };
-            }
+              // 获取所有行（排除表头）
+              const tbody = bugList.querySelector('tbody');
+              if (!tbody) {
+                console.error('[Get BugID] 未找到 tbody');
+                resolve({ success: false, reason: 'tbody_not_found' });
+                return;
+              }
 
-            // 遍历所有行，查找标题匹配且创建时间最接近的 Bug
-            let matchedBug = null;
-            let minTimeDiff = Infinity;
+              const rows = tbody.querySelectorAll('tr');
+              console.log('[Get BugID] 找到', rows.length, '个 Bug');
 
-            for (let i = 0; i < rows.length; i++) {
-              const row = rows[i];
-              const bugId = row.getAttribute('data-id');
+              if (rows.length === 0) {
+                console.error('[Get BugID] 未找到任何行');
+                resolve({ success: false, reason: 'no_rows_found' });
+                return;
+              }
 
-              // 提取标题
-              const titleCell = row.querySelector('.c-title');
-              if (!titleCell) continue;
+              // 遍历所有行，查找标题匹配且创建时间最接近的 Bug
+              let matchedBug = null;
+              let minTimeDiff = Infinity;
 
-              const titleLink = titleCell.querySelector('a');
-              if (!titleLink) continue;
+              for (let i = 0; i < rows.length; i++) {
+                const row = rows[i];
+                const bugId = row.getAttribute('data-id');
 
-              const title = titleLink.textContent.trim();
-              const titleAttr = titleLink.getAttribute('title');
-              const displayTitle = titleAttr || title;
+                // 提取标题
+                const titleCell = row.querySelector('.c-title');
+                if (!titleCell) continue;
 
-              // 提取创建时间
-              const dateCell = row.querySelector('.c-openedDate');
-              let createdTime = null;
-              if (dateCell) {
-                const dateText = dateCell.textContent.trim();
-                console.log('[Get BugID] Bug', bugId, '标题:', displayTitle, '日期:', dateText);
+                const titleLink = titleCell.querySelector('a');
+                if (!titleLink) continue;
 
-                // 解析日期格式：04-01 10:11
-                const dateMatch = dateText.match(/(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
-                if (dateMatch) {
-                  const month = parseInt(dateMatch[1]) - 1; // 月份从0开始
-                  const day = parseInt(dateMatch[2]);
-                  const hour = parseInt(dateMatch[3]);
-                  const minute = parseInt(dateMatch[4]);
+                const title = titleLink.textContent.trim();
+                const titleAttr = titleLink.getAttribute('title');
+                const displayTitle = titleAttr || title;
 
-                  const bugDate = new Date();
-                  bugDate.setMonth(month);
-                  bugDate.setDate(day);
-                  bugDate.setHours(hour);
-                  bugDate.setMinutes(minute);
-                  bugDate.setSeconds(0);
-                  bugDate.setMilliseconds(0);
+                // 提取创建时间
+                const dateCell = row.querySelector('.c-openedDate');
+                let createdTime = null;
+                if (dateCell) {
+                  const dateText = dateCell.textContent.trim();
+                  console.log('[Get BugID] Bug', bugId, '标题:', displayTitle, '日期:', dateText);
 
-                  createdTime = bugDate.getTime();
-                  const timeDiff = Math.abs(createTime - createdTime);
+                  // 解析日期格式：04-01 10:11
+                  const dateMatch = dateText.match(/(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
+                  if (dateMatch) {
+                    const month = parseInt(dateMatch[1]) - 1; // 月份从0开始
+                    const day = parseInt(dateMatch[2]);
+                    const hour = parseInt(dateMatch[3]);
+                    const minute = parseInt(dateMatch[4]);
 
-                  console.log('[Get BugID] Bug', bugId, '解析时间:', new Date(createdTime), '时间差:', timeDiff, 'ms');
+                    const bugDate = new Date();
+                    bugDate.setMonth(month);
+                    bugDate.setDate(day);
+                    bugDate.setHours(hour);
+                    bugDate.setMinutes(minute);
+                    bugDate.setSeconds(0);
+                    bugDate.setMilliseconds(0);
 
-                  // 检查标题是否匹配
-                  if (displayTitle === bugTitle) {
-                    console.log('[Get BugID] ✓ Bug', bugId, '标题匹配');
-                    if (timeDiff < minTimeDiff) {
-                      minTimeDiff = timeDiff;
-                      matchedBug = { bugId, createdTime, title: displayTitle };
-                      console.log('[Get BugID] ✓✓ 更新匹配Bug:', matchedBug, '时间差:', minTimeDiff);
+                    createdTime = bugDate.getTime();
+                    const timeDiff = Math.abs(createTime - createdTime);
+
+                    console.log('[Get BugID] Bug', bugId, '解析时间:', new Date(createdTime), '时间差:', timeDiff, 'ms');
+
+                    // 检查标题是否匹配
+                    if (displayTitle === bugTitle) {
+                      console.log('[Get BugID] ✓ Bug', bugId, '标题匹配');
+                      if (timeDiff < minTimeDiff) {
+                        minTimeDiff = timeDiff;
+                        matchedBug = { bugId, createdTime, title: displayTitle };
+                        console.log('[Get BugID] ✓✓ 更新匹配Bug:', matchedBug, '时间差:', minTimeDiff);
+                      }
+                    } else {
+                      console.log('[Get BugID] ✗ Bug', bugId, '标题不匹配, 期望:', bugTitle, '实际:', displayTitle);
                     }
-                  } else {
-                    console.log('[Get BugID] ✗ Bug', bugId, '标题不匹配, 期望:', bugTitle, '实际:', displayTitle);
                   }
                 }
               }
-            }
 
-            if (!matchedBug) {
-              console.error('[Get BugID] ✗ 未找到匹配的 Bug');
-              console.log('[Get BugID] 搜索标题:', bugTitle);
-              return { success: false, reason: 'no_matching_bug', searchedTitle: bugTitle };
-            }
+              if (!matchedBug) {
+                console.error('[Get BugID] ✗ 未找到匹配的 Bug');
+                console.log('[Get BugID] 搜索标题:', bugTitle);
+                resolve({ success: false, reason: 'no_matching_bug', searchedTitle: bugTitle });
+                return;
+              }
 
-            console.log('[Get BugID] ✓✓✓ 成功匹配 Bug, ID:', matchedBug.bugId, '标题:', matchedBug.title, '时间差:', minTimeDiff, 'ms');
-            return { success: true, bugId: matchedBug.bugId };
-          } catch (err) {
-            console.error('[Get BugID] 提取 BugID 异常:', err);
-            return { success: false, reason: err.message };
+              console.log('[Get BugID] ✓✓✓ 成功匹配 Bug, ID:', matchedBug.bugId, '标题:', matchedBug.title, '时间差:', minTimeDiff, 'ms');
+              resolve({ success: true, bugId: matchedBug.bugId });
+            } catch (err) {
+              console.error('[Get BugID] 提取 BugID 异常:', err);
+              resolve({ success: false, reason: err.message });
+            }
           }
-        }
-      });
-    },
-    args: [bugTitle, createTime]
-  });
+        });
+      },
+      args: [bugTitle, createTime]
+    });
 
-  const bugIdResult = bugIdResults[0].result;
+    const bugIdResult = bugIdResults[0].result;
 
-  if (!bugIdResult.success) {
-    return { success: false, reason: bugIdResult.reason };
+    // 如果找到了匹配的Bug，直接返回
+    if (bugIdResult.success) {
+      console.log('[Background] ✓✓✓ 第 ' + attempt + ' 次尝试成功找到 BugID:', bugIdResult.bugId);
+      bugId = bugIdResult.bugId;
+      break;
+    }
+
+    // 如果是最后一次尝试仍然失败，放弃
+    if (attempt === maxAttempts) {
+      console.error('[Background] ✗✗✗ 所有尝试都失败，无法找到 BugID');
+      return { success: false, reason: 'all_attempts_failed', searchedTitle: bugTitle };
+    }
+
+    console.log('[Background] 第 ' + attempt + ' 次尝试失败，准备刷新页面重试');
   }
 
-  return { success: true, data: { id: bugIdResult.bugId } };
+  return { success: true, data: { id: bugId } };
 }
 
 // 在禅道页面中执行请求（使用 content script）
