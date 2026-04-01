@@ -6329,6 +6329,19 @@ const BugManager = {
     // 从本地或后端加载 Bug 列表
     console.log('[BugManager] ========== loadBugs 开始 ==========');
     try {
+      // 先执行数据迁移（确保所有Bug都有必需的字段）
+      try {
+        const migrateResponse = await fetch(`${API_BASE_URL}/api/bugs/migrate`, {
+          method: 'POST'
+        });
+        const migrateResult = await migrateResponse.json();
+        if (migrateResult.success) {
+          console.log('[BugManager] Bug数据迁移完成:', migrateResult.message);
+        }
+      } catch (err) {
+        console.warn('[BugManager] Bug数据迁移失败（可忽略）:', err.message);
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/bugs`);
       const result = await response.json();
       console.log('[BugManager] API 响应 success:', result.success);
@@ -7043,6 +7056,7 @@ const BugManager = {
       assignedToList,  // 改为数组，支持多个指派人
       assignedTo: assignedToList.length > 0 ? assignedToList[0] : '',  // 兼容旧API，取第一个作为主指派人
       cc: ccList,
+      comment: '',  // 创建时没有备注字段，初始化为空
       // 如果有执行信息，添加到 Bug 数据中
       ...(executionId && { executionId: parseInt(executionId) }),
       ...(executionName && { executionName })

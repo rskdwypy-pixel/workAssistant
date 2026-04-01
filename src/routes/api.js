@@ -1388,6 +1388,24 @@ router.delete('/bugs/all', async (req, res) => {
 });
 
 /**
+ * POST /api/bugs/migrate - 迁移Bug数据
+ */
+router.post('/bugs/migrate', async (req, res) => {
+  try {
+    const { migrateBugData } = await import('../services/bugManager.js');
+    const result = await migrateBugData();
+    res.json({
+      success: true,
+      migratedCount: result.migratedCount,
+      total: result.total,
+      message: `已迁移 ${result.migratedCount}/${result.total} 个Bug`
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
  * GET /api/bugs/stats - 获取 Bug 统计
  */
 router.get('/bugs/stats', async (req, res) => {

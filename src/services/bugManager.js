@@ -53,6 +53,61 @@ async function createBug(bugData) {
 }
 
 /**
+ * 迁移Bug数据，添加缺失的字段
+ */
+async function migrateBugData() {
+  console.log('[BugManager] ========== 迁移Bug数据开始 ==========');
+
+  const data = await readTasks();
+  const tasks = data.tasks || [];
+  const bugs = tasks.filter(t => t.type === 'bug');
+
+  console.log('[BugManager] 找到 Bug 数量:', bugs.length);
+
+  let migratedCount = 0;
+  bugs.forEach(bug => {
+    let needUpdate = false;
+
+    // 确保所有必需字段都存在
+    if (bug.assignedTo === undefined) {
+      bug.assignedTo = '';
+      needUpdate = true;
+    }
+    if (bug.assignedToList === undefined) {
+      bug.assignedToList = [];
+      needUpdate = true;
+    }
+    if (bug.cc === undefined) {
+      bug.cc = [];
+      needUpdate = true;
+    }
+    if (bug.comment === undefined) {
+      bug.comment = '';
+      needUpdate = true;
+    }
+    if (bug.projectName === undefined) {
+      bug.projectName = '';
+      needUpdate = true;
+    }
+
+    if (needUpdate) {
+      migratedCount++;
+      console.log('[BugManager] 迁移 Bug:', bug.id, bug.title);
+    }
+  });
+
+  if (migratedCount > 0) {
+    await writeTasks({ tasks });
+    console.log('[BugManager] ✓ 已迁移', migratedCount, '个Bug');
+  } else {
+    console.log('[BugManager] 所有Bug数据已是最新，无需迁移');
+  }
+
+  console.log('[BugManager] ========== 迁移Bug数据结束 ==========');
+  return { migratedCount, total: bugs.length };
+}
+
+/**
  * 获取所有 Bug
  */
 async function getBugs(filters = {}) {
