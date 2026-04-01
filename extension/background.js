@@ -784,35 +784,77 @@ async function getExecutionProductId(params) {
       return new Promise((resolve) => {
         console.log('[Get ProductID] 从页面 DOM 中查找提Bug链接');
 
-        // 直接从页面 DOM 中查找提Bug链接
-        const allLinks = document.querySelectorAll('a[href*="bug-create"]');
-        console.log('[Get ProductID] 找到', allLinks.length, '个 bug-create 链接');
-
-        let productId = null;
-        for (const link of allLinks) {
-          const href = link.getAttribute('href');
-          console.log('[Get ProductID] 检查链接:', href);
-
-          // 匹配格式：/zentao/bug-create-{productID}-0-executionID={executionId}.html
-          const match = href.match(/\/zentao\/bug-create-(\d+)-0-executionID=${executionId}\.html/i);
-          if (match) {
-            productId = match[1];
-            console.log('[Get ProductID] ✓ 找到匹配的链接, productID:', productId);
-            break;
-          }
-        }
-
-        if (!productId) {
-          console.error('[Get ProductID] ✗ 未找到匹配的提Bug链接');
-          console.log('[Get ProductID] 页面 URL:', window.location.href);
-          // 打印页面部分内容用于调试
-          console.log('[Get ProductID] 页面 body (前2000字符):', document.body.innerHTML.substring(0, 2000));
-          resolve({ success: false, reason: 'bug_create_link_not_found' });
+        // 查找 iframe
+        const iframe = document.getElementById('appIframe-execution');
+        if (!iframe) {
+          console.error('[Get ProductID] 未找到 appIframe-execution iframe');
+          resolve({ success: false, reason: 'iframe_not_found' });
           return;
         }
 
-        console.log('[Get ProductID] ✓✓✓ 成功提取 productID:', productId);
-        resolve({ success: true, productId });
+        console.log('[Get ProductID] 找到 iframe');
+
+        // 等待 iframe 加载完成
+        if (!iframe.contentDocument || !iframe.contentDocument.body) {
+          console.log('[Get ProductID] iframe 还未加载完成，等待...');
+          iframe.addEventListener('load', () => {
+            console.log('[Get ProductID] iframe 加载完成');
+            extractProductId();
+          });
+
+          // 超时保护
+          setTimeout(() => {
+            console.error('[Get ProductID] iframe 加载超时');
+            resolve({ success: false, reason: 'iframe_load_timeout' });
+          }, 5000);
+        } else {
+          console.log('[Get ProductID] iframe 已加载完成');
+          extractProductId();
+        }
+
+        function extractProductId() {
+          try {
+            const iframeDoc = iframe.contentDocument;
+            if (!iframeDoc) {
+              console.error('[Get ProductID] 无法访问 iframe contentDocument');
+              resolve({ success: false, reason: 'iframe_access_denied' });
+              return;
+            }
+
+            // 从 iframe DOM 中查找提Bug链接
+            const allLinks = iframeDoc.querySelectorAll('a[href*="bug-create"]');
+            console.log('[Get ProductID] 在 iframe 中找到', allLinks.length, '个 bug-create 链接');
+
+            let productId = null;
+            for (const link of allLinks) {
+              const href = link.getAttribute('href');
+              console.log('[Get ProductID] 检查链接:', href);
+
+              // 匹配格式：/zentao/bug-create-{productID}-0-executionID={executionId}.html
+              const match = href.match(/\/zentao\/bug-create-(\d+)-0-executionID=${executionId}\.html/i);
+              if (match) {
+                productId = match[1];
+                console.log('[Get ProductID] ✓ 找到匹配的链接, productID:', productId);
+                break;
+              }
+            }
+
+            if (!productId) {
+              console.error('[Get ProductID] ✗ 未找到匹配的提Bug链接');
+              console.log('[Get ProductID] iframe URL:', iframe.src);
+              // 打印 iframe 部分内容用于调试
+              console.log('[Get ProductID] iframe body (前2000字符):', iframeDoc.body.innerHTML.substring(0, 2000));
+              resolve({ success: false, reason: 'bug_create_link_not_found' });
+              return;
+            }
+
+            console.log('[Get ProductID] ✓✓✓ 成功提取 productID:', productId);
+            resolve({ success: true, productId });
+          } catch (err) {
+            console.error('[Get ProductID] 提取 productID 异常:', err);
+            resolve({ success: false, reason: err.message });
+          }
+        }
       });
     },
     args: [executionId]
@@ -839,7 +881,8 @@ async function executeNormalExecutionBugInZentaoPage(params) {
 
   console.log('[Background] 普通 Bug 创建端点:', endpoint);
 
-  const results = await chrome.scripting.executeScript({
+  // 第一步：在当前页面中提交 Bug 创建请求
+  const createResults = await chrome.scripting.executeScript({
     target: { tabId: targetTab.id },
     func: (productId, executionId, projectId, bugData, endpoint) => {
       return new Promise((resolve) => {
@@ -918,7 +961,7 @@ async function executeNormalExecutionBugInZentaoPage(params) {
               return;
             }
 
-            // 从 locate 中获取列表页面 URL
+            // 返回 locate URL，让 background.js 处理导航
             const locateUrl = data.locate;
             console.log('[Normal Bug Create] locate URL:', locateUrl);
 
@@ -927,69 +970,11 @@ async function executeNormalExecutionBugInZentaoPage(params) {
               return;
             }
 
-            // 访问列表页面获取 BugID
-            const fullLocateUrl = locateUrl.startsWith('http') ? locateUrl : `${window.location.origin}${locateUrl}`;
-
-            return fetch(fullLocateUrl);
+            resolve({ success: true, locateUrl });
           } catch (e) {
             console.error('[Normal Bug Create] JSON 解析失败:', e);
             resolve({ success: false, reason: 'invalid_json', responseText: text.substring(0, 1000) });
           }
-        })
-        .then(r => {
-          if (!r) return; // 已经在之前的 then 中处理了错误
-
-          return r.text();
-        })
-        .then(listHtml => {
-          if (!listHtml) return;
-
-          console.log('[Normal Bug Create] 列表页面加载成功，长度:', listHtml.length);
-
-          // 查找 iframe
-          const iframeMatch = listHtml.match(/<iframe[^>]*id="appIframe-execution"[^>]*>/i);
-          if (!iframeMatch) {
-            console.error('[Normal Bug Create] 未找到 appIframe-execution iframe');
-            resolve({ success: false, reason: 'iframe_not_found' });
-            return;
-          }
-
-          // 提取 iframe 的 src
-          const srcMatch = iframeMatch[0].match(/src="([^"]+)"/i);
-          if (!srcMatch) {
-            console.error('[Normal Bug Create] iframe 没有 src 属性');
-            resolve({ success: false, reason: 'iframe_src_not_found' });
-            return;
-          }
-
-          const iframeSrc = srcMatch[1];
-          console.log('[Normal Bug Create] iframe src:', iframeSrc);
-
-          // 获取 iframe 内容
-          const fullIframeSrc = iframeSrc.startsWith('http') ? iframeSrc : `${window.location.origin}${iframeSrc}`;
-          return fetch(fullIframeSrc);
-        })
-        .then(r => {
-          if (!r) return;
-          return r.text();
-        })
-        .then(iframeHtml => {
-          if (!iframeHtml) return;
-
-          console.log('[Normal Bug Create] iframe 内容加载成功，长度:', iframeHtml.length);
-
-          // 查找 bugList 表格的第一个 tr
-          const trMatch = iframeHtml.match(/<tr[^>]*data-id="(\d+)"[^>]*>/i);
-          if (!trMatch) {
-            console.error('[Normal Bug Create] 未找到 bugList 中的 bug');
-            resolve({ success: false, reason: 'bug_not_found' });
-            return;
-          }
-
-          const bugId = trMatch[1];
-          console.log('[Normal Bug Create] 找到 BugID:', bugId);
-
-          resolve({ success: true, data: { id: bugId } });
         })
         .catch(err => {
           console.error('[Normal Bug Create] 请求失败:', err);
@@ -1000,7 +985,132 @@ async function executeNormalExecutionBugInZentaoPage(params) {
     args: [productId, executionId, projectId, bugData, endpoint]
   });
 
-  return results[0].result;
+  const createResult = createResults[0].result;
+
+  if (!createResult.success) {
+    return createResult;
+  }
+
+  const locateUrl = createResult.locateUrl;
+  console.log('[Background] Bug 创建成功，准备导航到列表页面:', locateUrl);
+
+  // 第二步：导航到列表页面
+  const fullLocateUrl = locateUrl.startsWith('http') ? locateUrl : `${baseUrl}${locateUrl}`;
+  await chrome.tabs.update(targetTab.id, { url: fullLocateUrl });
+
+  // 等待页面加载完成
+  await new Promise(resolve => {
+    const listener = (tabId, changeInfo) => {
+      if (tabId === targetTab.id && changeInfo.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(listener);
+        setTimeout(resolve, 500); // 额外等待确保页面稳定
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+
+    // 超时保护
+    setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, 15000);
+  });
+
+  console.log('[Background] 列表页面已加载，从 iframe DOM 中提取 BugID');
+
+  // 第三步：从列表页面的 iframe DOM 中提取 BugID
+  const bugIdResults = await chrome.scripting.executeScript({
+    target: { tabId: targetTab.id },
+    func: () => {
+      return new Promise((resolve) => {
+        console.log('[Get BugID] 从列表页面 DOM 中查找 BugID');
+
+        // 查找 iframe
+        const iframe = document.getElementById('appIframe-execution');
+        if (!iframe) {
+          console.error('[Get BugID] 未找到 appIframe-execution iframe');
+          resolve({ success: false, reason: 'iframe_not_found' });
+          return;
+        }
+
+        console.log('[Get BugID] 找到 iframe');
+
+        // 等待 iframe 加载完成
+        if (!iframe.contentDocument || !iframe.contentDocument.body) {
+          console.log('[Get BugID] iframe 还未加载完成，等待...');
+          iframe.addEventListener('load', () => {
+            console.log('[Get BugID] iframe 加载完成');
+            extractBugId();
+          });
+
+          // 超时保护
+          setTimeout(() => {
+            console.error('[Get BugID] iframe 加载超时');
+            resolve({ success: false, reason: 'iframe_load_timeout' });
+          }, 5000);
+        } else {
+          console.log('[Get BugID] iframe 已加载完成');
+          extractBugId();
+        }
+
+        function extractBugId() {
+          try {
+            const iframeDoc = iframe.contentDocument;
+            if (!iframeDoc) {
+              console.error('[Get BugID] 无法访问 iframe contentDocument');
+              resolve({ success: false, reason: 'iframe_access_denied' });
+              return;
+            }
+
+            // 从 iframe DOM 中查找 bugList 表格的第一个 tr
+            const bugList = iframeDoc.getElementById('bugList');
+            if (!bugList) {
+              console.error('[Get BugID] 未找到 bugList 表格');
+              resolve({ success: false, reason: 'buglist_not_found' });
+              return;
+            }
+
+            console.log('[Get BugID] 找到 bugList 表格');
+
+            // 获取第一个 tr（排除表头）
+            const tbody = bugList.querySelector('tbody');
+            if (!tbody) {
+              console.error('[Get BugID] 未找到 tbody');
+              resolve({ success: false, reason: 'tbody_not_found' });
+              return;
+            }
+
+            const firstRow = tbody.querySelector('tr');
+            if (!firstRow) {
+              console.error('[Get BugID] 未找到任何行');
+              resolve({ success: false, reason: 'no_rows_found' });
+              return;
+            }
+
+            const bugId = firstRow.getAttribute('data-id');
+            if (!bugId) {
+              console.error('[Get BugID] 第一行没有 data-id 属性');
+              resolve({ success: false, reason: 'no_data_id' });
+              return;
+            }
+
+            console.log('[Get BugID] ✓✓✓ 成功提取 BugID:', bugId);
+            resolve({ success: true, bugId });
+          } catch (err) {
+            console.error('[Get BugID] 提取 BugID 异常:', err);
+            resolve({ success: false, reason: err.message });
+          }
+        }
+      });
+    }
+  });
+
+  const bugIdResult = bugIdResults[0].result;
+
+  if (!bugIdResult.success) {
+    return { success: false, reason: bugIdResult.reason };
+  }
+
+  return { success: true, data: { id: bugIdResult.bugId } };
 }
 
 // 在禅道页面中执行请求（使用 content script）
