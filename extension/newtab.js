@@ -7140,13 +7140,21 @@ const BugManager = {
 
           // 使用看板 Bug 创建接口
           syncResponse = await new Promise(resolve => {
+            const timeout = setTimeout(() => {
+              console.error('[BugManager] 看板 Bug 创建请求超时');
+              resolve({ success: false, reason: 'timeout', data: null });
+            }, 30000); // 30秒超时
+
             chrome.runtime.sendMessage({
               action: 'executeBugInZentaoPage',
               baseUrl,
               // productId 是必需的，不允许使用默认值
               productId: bugData.productId,
               bugData
-            }, resolve);
+            }, (response) => {
+              clearTimeout(timeout);
+              resolve(response);
+            });
           });
         } else {
           // ========== 普通执行 Bug 创建 ==========
@@ -7154,11 +7162,19 @@ const BugManager = {
 
           // 获取 productID
           const productIdResponse = await new Promise(resolve => {
+            const timeout = setTimeout(() => {
+              console.error('[BugManager] 获取 productID 请求超时');
+              resolve({ success: false, reason: 'timeout' });
+            }, 15000); // 15秒超时
+
             chrome.runtime.sendMessage({
               action: 'getExecutionProductId',
               baseUrl,
               executionId
-            }, resolve);
+            }, (response) => {
+              clearTimeout(timeout);
+              resolve(response);
+            });
           });
 
           if (!productIdResponse || !productIdResponse.success) {
@@ -7174,12 +7190,20 @@ const BugManager = {
 
           // 使用普通执行 Bug 创建接口
           syncResponse = await new Promise(resolve => {
+            const timeout = setTimeout(() => {
+              console.error('[BugManager] 普通 Bug 创建请求超时');
+              resolve({ success: false, reason: 'timeout', data: null });
+            }, 45000); // 45秒超时（包括刷新重试时间）
+
             chrome.runtime.sendMessage({
               action: 'executeNormalExecutionBugInZentaoPage',
               baseUrl,
               productId,
               bugData
-            }, resolve);
+            }, (response) => {
+              clearTimeout(timeout);
+              resolve(response);
+            });
           });
         }
 
@@ -7351,7 +7375,11 @@ const BugManager = {
           } else {
              console.log('[BugManager] ✗ 禅道 Bug 可能创建成功，但无法提取 ID', data);
           }
-        } else if (syncResponse) {
+        } else if (syncResponse === null || syncResponse === undefined) {
+          console.error('[BugManager] 禅道 Bug 同步响应为空，可能消息处理失败');
+          Toast.error('禅道同步失败：未收到响应，请检查扩展是否正常工作');
+          return;
+        } else if (syncResponse && syncResponse.success !== undefined) {
           console.warn('[BugManager] 禅道 Bug 同步失败, success:', syncResponse.success, 'reason:', syncResponse.reason, 'data:', syncResponse.data);
           if (syncResponse.reason === 'no_zentao_tab') {
              Toast.error('未找到禅道标签页，请先在浏览器中登录禅道');
