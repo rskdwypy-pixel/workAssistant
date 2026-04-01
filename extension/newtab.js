@@ -6526,8 +6526,12 @@ const BugManager = {
 
     // Bug ID 显示和链接（直接在标题后面）
     let bugIdSuffix = '';
+    let addBugIdBtn = '';
     if (bug.zentaoId) {
       bugIdSuffix = ` <a class="bug-id-link-inline" href="javascript:void(0)" data-bug-id="${bug.zentaoId}" title="点击查看禅道详情">#${bug.zentaoId}</a>`;
+    } else {
+      // 没有BugID时显示加号按钮
+      addBugIdBtn = `<button class="bug-add-id-btn" title="添加禅道BugID" data-bug-id="${bug.id}">➕</button>`;
     }
 
     // 根据状态显示不同的快捷按钮
@@ -6542,7 +6546,7 @@ const BugManager = {
       <div class="task-title">
         <span class="bug-severity ${severityClass}">${severityText}</span>
         <span class="task-title-text">${escapeHtml(bug.title)}${bugIdSuffix}</span>
-        <button class="bug-edit-id-btn" title="编辑禅道BugID" data-bug-id="${bug.id}">✏️</button>
+        ${addBugIdBtn}
       </div>
       ${bug.projectName ? `<span class="execution-tag">${escapeHtml(bug.projectName)}</span>` : ''}
       ${assigneeDisplay ? `<div class="bug-meta">${assigneeDisplay}</div>` : ''}
@@ -6563,10 +6567,10 @@ const BugManager = {
       });
     }
 
-    // 编辑 BugID 按钮事件
-    const editIdBtn = card.querySelector('.bug-edit-id-btn');
-    if (editIdBtn) {
-      editIdBtn.addEventListener('click', (e) => {
+    // 添加 BugID 按钮事件
+    const addIdBtn = card.querySelector('.bug-add-id-btn');
+    if (addIdBtn) {
+      addIdBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
         this.showEditBugIdModal(bug.id, bug.zentaoId);
@@ -7791,6 +7795,7 @@ const BugManager = {
       <div style="margin-bottom: 16px;">
         ${bug.projectName ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">项目: ${escapeHtml(bug.projectName)}</p>` : ''}
         <p style="margin: 8px 0 4px 0; font-size: 13px; font-weight: 500;">标题: ${escapeHtml(bug.title)}</p>
+        ${bug.zentaoId ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">禅道BugID: <span class="bug-detail-zentao-id">${escapeHtml(bug.zentaoId)}</span></p>` : '<p style="margin: 4px 0; font-size: 13px; color: var(--text-muted);">禅道BugID: 未关联</p>'}
         ${bug.steps ? `
           <div style="margin-top: 12px;">
             <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 500;">复现步骤:</p>
@@ -7824,10 +7829,18 @@ const BugManager = {
     // 清空并重新创建按钮，避免 CSP 问题
     actions.innerHTML = '';
 
+    // 编辑 BugID 按钮（始终显示）
+    const editBugIdBtn = document.createElement('button');
+    editBugIdBtn.className = 'btn-secondary';
+    editBugIdBtn.textContent = '编辑BugID';
+    editBugIdBtn.onclick = () => this.showEditBugIdModal(bugId, bug.zentaoId);
+    actions.appendChild(editBugIdBtn);
+
     if (bug.status === 'unconfirmed') {
       const activateBtn = document.createElement('button');
       activateBtn.className = 'btn-primary';
       activateBtn.textContent = '激活';
+      activateBtn.style.marginLeft = '8px';
       activateBtn.onclick = () => this.activateBug(bugId);
       actions.appendChild(activateBtn);
 
@@ -7841,6 +7854,7 @@ const BugManager = {
       const resolveBtn = document.createElement('button');
       resolveBtn.className = 'btn-primary';
       resolveBtn.textContent = '修复';
+      resolveBtn.style.marginLeft = '8px';
       resolveBtn.onclick = () => this.showResolveModal(bugId);
       actions.appendChild(resolveBtn);
 
@@ -7854,6 +7868,7 @@ const BugManager = {
       const deleteBtn = document.createElement('button');
       deleteBtn.className = 'btn-danger';
       deleteBtn.textContent = '删除';
+      deleteBtn.style.marginLeft = '8px';
       deleteBtn.onclick = () => this.deleteBug(bugId);
       actions.appendChild(deleteBtn);
     }
