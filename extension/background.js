@@ -3356,18 +3356,44 @@ async function syncFromZentaoInBackground(config) {
       });
     }
 
-    const [tasksResult, bugsResult] = await Promise.all([
-      fetch(`${API_BASE_URL}/api/zentao/sync-tasks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tasks: zentaoTasks })
-      }).then(r => r.json()),
-      fetch(`${API_BASE_URL}/api/zentao/sync-bugs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bugs: zentaoBugs })
-      }).then(r => r.json())
-    ]);
+    // 串行同步任务和 Bug，避免并发写入同一个文件导致文件损坏
+    console.log('[Background] ========== 步骤6: 保存到本地数据库（串行执行） ==========');
+    console.log('[Background] 准备发送任务数据:', zentaoTasks.length, '个任务');
+    console.log('[Background] 准备发送Bug数据:', zentaoBugs.length, '个Bug');
+
+    // 打印 Bug 数据样本，验证新字段是否被包含
+    if (zentaoBugs.length > 0) {
+      const sampleBug = zentaoBugs[0];
+      console.log('[Background] Bug 数据样本（发送到后端前）:', {
+        zentaoId: sampleBug.zentaoId,
+        title: sampleBug.title,
+        hasSteps: !!sampleBug.steps,
+        stepsLength: sampleBug.steps?.length || 0,
+        hasHistory: !!sampleBug.history,
+        historyCount: sampleBug.history?.length || 0,
+        assignedTo: sampleBug.assignedTo,
+        assignedDate: sampleBug.assignedDate,
+        cc: sampleBug.cc
+      });
+    }
+
+    // 先同步任务
+    console.log('[Background] 开始同步任务...');
+    const tasksResult = await fetch(`${API_BASE_URL}/api/zentao/sync-tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tasks: zentaoTasks })
+    }).then(r => r.json());
+    console.log('[Background] ✓ 任务同步完成:', tasksResult);
+
+    // 再同步 Bug
+    console.log('[Background] 开始同步 Bug...');
+    const bugsResult = await fetch(`${API_BASE_URL}/api/zentao/sync-bugs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bugs: zentaoBugs })
+    }).then(r => r.json());
+    console.log('[Background] ✓ Bug 同步完成:', bugsResult);
 
     console.log('[Background] ✓ 同步结果 - 任务:', tasksResult, 'Bug:', bugsResult);
 
