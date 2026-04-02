@@ -2575,18 +2575,12 @@ async function getKanbanView(params) {
  * 激活 Bug
  */
 async function activateBugInZentao(params) {
-  const { baseUrl, kanbanUrl, bugId, assignedTo, pri, type, ccList, comment } = params;
+  const { baseUrl, bugId, assignedTo, pri, type, ccList, comment } = params;
   console.log('[Background] ========== 激活 Bug 开始 ==========');
-  console.log('[Background] 参数:', { baseUrl, kanbanUrl, bugId, assignedTo, pri, type, ccList, comment });
+  console.log('[Background] 参数:', { baseUrl, bugId, assignedTo, pri, type, ccList, comment });
 
-  // 如果提供了看板 URL，确保使用看板页面
-  let targetTab;
-  if (kanbanUrl) {
-    console.log('[Background] 使用指定的看板页面:', kanbanUrl);
-    targetTab = await ensureZentaoTabByUrl(baseUrl, kanbanUrl);
-  } else {
-    targetTab = await ensureZentaoTab(baseUrl);
-  }
+  // 使用普通禅道页面（不需要看板）
+  const targetTab = await ensureZentaoTab(baseUrl);
 
   if (!targetTab) {
     console.error('[Background] 未找到禅道标签页');
@@ -3069,16 +3063,48 @@ async function syncFromZentaoInBackground(config) {
               const priSpan = row.querySelector('.c-pri .label-pri');
               const priority = priSpan ? parseInt(priSpan.textContent) : 3;
 
-              const projectLinks = row.querySelectorAll('.c-project a');
-              const projectName = projectLinks[0]?.getAttribute('title') || '';
-              const projectHref = projectLinks[0]?.getAttribute('href') || '';
-              const projectIdMatch = projectHref.match(/project-index-(\d+)\.html/);
-              const projectId = projectIdMatch ? parseInt(projectIdMatch[1]) : null;
+              // 获取项目和执行信息
+              // 任务列表有 TWO 个 .c-project 列：第1个是项目，第2个是执行
+              let projectName = '';
+              let projectId = null;
+              let executionName = '';
+              let executionId = null;
 
-              const executionName = projectLinks[1]?.getAttribute('title') || '';
-              const executionHref = projectLinks[1]?.getAttribute('href') || '';
-              const executionIdMatch = executionHref.match(/execution-task-(\d+)\.html/);
-              const executionId = executionIdMatch ? parseInt(executionIdMatch[1]) : null;
+              // 获取所有 .c-project 单元格
+              const projectCells = row.querySelectorAll('.c-project');
+              console.log(`[Content] 任务${taskId} 找到 ${projectCells.length} 个 .c-project 单元格`);
+
+              if (projectCells.length >= 1) {
+                // 第1个 .c-project 是所属项目
+                const projectCell = projectCells[0];
+                const projectLink = projectCell.querySelector('a');
+                if (projectLink) {
+                  projectName = projectLink.textContent?.trim() || projectLink.getAttribute('title') || '';
+                  const projectHref = projectLink.getAttribute('href') || '';
+                  const projectIdMatch = projectHref.match(/project-index-(\d+)\.html/);
+                  if (projectIdMatch) {
+                    projectId = parseInt(projectIdMatch[1]);
+                  }
+                  console.log(`[Content]   项目: "${projectName}" (${projectId})`);
+                }
+              }
+
+              if (projectCells.length >= 2) {
+                // 第2个 .c-project 是所属执行
+                const executionCell = projectCells[1];
+                const executionLink = executionCell.querySelector('a');
+                if (executionLink) {
+                  executionName = executionLink.textContent?.trim() || executionLink.getAttribute('title') || '';
+                  const executionHref = executionLink.getAttribute('href') || '';
+                  const executionIdMatch = executionHref.match(/execution-task-(\d+)\.html/);
+                  if (executionIdMatch) {
+                    executionId = parseInt(executionIdMatch[1]);
+                  }
+                  console.log(`[Content]   执行: "${executionName}" (${executionId})`);
+                }
+              }
+
+              console.log(`[Content] 任务${taskId} - 项目: "${projectName}"(${projectId}), 执行: "${executionName}"(${executionId})`);
 
               const openedBy = row.querySelector('.c-user')?.textContent?.trim() || '';
 
@@ -3137,6 +3163,9 @@ async function syncFromZentaoInBackground(config) {
 
       zentaoTasks = taskResults[0]?.result || [];
       console.log('[Background] ✓ 解析到', zentaoTasks.length, '个任务');
+      if (zentaoTasks.length > 0) {
+        console.log('[Background] 任务数据示例:', JSON.stringify(zentaoTasks[0], null, 2));
+      }
     } else {
       console.log('[Background] 任务数量为0，跳过任务列表');
     }
@@ -3212,21 +3241,97 @@ async function syncFromZentaoInBackground(config) {
 
               const openedBy = row.querySelector('.c-user')?.textContent?.trim() || '';
 
-              const confirmSpan = row.querySelector('.c-confirmed span, .c-confirm span');
-              const confirmed = confirmSpan?.classList.contains('confirmed');
+              // 根据实际的 HTML 结构解析 bug 状态
+              // 从示例可以看到：
+              // - 第 7 个 td（索引 6）：确认状态 <td class="text-center"><span class="confirmed">已确认</span></td>
+              // - 第 11 个 td（索引 10）：解决状态 <td>已解决</td>
 
-              const userCells = row.querySelectorAll('.c-user');
-              const resolvedBy = userCells[1]?.textContent?.trim() || '';
+              const allTds = row.querySelectorAll('td');
+              let isConfirmed = false;
+              let isUnconfirmed = false;
+              let isResolved = false;
+              let resolvedBy = '';
+              let resolution = '';
 
-              const resolutionCell = row.querySelector('.c-resolution');
-              const resolution = resolutionCell?.textContent?.trim() || '';
+              console.log('[Content] Bug', zentaoId, `总共有 ${allTds.length} 个 td 单元格`);
 
-              let status = 'unconfirmed';
-              if (resolvedBy) {
-                status = 'resolved';
-              } else if (confirmed) {
-                status = 'activated';
+              // 输出所有 td 的详细信息，帮助确定列结构
+              allTds.forEach((td, index) => {
+                const text = td.textContent?.trim().substring(0, 20);
+                const className = td.className;
+                console.log(`[Content]   [${index}] class="${className}" text="${text}"`);
+              });
+
+              // 检查第 8 个 td（索引 7）- 确认状态
+              if (allTds.length > 7) {
+                const confirmedCell = allTds[7];
+                const confirmedText = confirmedCell.textContent?.trim() || '';
+
+                console.log('[Content] Bug', zentaoId, `第8个td(索引7): "${confirmedText}"`);
+
+                if (confirmedText === '已确认') {
+                  isConfirmed = true;
+                } else if (confirmedText === '未确认') {
+                  isUnconfirmed = true;
+                }
               }
+
+              // 检查第 11 个 td（索引 10）- 解决状态
+              if (allTds.length > 10) {
+                const resolvedCell = allTds[10];
+                resolution = resolvedCell.textContent?.trim() || '';
+
+                console.log('[Content] Bug', zentaoId, `第11个td(索引10): "${resolution}"`);
+
+                if (resolution === '已解决') {
+                  isResolved = true;
+                  // 解决者在第 10 个 td（索引 9）
+                  if (allTds.length > 9) {
+                    resolvedBy = allTds[9].textContent?.trim() || '';
+                    console.log('[Content] Bug', zentaoId, `解决者: ${resolvedBy}`);
+                  }
+                }
+              }
+
+              console.log('[Content] Bug', zentaoId, '状态判断:', {
+                isConfirmed,
+                isUnconfirmed,
+                isResolved,
+                resolvedBy,
+                resolution
+              });
+
+              // 如果已解决，跳过不同步
+              if (isResolved) {
+                console.log('[Content] Bug', zentaoId, '已解决，跳过同步');
+                return;
+              }
+
+              // 根据确认状态设置状态
+              let status = 'unconfirmed';
+              if (isConfirmed) {
+                status = 'activated';
+              } else if (isUnconfirmed) {
+                status = 'unconfirmed';
+              }
+
+              // 打印完整的 bug 信息
+              console.log('[Content] ========== Bug 信息示例 ==========');
+              console.log('[Content]', {
+                zentaoId,
+                title,
+                status,
+                severity,
+                priority,
+                bugType,
+                productName,
+                openedBy,
+                resolvedBy,
+                resolution,
+                confirmed: isConfirmed
+              });
+              console.log('[Content] ======================================');
+              console.log('[Content] Bug', zentaoId, '最终状态:', status);
 
               bugs.push({
                 zentaoId,
@@ -3239,7 +3344,7 @@ async function syncFromZentaoInBackground(config) {
                 openedBy,
                 resolvedBy,
                 resolution,
-                confirmed
+                confirmed: isConfirmed
               });
             } catch (err) {
               console.error('[Content] 解析Bug失败:', err);
@@ -3258,6 +3363,9 @@ async function syncFromZentaoInBackground(config) {
 
     // 6. 发送到后端API保存
     console.log('[Background] ========== 步骤6: 保存到本地数据库 ==========');
+    console.log('[Background] 准备发送任务数据:', zentaoTasks.length, '个任务');
+    console.log('[Background] 准备发送Bug数据:', zentaoBugs.length, '个Bug');
+
     const [tasksResult, bugsResult] = await Promise.all([
       fetch(`${API_BASE_URL}/api/zentao/sync-tasks`, {
         method: 'POST',

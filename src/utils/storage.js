@@ -75,7 +75,10 @@ async function writeJSON(filePath, data) {
     const content = JSON.stringify(data, null, 2);
     await fs.writeFile(tmpPath, content, 'utf-8');
 
-    // 原子重命名
+    // 原子重命名（如果目标文件存在，先删除）
+    if (existsSync(filePath)) {
+      await fs.unlink(filePath);
+    }
     await fs.rename(tmpPath, filePath);
 
     return true;

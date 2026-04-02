@@ -8173,12 +8173,7 @@ const BugManager = {
       return;
     }
 
-    if (!bug.executionId) {
-      Toast.warning('该 Bug 缺少执行 ID 信息，无法激活');
-      return;
-    }
-
-    // 显示激活表单
+    // 激活 Bug 不需要执行信息，直接显示激活表单
     this.showActivateModal(bugId);
   },
 
@@ -8201,7 +8196,7 @@ const BugManager = {
     // 保存当前操作的 Bug ID
     modal.dataset.bugId = bugId;
     modal.dataset.zentaoBugId = bug.zentaoId;
-    modal.dataset.executionId = bug.executionId;
+    // 注意：激活 Bug 不需要 executionId，所以不再保存它
 
     // 重置表单
     document.getElementById('activatePri').value = '3';
@@ -8640,7 +8635,6 @@ const BugManager = {
 
     const bugId = modal.dataset.bugId;
     const zentaoBugId = modal.dataset.zentaoBugId;
-    const executionId = modal.dataset.executionId;
 
     if (!bugId || !zentaoBugId) {
       Toast.error('Bug 信息不完整');
@@ -8661,7 +8655,6 @@ const BugManager = {
     console.log('[BugManager] 确认激活，参数:', {
       bugId,
       zentaoBugId,
-      executionId,
       assignedTo,
       ccList,
       pri,
@@ -8681,14 +8674,10 @@ const BugManager = {
         return;
       }
 
-      // 构造看板页面 URL
-      const kanbanUrl = `${baseUrl}/zentao/execution-kanban-${executionId}-bug.html`;
-
-      // 调用 background.js 激活 Bug
+      // 调用 background.js 激活 Bug（不需要看板 URL）
       const response = await chrome.runtime.sendMessage({
         action: 'activateBugInZentao',
         baseUrl,
-        kanbanUrl,
         bugId: zentaoBugId,
         assignedTo,
         ccList,
