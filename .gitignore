@@ -10,8 +10,6 @@ logs/
 
 # 数据
 data/*.json
-!data/tasks.json
-!data/history.json
 
 # 备份
 data/backups/
