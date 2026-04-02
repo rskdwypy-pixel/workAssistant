@@ -2065,7 +2065,7 @@ function createTaskCard(task) {
             style="cursor: pointer; padding: 2px 4px; border-radius: 4px; transition: background 0.2s;">
             ${escapeHtml(task.title)}
           </span>
-          ${task.zentaoId ? `<a href="${getZentaoTaskUrl(task.zentaoId)}" target="_blank" class="zentao-link" style="color: #3b82f6; text-decoration: none; font-size: 12px;">#${task.zentaoId}</a>` : ''}
+          ${task.zentaoId ? `<span class="zentao-task-link" data-task-id="${task.zentaoId}" style="color: #3b82f6; text-decoration: none; font-size: 12px; cursor: pointer;">#${task.zentaoId}</span>` : ''}
         </div>
         ${task.executionName ? `<span class="execution-tag" style="margin-top: 4px;">${escapeHtml(task.executionName)}</span>` : ''}
       </div>
@@ -2258,6 +2258,41 @@ function createTaskCard(task) {
     e.preventDefault();
     showTaskDetail(task);
   });
+
+  // 任务 ID 链接点击事件 - 复用禅道标签页
+  const taskLink = card.querySelector('.zentao-task-link');
+  if (taskLink && task.zentaoId) {
+    taskLink.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      try {
+        // 获取禅道配置
+        const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
+        const configResult = await configResp.json();
+
+        if (!configResult.success || !configResult.data || !configResult.data.url) {
+          Toast.error('禅道未配置');
+          return;
+        }
+
+        const baseUrl = configResult.data.url.replace(/\/$/, '');
+        const taskUrl = `${baseUrl}/zentao/task-view-${task.zentaoId}.html`;
+
+        // 使用 ZentaoTabManager 复用已存在的禅道标签页
+        const tab = await ZentaoTabManager.getOrCreateTab({
+          baseUrl,
+          targetUrl: taskUrl,
+          active: true  // 激活标签页
+        });
+
+        console.log('[TaskCard] 已在标签页', tab.id, '中打开任务详情');
+      } catch (err) {
+        console.error('[TaskCard] 打开任务详情失败:', err);
+        Toast.error('打开任务详情失败: ' + err.message);
+      }
+    });
+  }
 
   return card;
 }
