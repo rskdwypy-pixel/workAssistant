@@ -1,6 +1,39 @@
 {
   "tasks": [
     {
+      "id": "19d4e078-9f26-4e6c-adab-0e318b74aade",
+      "type": "bug",
+      "title": "卡中心测试bug",
+      "content": "卡中心测试 bug 新增哈哈哈",
+      "status": "unconfirmed",
+      "severity": 3,
+      "bugType": "codeerror",
+      "productId": "67",
+      "executionId": 148,
+      "executionName": "/民生卡中心项目交付",
+      "projectName": "",
+      "steps": "卡中心测试 bug 新增哈哈哈",
+      "os": "",
+      "browser": "",
+      "openedBuild": "trunk",
+      "priority": 3,
+      "assignedTo": "lijc",
+      "assignedToList": [
+        "lijc"
+      ],
+      "cc": [
+        "luyl"
+      ],
+      "comments": [],
+      "history": [],
+      "assignedDate": "",
+      "zentaoId": 491,
+      "createdAt": "2026-04-02T09:03:54.680Z",
+      "updatedAt": "2026-04-02T09:03:54.680Z",
+      "progress": 0,
+      "consumedTime": 0
+    },
+    {
       "id": "e39745f6-226d-49e9-b8ba-2eaa6c8af7a6",
       "type": "task",
       "title": "上海电信项目寄设备",
@@ -15,7 +48,7 @@
       "projectId": 166,
       "totalConsumedTime": 0.2,
       "createdAt": "2026-04-02T08:37:00.229Z",
-      "updatedAt": "2026-04-02T08:47:40.873Z"
+      "updatedAt": "2026-04-02T09:01:25.518Z"
     },
     {
       "id": "cc34e0c8-52f4-41f1-9fc1-0cb054cbc335",
@@ -32,7 +65,7 @@
       "projectId": 130,
       "totalConsumedTime": 0,
       "createdAt": "2026-04-02T08:37:00.228Z",
-      "updatedAt": "2026-04-02T08:47:40.873Z"
+      "updatedAt": "2026-04-02T09:01:25.518Z"
     },
     {
       "id": "62bbb465-ab40-4820-9c66-241c21df36c4",
@@ -48,16 +81,40 @@
       "resolvedBy": "罗天文",
       "resolution": "已解决",
       "confirmed": true,
-      "assignedTo": "",
+      "assignedTo": "李佳成",
       "assignedToList": [],
       "cc": [],
       "comments": [],
       "zentaoId": 320,
       "createdAt": "2026-04-02T07:00:09.397Z",
-      "updatedAt": "2026-04-02T07:00:09.397Z",
+      "updatedAt": "2026-04-02T09:01:25.620Z",
       "progress": 0,
       "consumedTime": 0,
-      "projectName": ""
+      "projectName": "",
+      "steps": "[步骤]\n1. 链接录制器后打开录制应用\n2.打开录制模式，点击左侧录屏上应用的按钮，\n[结果]\n右侧的控件树自动定位联动位置不准[期望]",
+      "history": [
+        {
+          "comment": "",
+          "text": "2025-11-03 10:51:54, 由 李佳成 创建。"
+        },
+        {
+          "comment": "",
+          "text": "2025-11-14 14:42:53, 由 李佳成 编辑。\n                \n        \n          修改了 所属产品，旧值为 \"3\"，新值为 \"19\"。"
+        },
+        {
+          "comment": "",
+          "text": "2025-11-14 15:16:46, 由 罗天文 确认Bug。\n                \n        \n          修改了 是否确认，旧值为 \"0\"，新值为 \"1\"。"
+        },
+        {
+          "comment": "",
+          "text": "2025-11-19 17:52:44, 由 罗天文 转为任务，编号为 484。"
+        },
+        {
+          "comment": "",
+          "text": "2025-11-19 17:53:27, 由 罗天文 解决，方案为 已解决 。                \n        \n          修改了 解决版本，旧值为 \"\"，新值为 \"trunk\"。\n修改了 解决日期，旧值为 \"\"，新值为 \"2025-11-19 17:53:22\"。\n修改了 指派给   ，旧值为 \"luotw\"，新值为 \"lijc\"。\n修改了 Bug状态   ，旧值为 \"active\"，新值为 \"resolved\"。\n修改了 解决者   ，旧值为 \"\"，新值为 \"luotw\"。\n修改了 解决方案，区别为：\n001- \n001+ fixed\n001- \n001+ fixed"
+        }
+      ],
+      "assignedDate": "2025-11-19 17:53:27"
     },
     {
       "id": "e140eb35-12fc-42e1-88f0-f65b79f23007",
@@ -73,16 +130,40 @@
       "resolvedBy": "罗天文",
       "resolution": "已解决",
       "confirmed": true,
-      "assignedTo": "",
+      "assignedTo": "李佳成",
       "assignedToList": [],
       "cc": [],
       "comments": [],
       "zentaoId": 330,
       "createdAt": "2026-04-02T07:00:09.397Z",
-      "updatedAt": "2026-04-02T07:00:09.397Z",
+      "updatedAt": "2026-04-02T09:01:25.620Z",
       "progress": 0,
       "consumedTime": 0,
-      "projectName": ""
+      "projectName": "",
+      "steps": "[步骤]\n[结果]\n[期望]",
+      "history": [
+        {
+          "comment": "",
+          "text": "2025-11-21 14:05:52, 由 李佳成 创建。"
+        },
+        {
+          "comment": "",
+          "text": "2025-11-21 14:07:34, 由 李佳成 指派给 罗天文。\n                \n        \n          修改了 指派给，旧值为 \"weiwf\"，新值为 \"luotw\"。"
+        },
+        {
+          "comment": "",
+          "text": "2025-11-21 14:08:20, 由 李佳成 编辑。\n                \n        \n          修改了 所属产品，旧值为 \"82\"，新值为 \"19\"。\n修改了 重现步骤，区别为：\n001- [步骤][结果][期望]\n001+ [步骤]\n002+ [结果]\n003+ [期望]\n004+ \n001- <p>[步骤]</p><br /><p>[结果]</p><br /><p>[期望]</p><br />\n001+ <p>[步骤]</p>\n002+ <br /><p>[结果]</p>\n003+ <br /><p>[期望]</p>\n004+ <br />"
+        },
+        {
+          "comment": "",
+          "text": "2025-11-21 14:10:09, 由 罗天文 转为任务，编号为 492。"
+        },
+        {
+          "comment": "",
+          "text": "2025-11-21 14:11:01, 由 罗天文 解决，方案为 已解决 。                \n        \n          修改了 解决版本，旧值为 \"\"，新值为 \"trunk\"。\n修改了 解决日期，旧值为 \"\"，新值为 \"2025-11-21 14:10:55\"。\n修改了 指派给   ，旧值为 \"luotw\"，新值为 \"lijc\"。\n修改了 Bug状态   ，旧值为 \"active\"，新值为 \"resolved\"。\n修改了 是否确认，旧值为 \"0\"，新值为 \"1\"。\n修改了 解决者   ，旧值为 \"\"，新值为 \"luotw\"。\n修改了 解决方案，区别为：\n001- \n001+ fixed\n001- \n001+ fixed"
+        }
+      ],
+      "assignedDate": "2025-11-21 14:11:01"
     },
     {
       "id": "067a0c51-3800-47eb-b217-254bccc92e81",
@@ -98,41 +179,32 @@
       "resolvedBy": "罗天文",
       "resolution": "已解决",
       "confirmed": true,
-      "assignedTo": "",
+      "assignedTo": "李佳成",
       "assignedToList": [],
       "cc": [],
       "comments": [],
       "zentaoId": 335,
       "createdAt": "2026-04-02T07:00:09.397Z",
-      "updatedAt": "2026-04-02T07:00:09.397Z",
+      "updatedAt": "2026-04-02T09:01:25.620Z",
       "progress": 0,
       "consumedTime": 0,
-      "projectName": ""
-    },
-    {
-      "id": "d6440c89-49db-49a0-83ba-2ef03f785543",
-      "type": "bug",
-      "title": "卡中心测试异常",
-      "content": "卡中心测试异常",
-      "status": "closed",
-      "severity": 3,
-      "priority": 3,
-      "bugType": "codeerror",
-      "productName": "",
-      "openedBy": "",
-      "resolvedBy": "李佳成",
-      "resolution": "已解决",
-      "confirmed": true,
-      "assignedTo": "",
-      "assignedToList": [],
-      "cc": [],
-      "comments": [],
-      "zentaoId": 481,
-      "createdAt": "2026-04-02T07:00:09.397Z",
-      "updatedAt": "2026-04-02T07:00:09.397Z",
-      "progress": 0,
-      "consumedTime": 0,
-      "projectName": ""
+      "projectName": "",
+      "steps": "[步骤][结果][期望]",
+      "history": [
+        {
+          "comment": "",
+          "text": "2025-12-08 17:21:12, 由 李佳成 创建。"
+        },
+        {
+          "comment": "",
+          "text": "2025-12-12 11:16:28, 由 罗天文 转为任务，编号为 500。"
+        },
+        {
+          "comment": "",
+          "text": "2025-12-12 14:42:18, 由 罗天文 解决，方案为 已解决 。                \n        \n          修改了 解决版本，旧值为 \"\"，新值为 \"trunk\"。\n修改了 解决日期，旧值为 \"\"，新值为 \"2025-12-12 14:42:12\"。\n修改了 指派给   ，旧值为 \"luotw\"，新值为 \"lijc\"。\n修改了 Bug状态   ，旧值为 \"active\"，新值为 \"resolved\"。\n修改了 是否确认，旧值为 \"0\"，新值为 \"1\"。\n修改了 解决者   ，旧值为 \"\"，新值为 \"luotw\"。\n修改了 解决方案，区别为：\n001- \n001+ fixed\n001- \n001+ fixed"
+        }
+      ],
+      "assignedDate": "2025-12-12 14:42:18"
     },
     {
       "id": "19d9bccb-7d9c-4077-ab4f-6a37d4436b36",
@@ -149,7 +221,7 @@
       "projectId": 166,
       "totalConsumedTime": 0.3,
       "createdAt": "2026-04-02T05:58:21.483Z",
-      "updatedAt": "2026-04-02T08:47:40.873Z"
+      "updatedAt": "2026-04-02T09:01:25.518Z"
     },
     {
       "id": "e9cbe43e-8434-4ea1-b674-463b8cccb2c2",
@@ -194,7 +266,7 @@
       "projectId": 119,
       "totalConsumedTime": 0,
       "createdAt": "2026-04-02T05:58:21.483Z",
-      "updatedAt": "2026-04-02T08:47:40.873Z"
+      "updatedAt": "2026-04-02T09:01:25.517Z"
     },
     {
       "id": "c7681138-f003-41ea-ba9c-d23fee58357d",
@@ -211,7 +283,7 @@
       "projectId": 166,
       "totalConsumedTime": 0,
       "createdAt": "2026-04-02T05:58:21.483Z",
-      "updatedAt": "2026-04-02T08:47:40.872Z"
+      "updatedAt": "2026-04-02T09:01:25.517Z"
     },
     {
       "id": "f1403be9-2fd1-4c09-b969-274e327e3771",
@@ -228,136 +300,7 @@
       "projectId": 166,
       "totalConsumedTime": 0,
       "createdAt": "2026-04-02T05:58:21.483Z",
-      "updatedAt": "2026-04-02T08:47:40.872Z"
-    },
-    {
-      "id": "3430e87c-77d1-4900-be8d-0e07bdb6bae4",
-      "type": "bug",
-      "title": "测试",
-      "content": "测试",
-      "status": "activated",
-      "severity": 3,
-      "priority": 3,
-      "bugType": "codeerror",
-      "productName": "",
-      "openedBy": "",
-      "resolvedBy": "",
-      "resolution": "",
-      "confirmed": false,
-      "assignedTo": "lijc",
-      "assignedToList": [
-        "lijc"
-      ],
-      "cc": [
-        "lijc"
-      ],
-      "comments": [],
-      "zentaoId": 480,
-      "createdAt": "2026-04-02T05:43:37.345Z",
-      "updatedAt": "2026-04-02T07:09:38.227Z",
-      "progress": 0,
-      "consumedTime": 0,
-      "projectName": ""
-    },
-    {
-      "id": "687334f9-23e7-48e5-afc3-514a2afe36f2",
-      "type": "bug",
-      "title": "bug3复现异常",
-      "content": "bug3复现异常",
-      "status": "unconfirmed",
-      "severity": 3,
-      "priority": 3,
-      "bugType": "codeerror",
-      "productName": "",
-      "openedBy": "",
-      "resolvedBy": "",
-      "resolution": "",
-      "confirmed": false,
-      "assignedTo": "",
-      "assignedToList": [],
-      "cc": [],
-      "comments": [],
-      "zentaoId": 482,
-      "createdAt": "2026-04-02T05:43:37.345Z",
-      "updatedAt": "2026-04-02T07:00:09.397Z",
-      "progress": 0,
-      "consumedTime": 0,
-      "projectName": ""
-    },
-    {
-      "id": "25e47885-0167-4d58-a2f3-64b37af43461",
-      "type": "bug",
-      "title": "测试bug34复现失败",
-      "content": "测试bug34复现失败",
-      "status": "unconfirmed",
-      "severity": 3,
-      "priority": 3,
-      "bugType": "codeerror",
-      "productName": "",
-      "openedBy": "",
-      "resolvedBy": "",
-      "resolution": "",
-      "confirmed": false,
-      "assignedTo": "",
-      "assignedToList": [],
-      "cc": [],
-      "comments": [],
-      "zentaoId": 483,
-      "createdAt": "2026-04-02T05:43:37.345Z",
-      "updatedAt": "2026-04-02T07:00:09.397Z",
-      "progress": 0,
-      "consumedTime": 0,
-      "projectName": ""
-    },
-    {
-      "id": "2b049631-b9ec-4a61-bcde-7b8d3a31b324",
-      "type": "bug",
-      "title": "bug4455测试失败",
-      "content": "bug4455测试失败",
-      "status": "activated",
-      "severity": 3,
-      "priority": 3,
-      "bugType": "codeerror",
-      "productName": "",
-      "openedBy": "",
-      "resolvedBy": "",
-      "resolution": "",
-      "confirmed": true,
-      "assignedTo": "",
-      "assignedToList": [],
-      "cc": [],
-      "comments": [],
-      "zentaoId": 484,
-      "createdAt": "2026-04-02T05:43:37.345Z",
-      "updatedAt": "2026-04-02T07:00:09.397Z",
-      "progress": 0,
-      "consumedTime": 0,
-      "projectName": ""
-    },
-    {
-      "id": "86e322a3-902b-4529-afa5-bd93ed35981f",
-      "type": "bug",
-      "title": "bug999测试失败",
-      "content": "bug999测试失败",
-      "status": "unconfirmed",
-      "severity": 3,
-      "priority": 3,
-      "bugType": "codeerror",
-      "productName": "",
-      "openedBy": "",
-      "resolvedBy": "",
-      "resolution": "",
-      "confirmed": false,
-      "assignedTo": "",
-      "assignedToList": [],
-      "cc": [],
-      "comments": [],
-      "zentaoId": 485,
-      "createdAt": "2026-04-02T05:43:37.344Z",
-      "updatedAt": "2026-04-02T07:00:09.397Z",
-      "progress": 0,
-      "consumedTime": 0,
-      "projectName": ""
+      "updatedAt": "2026-04-02T09:01:25.517Z"
     },
     {
       "id": "79c34fa2-23c9-4454-bf96-e091a5a39d9d",
@@ -373,93 +316,29 @@
       "resolvedBy": "",
       "resolution": "",
       "confirmed": true,
-      "assignedTo": "",
+      "assignedTo": "李佳成",
       "assignedToList": [],
-      "cc": [],
+      "cc": "李佳成",
       "comments": [],
       "zentaoId": 486,
       "createdAt": "2026-04-02T05:43:37.344Z",
-      "updatedAt": "2026-04-02T07:00:09.397Z",
+      "updatedAt": "2026-04-02T09:01:25.620Z",
       "progress": 0,
       "consumedTime": 0,
-      "projectName": ""
-    },
-    {
-      "id": "274ef44d-2f34-4ec8-98d5-c6b2b1401cd7",
-      "type": "bug",
-      "title": "步骤错误",
-      "content": "步骤错误",
-      "status": "activated",
-      "severity": 3,
-      "priority": 3,
-      "bugType": "codeerror",
-      "productName": "",
-      "openedBy": "",
-      "resolvedBy": "",
-      "resolution": "",
-      "confirmed": true,
-      "assignedTo": "",
-      "assignedToList": [],
-      "cc": [],
-      "comments": [],
-      "zentaoId": 488,
-      "createdAt": "2026-04-02T05:43:37.344Z",
-      "updatedAt": "2026-04-02T07:00:09.397Z",
-      "progress": 0,
-      "consumedTime": 0,
-      "projectName": ""
-    },
-    {
-      "id": "2c848c10-1d7e-487b-b599-0190313ce261",
-      "content": "上海电信项目给苏州寄一台 iOS 设备",
-      "title": "上海电信项目寄设备",
-      "status": "in_progress",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 30,
-      "executionId": "167",
-      "executionName": "/2026 年工作日志记录",
-      "zentaoId": "700",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 0.2,
-      "createdAt": "2026-04-02T06:06:54.383Z",
-      "updatedAt": "2026-04-02T06:07:39.321Z",
-      "executionType": "stage",
-      "progressUpdates": [
+      "projectName": "",
+      "steps": "bug 测试",
+      "history": [
         {
-          "timestamp": "2026-04-02T06:07:39.316Z",
-          "progress": 30,
-          "oldProgress": 0,
-          "workContent": "设备准备完成：1.巨魔；2.测试快手",
-          "consumedTime": 0.2
+          "comment": "",
+          "text": "2026-04-01 11:23:55, 由 李佳成 创建。"
+        },
+        {
+          "comment": "",
+          "text": "2026-04-01 11:43:13, 由 李佳成 确认Bug。\n                \n        \n          修改了 Bug类型   ，旧值为 \"automation\"，新值为 \"codeerror\"。\n修改了 是否确认，旧值为 \"0\"，新值为 \"1\"。"
         }
       ],
-      "progressComment": "设备准备完成：1.巨魔；2.测试快手",
-      "consumedTime": 0.2
-    },
-    {
-      "id": "4abf285c-e83f-4769-ae90-25ed6ff84b94",
-      "content": "卡中心 3 月竞品分析报告",
-      "title": "卡中心3月竞品分析报告",
-      "status": "todo",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 0,
-      "executionId": "148",
-      "executionName": "/民生卡中心项目交付",
-      "zentaoId": "701",
-      "zentaoExecution": "148",
-      "totalConsumedTime": 0,
-      "createdAt": "2026-04-02T06:09:05.283Z",
-      "updatedAt": "2026-04-02T06:09:13.933Z",
-      "executionType": "kanban"
+      "assignedDate": "2026-04-01 11:43:13"
     }
   ],
-  "lastUpdated": "2026-04-02T08:47:40.873Z"
+  "lastUpdated": "2026-04-02T10:45:29.873Z"
 }

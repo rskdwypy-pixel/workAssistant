@@ -14,7 +14,8 @@ async function getAllTasks(filters = {}) {
   tasks.forEach(task => {
     // 优先使用 zentaoId 去重（对于已同步到禅道的任务）
     // 如果没有 zentaoId，使用本地 id 去重
-    const key = task.zentaoId || task.id;
+    // 重要：将 zentaoId 转换为字符串，确保类型一致（700 和 '700' 被视为相同）
+    const key = task.zentaoId ? String(task.zentaoId) : task.id;
     // 如果有重复，保留最新的（按 updatedAt）
     const existing = taskMap.get(key);
     if (!existing ||
