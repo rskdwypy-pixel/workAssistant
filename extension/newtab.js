@@ -8120,10 +8120,21 @@ const BugManager = {
         ${bug.zentaoId ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">禅道BugID: <span class="bug-detail-zentao-id">${escapeHtml(bug.zentaoId)}</span></p>` : '<p style="margin: 4px 0; font-size: 13px; color: var(--text-muted);">禅道BugID: 未关联</p>'}
         ${bug.steps ? `
           <div style="margin-top: 12px;">
-            <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 500;">复现步骤:</p>
+            <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 500;">重现步骤:</p>
             <div style="padding: 12px; background: var(--bg-secondary); border-radius: 6px;">
               <p style="margin: 0; font-size: 13px; white-space: pre-wrap;">${escapeHtml(bug.steps)}</p>
             </div>
+          </div>
+        ` : ''}
+        ${bug.history && bug.history.length > 0 ? `
+          <div style="margin-top: 12px;">
+            <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 500;">历史记录:</p>
+            ${bug.history.map((item, index) => `
+              <div style="padding: 12px; background: var(--bg-secondary); border-radius: 6px; margin-bottom: ${index < bug.history.length - 1 ? '8px' : '0'};">
+                <p style="margin: 0 0 4px 0; font-size: 12px; color: var(--text-muted);">${escapeHtml(item.text)}</p>
+                ${item.comment ? `<p style="margin: 4px 0 0 0; font-size: 13px; white-space: pre-wrap; color: var(--text-secondary);">${escapeHtml(item.comment)}</p>` : ''}
+              </div>
+            `).join('')}
           </div>
         ` : ''}
         ${bug.comments && bug.comments.length > 0 ? `
@@ -8143,6 +8154,7 @@ const BugManager = {
         ` : ''}
         <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
           ${assigneeText ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">指派人: ${escapeHtml(assigneeText)}</p>` : ''}
+          ${bug.assignedDate ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">指派时间: ${escapeHtml(bug.assignedDate)}</p>` : ''}
           ${ccText ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">抄送人: ${escapeHtml(ccText)}</p>` : ''}
         </div>
       </div>

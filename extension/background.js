@@ -3284,6 +3284,53 @@ async function syncFromZentaoInBackground(config) {
       console.log('[Background] Bug数量为0，跳过Bug列表');
     }
 
+    // 5.5. 为每个 Bug 获取详情信息（重现步骤、历史记录、指派人、抄送人）
+    if (zentaoBugs.length > 0) {
+      console.log('[Background] ========== 步骤5.5: 获取 Bug 详情信息 ==========');
+      console.log('[Background] 开始为', zentaoBugs.length, '个 Bug 获取详情信息...');
+
+      // 获取禅道配置
+      const config = await getConfig();
+      const baseUrl = config?.zentaoUrl?.replace(/\/$/, '');
+      if (!baseUrl) {
+        console.warn('[Background] 未配置禅道 URL，跳过 Bug 详情获取');
+      } else {
+        // 为每个 Bug 获取详情
+        for (let i = 0; i < zentaoBugs.length; i++) {
+          const bug = zentaoBugs[i];
+          console.log(`[Background] [${i + 1}/${zentaoBugs.length}] 获取 Bug ${bug.zentaoId} 详情...`);
+
+          try {
+            const bugDetail = await fetchBugDetail(baseUrl, bug.zentaoId);
+
+            // 将详情信息合并到 Bug 对象
+            bug.steps = bugDetail.steps;
+            bug.history = bugDetail.history;
+            bug.assignedTo = bugDetail.assignedTo;
+            bug.assignedDate = bugDetail.assignedDate;
+            bug.cc = bugDetail.cc;
+
+            console.log(`[Background] ✓ Bug ${bug.zentaoId} 详情获取完成`);
+          } catch (err) {
+            console.error(`[Background] ✗ Bug ${bug.zentaoId} 详情获取失败:`, err);
+            // 即使失败也保留 Bug，只是详情信息为空
+            bug.steps = '';
+            bug.history = [];
+            bug.assignedTo = '';
+            bug.assignedDate = '';
+            bug.cc = '';
+          }
+
+          // 添加延迟避免请求过快
+          if (i < zentaoBugs.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        }
+
+        console.log('[Background] ✓ 所有 Bug 详情获取完成');
+      }
+    }
+
     // 6. 发送到后端API保存
     console.log('[Background] ========== 步骤6: 保存到本地数据库 ==========');
     console.log('[Background] 准备发送任务数据:', zentaoTasks.length, '个任务');
@@ -3580,5 +3627,130 @@ async function waitForTabLoad(tabId) {
       resolve();
     }, 30000);
   });
+}
+
+/**
+ * 从 Bug 详情页面提取额外信息
+ * @param {string} baseUrl - 禅道基础URL
+ * @param {number} bugId - Bug ID
+ * @returns {Promise<Object>} Bug 详情信息
+ */
+async function fetchBugDetail(baseUrl, bugId) {
+  console.log('[Background] 开始获取 Bug 详情:', bugId);
+
+  try {
+    // 使用 ZentaoTabManager 获取或创建标签页
+    const bugUrl = `${baseUrl}/zentao/bug-view-${bugId}.html`;
+    const tab = await ZentaoTabManager.getOrCreateTab({
+      baseUrl,
+      targetUrl: bugUrl,
+      active: false
+    });
+
+    console.log('[Background] Bug 详情标签页:', tab.id, tab.url);
+
+    // 等待页面加载完成
+    await ZentaoTabManager.waitForTabLoad(tab.id, 15000);
+
+    // 在页面中执行脚本提取信息
+    const bugDetail = await ZentaoTabManager.executeScript(tab, () => {
+      const result = {
+        steps: '',
+        history: [],
+        assignedTo: '',
+        assignedDate: '',
+        cc: ''
+      };
+
+      try {
+        // 在 iframe 中查找内容
+        const iframe = document.querySelector('#appIframe-qa');
+        if (!iframe) {
+          console.warn('[Bug Detail] 未找到 iframe #appIframe-qa');
+          return result;
+        }
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+        if (!iframeDoc) {
+          console.warn('[Bug Detail] 无法访问 iframe document');
+          return result;
+        }
+
+        // 1. 提取重现步骤
+        const stepsDiv = iframeDoc.querySelector('.detail-content.article-content');
+        if (stepsDiv) {
+          result.steps = stepsDiv.textContent?.trim() || '';
+          console.log('[Bug Detail] 重现步骤:', result.steps.substring(0, 100));
+        }
+
+        // 2. 提取历史记录
+        const historyList = iframeDoc.querySelector('.histories-list');
+        if (historyList) {
+          const historyItems = historyList.querySelectorAll('li');
+          historyItems.forEach((item, index) => {
+            const historyText = item.textContent?.trim() || '';
+            console.log(`[Bug Detail] 历史[${index}]:`, historyText.substring(0, 100));
+
+            // 提取备注内容（如果有）
+            const commentDiv = item.querySelector('.comment-content');
+            const comment = commentDiv ? commentDiv.textContent?.trim() : '';
+
+            result.history.push({
+              text: historyText,
+              comment: comment
+            });
+          });
+          console.log('[Bug Detail] 提取到', result.history.length, '条历史记录');
+        }
+
+        // 3. 提取指派人（从基本信息表格中）
+        const table = iframeDoc.querySelector('table.table-data');
+        if (table) {
+          const rows = table.querySelectorAll('tr');
+          rows.forEach(row => {
+            const th = row.querySelector('th');
+            const td = row.querySelector('td');
+            if (!th || !td) return;
+
+            const thText = th.textContent?.trim();
+            const tdText = td.textContent?.trim();
+
+            if (thText === '当前指派') {
+              // 格式：李佳成 于 2026-04-01 10:16:23
+              const match = tdText.match(/^(.+)\s+于\s+(.+)$/);
+              if (match) {
+                result.assignedTo = match[1];
+                result.assignedDate = match[2];
+              } else {
+                result.assignedTo = tdText;
+              }
+              console.log('[Bug Detail] 指派人:', result.assignedTo, '日期:', result.assignedDate);
+            } else if (thText === '抄送给') {
+              result.cc = tdText;
+              console.log('[Bug Detail] 抄送人:', result.cc);
+            }
+          });
+        }
+
+        console.log('[Bug Detail] 提取完成:', result);
+        return result;
+      } catch (err) {
+        console.error('[Bug Detail] 提取失败:', err);
+        return result;
+      }
+    });
+
+    console.log('[Background] ✓ Bug 详情提取完成:', bugDetail);
+    return bugDetail;
+  } catch (err) {
+    console.error('[Background] ✗ 获取 Bug 详情失败:', err);
+    return {
+      steps: '',
+      history: [],
+      assignedTo: '',
+      assignedDate: '',
+      cc: ''
+    };
+  }
 }
 

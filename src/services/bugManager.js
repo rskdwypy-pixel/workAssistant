@@ -32,6 +32,8 @@ async function createBug(bugData) {
     assignedToList: bugData.assignedToList || [],
     cc: bugData.cc || [],
     comments: bugData.comments || [],  // 改为数组，存储多条备注
+    history: bugData.history || [],  // 新增：历史记录
+    assignedDate: bugData.assignedDate || '',  // 新增：指派时间
     zentaoId: bugData.zentaoId || null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -415,6 +417,12 @@ async function importZentaoBugs(zentaoBugs) {
           resolvedBy: zentaoBug.resolvedBy || existingBug.resolvedBy,
           resolution: zentaoBug.resolution || existingBug.resolution,
           confirmed: zentaoBug.confirmed,
+          // 新增字段
+          steps: zentaoBug.steps || existingBug.steps || '',
+          history: zentaoBug.history || existingBug.history || [],
+          assignedTo: zentaoBug.assignedTo || existingBug.assignedTo || '',
+          assignedDate: zentaoBug.assignedDate || existingBug.assignedDate || '',
+          cc: zentaoBug.cc || existingBug.cc || [],
           updatedAt: new Date().toISOString()
         });
 
@@ -437,9 +445,13 @@ async function importZentaoBugs(zentaoBugs) {
           resolvedBy: zentaoBug.resolvedBy || '',
           resolution: zentaoBug.resolution || '',
           confirmed: zentaoBug.confirmed,
-          assignedTo: '',
+          // 新增字段
+          steps: zentaoBug.steps || '',
+          history: zentaoBug.history || [],
+          assignedTo: zentaoBug.assignedTo || '',
+          assignedDate: zentaoBug.assignedDate || '',
+          cc: zentaoBug.cc || [],
           assignedToList: [],
-          cc: [],
           comments: [],
           zentaoId: zentaoBug.zentaoId,
           createdAt: new Date().toISOString(),
