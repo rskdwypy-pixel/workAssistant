@@ -1,1412 +1,344 @@
 {
   "tasks": [
     {
-      "id": "a60920c2-cb2f-4790-828d-460ff2d61cd0",
-      "content": "iOS 签名修改",
-      "title": "iOS签名修改",
+      "id": "e39745f6-226d-49e9-b8ba-2eaa6c8af7a6",
+      "type": "task",
+      "title": "上海电信项目寄设备",
+      "content": "上海电信项目寄设备",
       "status": "done",
-      "priority": "medium",
-      "category": "开发",
-      "dueDate": null,
-      "createdAt": "2026-02-27T03:36:57.454Z",
-      "updatedAt": "2026-02-27T13:07:54.764Z",
+      "priority": 3,
       "progress": 100,
-      "order": 8
-    },
-    {
-      "id": "30f8994c-10b9-45fa-b966-557e630e6d04",
-      "content": "华夏银行页面变化，处理脚本",
-      "title": "处理华夏银行脚本",
-      "status": "done",
-      "dueDate": null,
-      "reminderTime": "2026-02-27T10:41:00.000Z",
-      "progress": 100,
-      "createdAt": "2026-02-27T08:10:08.337Z",
-      "updatedAt": "2026-02-27T13:07:54.764Z",
-      "reminder3hTriggered": true,
-      "reminderExactTriggered": true,
-      "order": 7
-    },
-    {
-      "id": "10e7a513-6d24-46a1-b86d-87526a8ea58d",
-      "content": "处理 E 路有我账号登录问题，已完成",
-      "title": "处理E路有我账号登录问题",
-      "status": "done",
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "createdAt": "2026-02-27T12:41:54.132Z",
-      "updatedAt": "2026-02-27T13:07:54.764Z",
-      "order": 5
-    },
-    {
-      "id": "acaeba35-3f3d-46f0-a135-711bb1a5eeee",
-      "content": "处理阿迪达斯账号掉登录问题，已完成",
-      "title": "处理阿迪达斯账号掉登录问题",
-      "status": "done",
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "createdAt": "2026-02-27T12:46:06.417Z",
-      "updatedAt": "2026-02-27T13:07:54.764Z",
-      "order": 6
-    },
-    {
-      "id": "500f7306-3b70-4fbc-8500-f234d6a8a073",
-      "content": "江苏农信锁屏问题排查",
-      "title": "江苏农信锁屏问题排查",
-      "status": "done",
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "createdAt": "2026-02-28T01:45:50.556Z",
-      "updatedAt": "2026-02-28T03:02:34.075Z",
-      "priority": 1,
-      "order": 6
-    },
-    {
-      "id": "55bdfbd5-2cd0-4192-9a73-f482dbfb5eac",
-      "content": "民生卡中心竞品分析，已完成 40%，预计下周五完成",
-      "title": "民生卡中心竞品分析",
-      "status": "done",
-      "priority": 2,
-      "dueDate": null,
-      "reminderTime": "2026-03-08T10:00:00.000Z",
-      "reminder3hTriggered": true,
-      "reminderExactTriggered": true,
-      "progress": 100,
-      "zentaoId": "561",
-      "totalConsumedTime": 15,
-      "createdAt": "2026-03-01T11:30:35.724Z",
-      "updatedAt": "2026-03-10T02:20:55.286Z",
-      "zentaoExecution": "167",
-      "order": null,
+      "zentaoId": 700,
+      "executionId": "167",
+      "executionName": "2026 年工作日志记录",
+      "projectName": "李佳成 2026 年工作日志记录",
+      "projectId": 166,
+      "totalConsumedTime": 1.2,
+      "createdAt": "2026-04-02T08:37:00.229Z",
+      "updatedAt": "2026-04-02T13:36:38.481Z",
       "progressUpdates": [
         {
-          "timestamp": "2026-03-05T12:10:40.130Z",
-          "progress": 94,
-          "oldProgress": 87,
-          "workContent": "修改民生银行信用卡脚本",
-          "consumedTime": 0.5
-        },
-        {
-          "timestamp": "2026-03-06T08:41:18.431Z",
-          "progress": 97,
-          "oldProgress": 94,
-          "workContent": "完成 1 月份竞品分析报告，但是因为启动时间计算存疑，需要再次进行验证",
-          "consumedTime": 3
-        },
-        {
-          "timestamp": "2026-03-09T03:56:47.237Z",
-          "progress": 98,
-          "oldProgress": 97,
-          "workContent": "重新跑启动数据",
-          "consumedTime": 0.5
-        },
-        {
-          "timestamp": "2026-03-09T10:23:47.154Z",
-          "progress": 99,
-          "oldProgress": 98,
-          "workContent": "完成卡中心竞品分析报告",
-          "consumedTime": 1
-        },
-        {
-          "timestamp": "2026-03-10T02:20:55.282Z",
+          "timestamp": "2026-04-02T13:36:38.472Z",
           "progress": 100,
-          "oldProgress": 99,
-          "workContent": "民生银行对比民生信用卡报告完成",
+          "oldProgress": 29,
+          "workContent": "已寄出",
           "consumedTime": 1
         }
       ],
-      "progressComment": "民生银行对比民生信用卡报告完成",
+      "progressComment": "已寄出",
       "consumedTime": 1
     },
     {
-      "id": "21c9b3d3-0e6e-4751-a300-c78b6b338ed8",
-      "content": "修改中国银行脚本，已完成 40%",
-      "title": "中国银行脚本修改",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "562",
-      "totalConsumedTime": 7,
-      "createdAt": "2026-03-01T12:43:43.452Z",
-      "updatedAt": "2026-03-01T12:50:46.797Z",
-      "zentaoExecution": "167",
-      "order": 2
-    },
-    {
-      "id": "862f9a1d-c318-4a87-8c95-06530d9de72d",
-      "content": "3 月 2 日任务巡检",
-      "title": "3月2日任务巡检",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "564",
-      "totalConsumedTime": 6,
-      "createdAt": "2026-03-02T01:46:55.477Z",
-      "updatedAt": "2026-03-02T09:32:25.780Z",
-      "zentaoExecution": "167"
-    },
-    {
-      "id": "25996e54-e76b-450d-9e77-95076b83949c",
-      "content": "江苏农商行对比分析任务，最紧急",
-      "title": "江苏农商行对比分析",
-      "status": "done",
-      "priority": 1,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "566",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 1,
-      "createdAt": "2026-03-02T07:02:20.383Z",
-      "updatedAt": "2026-03-02T07:50:09.421Z"
-    },
-    {
-      "id": "1e47bcab-110b-4c9a-ab5d-2808df6a87d3",
-      "content": "中泰期货恢复任务",
-      "title": "中泰期货恢复",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "567",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 1.6,
-      "createdAt": "2026-03-02T07:02:46.576Z",
-      "updatedAt": "2026-03-02T09:32:47.233Z"
-    },
-    {
-      "id": "717f671b-08f1-4dac-836b-094812ae4379",
-      "content": "更新 controller 版本 1.9.15",
-      "title": "更新controller版本",
-      "status": "todo",
-      "priority": 2,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 0,
-      "zentaoId": "569",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 0,
-      "createdAt": "2026-03-02T10:32:06.042Z",
-      "updatedAt": "2026-03-03T02:30:14.895Z",
-      "order": 0
-    },
-    {
-      "id": "8488d367-7f33-4fbb-8ede-237294338c2f",
-      "content": "3 月 3 日任务巡检",
-      "title": "3月3日任务巡检",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "570",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 3.5,
-      "createdAt": "2026-03-03T01:58:34.399Z",
-      "updatedAt": "2026-03-03T07:50:17.613Z",
-      "order": 3
-    },
-    {
-      "id": "8c6977e3-7b0e-4309-a5c8-862410764d9f",
-      "content": "3 月 4 日任务巡检",
-      "title": "3月4日任务巡检",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "574",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 1,
-      "createdAt": "2026-03-04T02:35:13.204Z",
-      "updatedAt": "2026-03-04T02:35:53.147Z"
-    },
-    {
-      "id": "6d8e3ee7-8318-4cdf-9c68-37646e3282fd",
-      "content": "爱建证券 POC 报告",
-      "title": "爱建证券POC报告",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": "2026-03-08T10:00:00.000Z",
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "576",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 2.5,
-      "createdAt": "2026-03-04T06:16:09.373Z",
-      "updatedAt": "2026-03-04T10:03:28.358Z"
-    },
-    {
-      "id": "cb34e5b7-afb5-4f41-98b1-8df1430172e8",
-      "content": "极氪汽车新增业务脚本部署",
-      "title": "极氪业务脚本部署",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "577",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 2,
-      "createdAt": "2026-03-04T06:16:27.036Z",
-      "updatedAt": "2026-03-13T03:42:50.328Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-05T12:10:12.775Z",
-          "progress": 46,
-          "oldProgress": 30,
-          "workContent": "优化脚本",
-          "consumedTime": 1
-        },
-        {
-          "timestamp": "2026-03-13T02:19:48.244Z",
-          "progress": 54,
-          "oldProgress": 46,
-          "workContent": "和客户沟通虚拟车绑定问题，已解决",
-          "consumedTime": 0.5
-        },
-        {
-          "timestamp": "2026-03-13T03:42:50.320Z",
-          "progress": 100,
-          "oldProgress": 54,
-          "workContent": "完成爱车脚本编写和部署",
-          "consumedTime": 2
-        }
-      ],
-      "progressComment": "完成爱车脚本编写和部署",
-      "consumedTime": 2
-    },
-    {
-      "id": "f29ad852-e690-4c9c-b560-f53c19a069cb",
-      "content": "3 月 5 日任务巡检",
-      "title": "3月5日任务巡检",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "580",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 1.5,
-      "createdAt": "2026-03-05T02:00:09.941Z",
-      "updatedAt": "2026-03-05T02:44:00.046Z"
-    },
-    {
-      "id": "62e8a1cb-868f-46d5-9279-c21dbc85a9a7",
-      "content": "爱音乐 2 月竞品分析报告",
-      "title": "爱音乐2月竞品分析报告",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "581",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 7.5,
-      "createdAt": "2026-03-05T06:04:57.570Z",
-      "updatedAt": "2026-03-09T09:29:54.020Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-05T12:11:11.775Z",
-          "progress": 20,
-          "oldProgress": 0,
-          "workContent": "脱壳以及上传应用修改爱音乐脚本",
-          "consumedTime": 2
-        },
-        {
-          "timestamp": "2026-03-06T07:06:44.900Z",
-          "progress": 59,
-          "oldProgress": 20,
-          "workContent": "修改 4 家脚本",
-          "consumedTime": 3.5
-        },
-        {
-          "timestamp": "2026-03-09T06:48:14.757Z",
-          "progress": 72,
-          "oldProgress": 59,
-          "workContent": "修改酷狗音乐脚本",
-          "consumedTime": 0.5
-        },
-        {
-          "timestamp": "2026-03-09T09:29:54.017Z",
-          "progress": 100,
-          "oldProgress": 72,
-          "workContent": "咪咕调试完成，预计今天跑完数据",
-          "consumedTime": 1.5
-        }
-      ],
-      "progressComment": "咪咕调试完成，预计今天跑完数据",
-      "consumedTime": 1.5
-    },
-    {
-      "id": "460f49d3-74d2-4d1d-a361-03a5b94eddaf",
-      "content": "阿迪节点账号掉登录处理",
-      "title": "阿迪节点账号登录处理",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "582",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 0.5,
-      "createdAt": "2026-03-05T12:09:37.162Z",
-      "updatedAt": "2026-03-05T12:09:49.999Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-05T12:09:49.996Z",
-          "progress": 100,
-          "oldProgress": 0,
-          "workContent": "更新进度至 100%",
-          "consumedTime": 0.5
-        }
-      ],
-      "progressComment": "更新进度至 100%",
-      "consumedTime": 0.5
-    },
-    {
-      "id": "e6b4123b-7238-4b0d-a610-26a23eaa634d",
-      "content": "关于 dhash 方案优化性能讨论",
-      "title": "dhash方案优化讨论",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "583",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 1,
-      "createdAt": "2026-03-05T12:12:57.253Z",
-      "updatedAt": "2026-03-05T12:13:36.979Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-05T12:13:36.976Z",
-          "progress": 100,
-          "oldProgress": 0,
-          "workContent": "方案：“dHash代替OCR”，在二分法确定精确时间时，当前算法是每一次都是OCR，实际上二分法的过程中，只需要“区域dHash”即可。\n“区域dHash”的成本，相对OCR来说，几乎相当于免费，速度极快，几乎让精确查找的成本接近非精确查找。",
-          "consumedTime": 1
-        }
-      ],
-      "progressComment": "方案：“dHash代替OCR”，在二分法确定精确时间时，当前算法是每一次都是OCR，实际上二分法的过程中，只需要“区域dHash”即可。\n“区域dHash”的成本，相对OCR来说，几乎相当于免费，速度极快，几乎让精确查找的成本接近非精确查找。",
-      "consumedTime": 1
-    },
-    {
-      "id": "1461f199-23bd-4ac8-85cb-8a7b2ae665c0",
-      "content": "3 月 6 日任务巡检",
-      "title": "3月6日任务巡检",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "584",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 1.1,
-      "createdAt": "2026-03-06T01:37:30.889Z",
-      "updatedAt": "2026-03-06T02:08:00.313Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-06T01:51:21.829Z",
-          "progress": 19,
-          "oldProgress": 0,
-          "workContent": "中泰期货修改 3 个脚本",
-          "consumedTime": 0.5
-        },
-        {
-          "timestamp": "2026-03-06T02:05:40.385Z",
-          "progress": 25,
-          "oldProgress": 19,
-          "workContent": "中泰期货增加修改 3 个脚本",
-          "consumedTime": 0.5
-        },
-        {
-          "timestamp": "2026-03-06T02:08:00.309Z",
-          "progress": 100,
-          "oldProgress": 25,
-          "workContent": "江苏农信北京快捷支付设备恢复以及噪点问题查询",
-          "consumedTime": 0.1
-        }
-      ],
-      "progressComment": "江苏农信北京快捷支付设备恢复以及噪点问题查询",
-      "consumedTime": 0.1
-    },
-    {
-      "id": "78a4709a-e1b2-467c-b752-4731cbd188bc",
-      "content": "中信证券机型对比分析",
-      "title": "中信证券机型对比分析",
-      "status": "done",
-      "priority": 2,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "585",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 3,
-      "createdAt": "2026-03-06T09:30:20.665Z",
-      "updatedAt": "2026-03-20T02:50:06.708Z",
-      "order": null,
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-09T03:56:33.382Z",
-          "progress": 11,
-          "oldProgress": 0,
-          "workContent": "测试竞品 app 兼容性，其中同花顺、国泰海通君安、东方财富兼容性通过。涨乐财富通只能使用巨魔注入方式，重签方式闪退，app  已上传到 yg_zxzq",
-          "consumedTime": 1
-        },
-        {
-          "timestamp": "2026-03-11T10:03:51.860Z",
-          "progress": 54,
-          "oldProgress": 11,
-          "workContent": "完成脚本部署，升级包测试还有问题，等待客户排查",
-          "consumedTime": 2.5
-        },
-        {
-          "timestamp": "2026-03-12T06:55:42.753Z",
-          "progress": 73,
-          "oldProgress": 54,
-          "workContent": "完成三个机型部署4G 网络跑任务",
-          "consumedTime": 3
-        },
-        {
-          "timestamp": "2026-03-13T08:37:06.137Z",
-          "progress": 89,
-          "oldProgress": 73,
-          "workContent": "优化包已部署完成",
-          "consumedTime": 0.5
-        },
-        {
-          "timestamp": "2026-03-20T02:50:06.704Z",
-          "progress": 100,
-          "oldProgress": 89,
-          "workContent": "更新进度至 100%",
-          "consumedTime": 1.5
-        }
-      ],
-      "progressComment": "更新进度至 100%",
-      "consumedTime": 1.5
-    },
-    {
-      "id": "0a244488-06fb-43e4-ad52-84cd89961cfe",
-      "content": "3月 9 日任务巡检",
-      "title": "3月9日任务巡检",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "589",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 1.5,
-      "createdAt": "2026-03-09T02:17:46.729Z",
-      "updatedAt": "2026-03-09T06:47:55.563Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-09T02:37:33.053Z",
-          "progress": 25,
-          "oldProgress": 0,
-          "workContent": "处理民生证券、直客通、爱音乐等掉线节点。去掉民生证券基金诊断业务",
-          "consumedTime": 1
-        },
-        {
-          "timestamp": "2026-03-09T06:47:55.553Z",
-          "progress": 100,
-          "oldProgress": 25,
-          "workContent": "华夏银行基金详情页面变动修改脚本",
-          "consumedTime": 0.5
-        }
-      ],
-      "progressComment": "华夏银行基金详情页面变动修改脚本",
-      "consumedTime": 0.5
-    },
-    {
-      "id": "d16b27d9-5938-490d-96df-8ef57f53aa28",
-      "content": "爱建证券报告中问题分析",
-      "title": "爱建证券报告分析",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "590",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 1,
-      "createdAt": "2026-03-09T09:29:05.555Z",
-      "updatedAt": "2026-03-09T09:29:18.035Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-09T09:29:18.030Z",
-          "progress": 100,
-          "oldProgress": 0,
-          "workContent": "更新进度至 100%",
-          "consumedTime": 1
-        }
-      ],
-      "progressComment": "更新进度至 100%",
-      "consumedTime": 1
-    },
-    {
-      "id": "893b342b-9a55-4569-8290-d76941897c12",
-      "content": "解决中信证券测试 ipa 签名问题",
-      "title": "中信证券测试ipa签名问题",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "591",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 4,
-      "createdAt": "2026-03-10T07:53:01.564Z",
-      "updatedAt": "2026-03-11T06:52:26.199Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-10T09:15:24.359Z",
-          "progress": 37,
-          "oldProgress": 0,
-          "workContent": "经过反复验证以及对比测试发现是兼容性问题导致的重签注入启动崩溃，需要凯哥支持，暂时先用巨魔方式代替测试。已经告知凯哥",
-          "consumedTime": 3
-        },
-        {
-          "timestamp": "2026-03-11T06:52:26.195Z",
-          "progress": 100,
-          "oldProgress": 37,
-          "workContent": "中信证券提供未加固测试包解决重签导致的崩溃问题",
-          "consumedTime": 1
-        }
-      ],
-      "progressComment": "中信证券提供未加固测试包解决重签导致的崩溃问题",
-      "consumedTime": 1
-    },
-    {
-      "id": "ca659741-b621-457c-a92d-e4d4b402819e",
-      "content": "3 月 11 日任务巡检",
-      "title": "3月11日任务巡检",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "595",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 0,
-      "createdAt": "2026-03-11T02:22:26.058Z",
-      "updatedAt": "2026-03-11T10:03:13.452Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-11T10:03:13.448Z",
-          "progress": 100,
-          "oldProgress": 0,
-          "workContent": "更新进度至 100%",
-          "consumedTime": 2
-        }
-      ],
-      "progressComment": "更新进度至 100%",
-      "consumedTime": 2
-    },
-    {
-      "id": "b458d967-720c-48e8-bd42-e773e1b8b879",
-      "content": "测试广东移动办公软件兼容性",
-      "title": "测试广东移动办公软件兼容性",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "596",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 1,
-      "createdAt": "2026-03-12T02:47:07.894Z",
-      "updatedAt": "2026-03-12T02:47:18.196Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-12T02:47:18.192Z",
-          "progress": 100,
-          "oldProgress": 0,
-          "workContent": "巨魔可以，重签闪退，有网络数据",
-          "consumedTime": 1
-        }
-      ],
-      "progressComment": "巨魔可以，重签闪退，有网络数据",
-      "consumedTime": 1
-    },
-    {
-      "id": "571024f5-741e-4120-825b-c607aa124e42",
-      "content": "江苏农信手机银行测试",
-      "title": "江苏农信手机银行测试",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "597",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 7,
-      "createdAt": "2026-03-13T08:36:32.242Z",
-      "updatedAt": "2026-03-20T02:49:58.206Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-13T08:36:49.337Z",
-          "progress": 79,
-          "oldProgress": 0,
-          "workContent": "完成 5 大标签页脚本及部署",
-          "consumedTime": 4
-        },
-        {
-          "timestamp": "2026-03-20T02:49:58.202Z",
-          "progress": 100,
-          "oldProgress": 79,
-          "workContent": "已完成部署",
-          "consumedTime": 3
-        }
-      ],
-      "progressComment": "已完成部署",
-      "consumedTime": 3
-    },
-    {
-      "id": "6851460f-23dd-465c-a841-e906eb24af95",
-      "content": "3 月 13 日任务巡检",
-      "title": "3月13日任务巡检",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "598",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 1,
-      "createdAt": "2026-03-13T08:45:10.301Z",
-      "updatedAt": "2026-03-13T08:45:17.545Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-13T08:45:17.541Z",
-          "progress": 100,
-          "oldProgress": 0,
-          "workContent": "更新进度至 100%",
-          "consumedTime": 1
-        }
-      ],
-      "progressComment": "更新进度至 100%",
-      "consumedTime": 1
-    },
-    {
-      "id": "20050076-d50b-4dcd-b1a4-66d456d92536",
-      "content": "中信证券拨测版本线上更新，一来 controller 更新版本",
-      "title": "中信证券拨测版本更新",
+      "id": "cc34e0c8-52f4-41f1-9fc1-0cb054cbc335",
+      "type": "task",
+      "title": "卡中心3月竞品分析报告",
+      "content": "卡中心3月竞品分析报告",
       "status": "todo",
       "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
       "progress": 0,
-      "zentaoId": "599",
-      "zentaoExecution": "167",
+      "zentaoId": 701,
+      "executionId": "148",
+      "executionName": "民生卡中心项目交付",
+      "projectName": "民生卡中心",
+      "projectId": 130,
       "totalConsumedTime": 0,
-      "createdAt": "2026-03-13T08:47:26.753Z",
-      "updatedAt": "2026-03-13T08:47:27.566Z"
+      "createdAt": "2026-04-02T08:37:00.228Z",
+      "updatedAt": "2026-04-02T14:24:48.328Z"
     },
     {
-      "id": "1d8de396-c759-407a-9d3d-130160dc1095",
-      "content": "极氪汽车 POC报告",
-      "title": "极氪汽车POC报告",
-      "status": "done",
+      "id": "62bbb465-ab40-4820-9c66-241c21df36c4",
+      "type": "bug",
+      "title": "iOS录制器链接录制应用后，点击左侧录屏与右侧控件树自动定位的控件无法精准对齐",
+      "content": "iOS录制器链接录制应用后，点击左侧录屏与右侧控件树自动定位的控件无法精准对齐",
+      "status": "closed",
+      "severity": 3,
       "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "600",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 1,
-      "createdAt": "2026-03-17T01:34:26.476Z",
-      "updatedAt": "2026-03-17T02:33:43.109Z",
-      "progressUpdates": [
+      "bugType": "codeerror",
+      "productName": "",
+      "openedBy": "",
+      "resolvedBy": "罗天文",
+      "resolution": "已解决",
+      "confirmed": true,
+      "assignedTo": "李佳成",
+      "assignedToList": [],
+      "cc": [],
+      "comments": [],
+      "zentaoId": 320,
+      "createdAt": "2026-04-02T07:00:09.397Z",
+      "updatedAt": "2026-04-02T14:24:48.385Z",
+      "progress": 0,
+      "consumedTime": 0,
+      "projectName": "",
+      "steps": "[步骤]\n1. 链接录制器后打开录制应用\n2.打开录制模式，点击左侧录屏上应用的按钮，\n[结果]\n右侧的控件树自动定位联动位置不准[期望]",
+      "history": [
         {
-          "timestamp": "2026-03-17T02:33:43.098Z",
-          "progress": 100,
-          "oldProgress": 0,
-          "workContent": "已提交给郭秀艳",
-          "consumedTime": 1
-        }
-      ],
-      "progressComment": "已提交给郭秀艳",
-      "consumedTime": 1
-    },
-    {
-      "id": "f59cfc19-e61b-4497-9e9e-7c6dcded334f",
-      "content": "3 月 17 日任务巡检",
-      "title": "3月17日任务巡检",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "601",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 1.5,
-      "createdAt": "2026-03-17T01:34:46.449Z",
-      "updatedAt": "2026-03-17T07:18:43.619Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-17T07:18:43.613Z",
-          "progress": 100,
-          "oldProgress": 0,
-          "workContent": "更新进度至 100%",
-          "consumedTime": 1.5
-        }
-      ],
-      "progressComment": "更新进度至 100%",
-      "consumedTime": 1.5
-    },
-    {
-      "id": "2181d4d6-8c15-4cd4-ba0b-8bd79996fff5",
-      "content": "更新极氪汽车 app 新版本",
-      "title": "更新极氪汽车app新版本",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "602",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 0.5,
-      "createdAt": "2026-03-17T02:34:00.778Z",
-      "updatedAt": "2026-03-17T02:34:18.740Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-17T02:34:18.731Z",
-          "progress": 100,
-          "oldProgress": 0,
-          "workContent": "更新版本",
-          "consumedTime": 0.5
-        }
-      ],
-      "progressComment": "更新版本",
-      "consumedTime": 0.5
-    },
-    {
-      "id": "15094373-6a9e-4304-b077-60ed6c3d9baf",
-      "content": "财达证券更新版本，以及修改用例",
-      "title": "财达证券版本更新及用例修改",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "603",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 0.5,
-      "createdAt": "2026-03-18T01:48:57.270Z",
-      "updatedAt": "2026-03-18T08:07:49.418Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-18T02:44:17.110Z",
-          "progress": 36,
-          "oldProgress": 0,
-          "workContent": "版本更新完成",
-          "consumedTime": 0.5
+          "comment": "",
+          "text": "2025-11-03 10:51:54, 由 李佳成 创建。"
         },
         {
-          "timestamp": "2026-03-18T08:07:49.413Z",
-          "progress": 100,
-          "oldProgress": 36,
-          "workContent": "适配新版本脚本",
-          "consumedTime": 2
+          "comment": "",
+          "text": "2025-11-14 14:42:53, 由 李佳成 编辑。\n                \n        \n          修改了 所属产品，旧值为 \"3\"，新值为 \"19\"。"
+        },
+        {
+          "comment": "",
+          "text": "2025-11-14 15:16:46, 由 罗天文 确认Bug。\n                \n        \n          修改了 是否确认，旧值为 \"0\"，新值为 \"1\"。"
+        },
+        {
+          "comment": "",
+          "text": "2025-11-19 17:52:44, 由 罗天文 转为任务，编号为 484。"
+        },
+        {
+          "comment": "",
+          "text": "2025-11-19 17:53:27, 由 罗天文 解决，方案为 已解决 。                \n        \n          修改了 解决版本，旧值为 \"\"，新值为 \"trunk\"。\n修改了 解决日期，旧值为 \"\"，新值为 \"2025-11-19 17:53:22\"。\n修改了 指派给   ，旧值为 \"luotw\"，新值为 \"lijc\"。\n修改了 Bug状态   ，旧值为 \"active\"，新值为 \"resolved\"。\n修改了 解决者   ，旧值为 \"\"，新值为 \"luotw\"。\n修改了 解决方案，区别为：\n001- \n001+ fixed\n001- \n001+ fixed"
         }
       ],
-      "progressComment": "适配新版本脚本",
-      "consumedTime": 2
+      "assignedDate": "2025-11-19 17:53:27"
     },
     {
-      "id": "6e168fa7-9ee5-4ebd-9206-aa5663185860",
-      "content": "3.20 任务巡检",
-      "title": "任务巡检",
-      "status": "done",
+      "id": "e140eb35-12fc-42e1-88f0-f65b79f23007",
+      "type": "bug",
+      "title": "录制器取点操作，获取到的坐标不对",
+      "content": "录制器取点操作，获取到的坐标不对",
+      "status": "closed",
+      "severity": 3,
       "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "615",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 3,
-      "createdAt": "2026-03-18T02:37:57.626Z",
-      "updatedAt": "2026-03-23T02:13:57.882Z",
-      "progressUpdates": [
+      "bugType": "codeerror",
+      "productName": "",
+      "openedBy": "",
+      "resolvedBy": "罗天文",
+      "resolution": "已解决",
+      "confirmed": true,
+      "assignedTo": "李佳成",
+      "assignedToList": [],
+      "cc": [],
+      "comments": [],
+      "zentaoId": 330,
+      "createdAt": "2026-04-02T07:00:09.397Z",
+      "updatedAt": "2026-04-02T09:01:25.620Z",
+      "progress": 0,
+      "consumedTime": 0,
+      "projectName": "",
+      "steps": "[步骤]\n[结果]\n[期望]",
+      "history": [
         {
-          "timestamp": "2026-03-18T02:44:06.917Z",
-          "progress": 100,
-          "oldProgress": 0,
-          "workContent": "处理华夏银行定投失败、处理安德玛首页新广告形式，处理直客通失败任务",
-          "consumedTime": 1
+          "comment": "",
+          "text": "2025-11-21 14:05:52, 由 李佳成 创建。"
         },
         {
-          "timestamp": "2026-03-20T02:50:19.448Z",
-          "progress": 20,
-          "oldProgress": 0,
-          "workContent": "更新进度至 20%",
-          "consumedTime": 1
+          "comment": "",
+          "text": "2025-11-21 14:07:34, 由 李佳成 指派给 罗天文。\n                \n        \n          修改了 指派给，旧值为 \"weiwf\"，新值为 \"luotw\"。"
         },
         {
-          "timestamp": "2026-03-23T02:13:57.878Z",
-          "progress": 100,
-          "oldProgress": 20,
-          "workContent": "更新进度至 100%",
-          "consumedTime": 1
+          "comment": "",
+          "text": "2025-11-21 14:08:20, 由 李佳成 编辑。\n                \n        \n          修改了 所属产品，旧值为 \"82\"，新值为 \"19\"。\n修改了 重现步骤，区别为：\n001- [步骤][结果][期望]\n001+ [步骤]\n002+ [结果]\n003+ [期望]\n004+ \n001- <p>[步骤]</p><br /><p>[结果]</p><br /><p>[期望]</p><br />\n001+ <p>[步骤]</p>\n002+ <br /><p>[结果]</p>\n003+ <br /><p>[期望]</p>\n004+ <br />"
+        },
+        {
+          "comment": "",
+          "text": "2025-11-21 14:10:09, 由 罗天文 转为任务，编号为 492。"
+        },
+        {
+          "comment": "",
+          "text": "2025-11-21 14:11:01, 由 罗天文 解决，方案为 已解决 。                \n        \n          修改了 解决版本，旧值为 \"\"，新值为 \"trunk\"。\n修改了 解决日期，旧值为 \"\"，新值为 \"2025-11-21 14:10:55\"。\n修改了 指派给   ，旧值为 \"luotw\"，新值为 \"lijc\"。\n修改了 Bug状态   ，旧值为 \"active\"，新值为 \"resolved\"。\n修改了 是否确认，旧值为 \"0\"，新值为 \"1\"。\n修改了 解决者   ，旧值为 \"\"，新值为 \"luotw\"。\n修改了 解决方案，区别为：\n001- \n001+ fixed\n001- \n001+ fixed"
         }
       ],
-      "progressComment": "更新进度至 100%",
-      "consumedTime": 1
+      "assignedDate": "2025-11-21 14:11:01"
     },
     {
-      "id": "bebde3f1-381e-445d-a101-4c7194bf10c0",
-      "content": "沃尔沃汽车 POC",
-      "title": "沃尔沃汽车POC",
-      "status": "done",
+      "id": "067a0c51-3800-47eb-b217-254bccc92e81",
+      "type": "bug",
+      "title": "项目大屏日历控件时间默认显示当天时间，每日过0点需要自动变化",
+      "content": "项目大屏日历控件时间默认显示当天时间，每日过0点需要自动变化",
+      "status": "closed",
+      "severity": 3,
       "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "605",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 4,
-      "createdAt": "2026-03-18T02:43:15.539Z",
-      "updatedAt": "2026-03-19T07:13:30.136Z",
-      "progressUpdates": [
+      "bugType": "codeerror",
+      "productName": "",
+      "openedBy": "",
+      "resolvedBy": "罗天文",
+      "resolution": "已解决",
+      "confirmed": true,
+      "assignedTo": "李佳成",
+      "assignedToList": [],
+      "cc": [],
+      "comments": [],
+      "zentaoId": 335,
+      "createdAt": "2026-04-02T07:00:09.397Z",
+      "updatedAt": "2026-04-02T14:24:48.384Z",
+      "progress": 0,
+      "consumedTime": 0,
+      "projectName": "",
+      "steps": "[步骤][结果][期望]",
+      "history": [
         {
-          "timestamp": "2026-03-19T02:29:53.595Z",
-          "progress": 7,
-          "oldProgress": 0,
-          "workContent": "客户 沃尔沃汽车（亚太）投资控股有限公司 的基调听云帐号现在开通完毕，用户名为：woerwo.com，初始密码为：Wwjsdfty@1!",
-          "consumedTime": 1
+          "comment": "",
+          "text": "2025-12-08 17:21:12, 由 李佳成 创建。"
         },
         {
-          "timestamp": "2026-03-19T07:13:30.132Z",
-          "progress": 100,
-          "oldProgress": 7,
-          "workContent": "完成部署，频率 30 分钟 1 次",
-          "consumedTime": 3
+          "comment": "",
+          "text": "2025-12-12 11:16:28, 由 罗天文 转为任务，编号为 500。"
+        },
+        {
+          "comment": "",
+          "text": "2025-12-12 14:42:18, 由 罗天文 解决，方案为 已解决 。                \n        \n          修改了 解决版本，旧值为 \"\"，新值为 \"trunk\"。\n修改了 解决日期，旧值为 \"\"，新值为 \"2025-12-12 14:42:12\"。\n修改了 指派给   ，旧值为 \"luotw\"，新值为 \"lijc\"。\n修改了 Bug状态   ，旧值为 \"active\"，新值为 \"resolved\"。\n修改了 是否确认，旧值为 \"0\"，新值为 \"1\"。\n修改了 解决者   ，旧值为 \"\"，新值为 \"luotw\"。\n修改了 解决方案，区别为：\n001- \n001+ fixed\n001- \n001+ fixed"
         }
       ],
-      "progressComment": "完成部署，频率 30 分钟 1 次",
-      "consumedTime": 3
+      "assignedDate": "2025-12-12 14:42:18"
     },
     {
-      "id": "f00b9f67-d2e4-4cc0-9866-4d100613dc31",
-      "content": "江苏农商行竞品分析，增加招商和宁波",
-      "title": "江苏农商行竞品分析增加招商宁波",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": null,
-      "zentaoExecution": null,
-      "totalConsumedTime": 0,
-      "createdAt": "2026-03-18T10:03:48.107Z",
-      "updatedAt": "2026-03-20T02:49:09.607Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-19T09:00:06.304Z",
-          "progress": 18,
-          "oldProgress": 0,
-          "workContent": "经过和国庆沟通，采用任务部署江苏农商行+招商，宁波使用抓包方式记录网络耗时。等待提供详细业务",
-          "consumedTime": 0.5
-        },
-        {
-          "timestamp": "2026-03-20T02:49:09.598Z",
-          "progress": 100,
-          "oldProgress": 18,
-          "workContent": "最终讨论，不需要网络数据，只需要精准耗时，这部分 Android 已经做过，iOS 不需要重复做了",
-          "consumedTime": 0.5
-        }
-      ],
-      "progressComment": "最终讨论，不需要网络数据，只需要精准耗时，这部分 Android 已经做过，iOS 不需要重复做了",
-      "consumedTime": 0.5
-    },
-    {
-      "id": "b04b8382-af04-4d1d-9b0c-f3b464e7ce36",
-      "content": "3 月 19 日巡检",
-      "title": "3月19日巡检",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "612",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 1.5,
-      "createdAt": "2026-03-19T02:14:32.494Z",
-      "updatedAt": "2026-03-19T07:15:53.698Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-19T02:15:31.676Z",
-          "progress": 19,
-          "oldProgress": 0,
-          "workContent": "comfirmed 可用性 0，因产品售罄问题导致，优化脚本",
-          "consumedTime": 0.5
-        },
-        {
-          "timestamp": "2026-03-19T07:15:53.690Z",
-          "progress": 100,
-          "oldProgress": 19,
-          "workContent": "更新进度至 100%",
-          "consumedTime": 1
-        }
-      ],
-      "progressComment": "更新进度至 100%",
-      "consumedTime": 1
-    },
-    {
-      "id": "aa74394e-3810-4787-a62b-0336f2905780",
-      "content": "测试豆包兼容性",
-      "title": "测试豆包兼容性",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "614",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 0.5,
-      "createdAt": "2026-03-19T10:31:39.921Z",
-      "updatedAt": "2026-03-20T02:50:46.722Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-20T02:50:46.719Z",
-          "progress": 100,
-          "oldProgress": 0,
-          "workContent": "可自动化，无法抓取网络数据",
-          "consumedTime": 0.5
-        }
-      ],
-      "progressComment": "可自动化，无法抓取网络数据",
-      "consumedTime": 0.5
-    },
-    {
-      "id": "030328ef-9693-4490-86c7-66ad927d213b",
-      "content": "3月 23 日任务巡检",
-      "title": "3月23日任务巡检",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "616",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 1.9,
-      "createdAt": "2026-03-23T02:14:10.261Z",
-      "updatedAt": "2026-03-23T03:29:45.944Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-23T02:26:27.193Z",
-          "progress": 13,
-          "oldProgress": 0,
-          "workContent": "华夏银行大额存单没有产品导致告警，确认不需要兼容此种情况",
-          "consumedTime": 0.1
-        },
-        {
-          "timestamp": "2026-03-23T02:51:16.880Z",
-          "progress": 20,
-          "oldProgress": 13,
-          "workContent": "阿迪达斯处理 外地两台设备账号掉线问题",
-          "consumedTime": 0.5
-        },
-        {
-          "timestamp": "2026-03-23T03:09:30.597Z",
-          "progress": 35,
-          "oldProgress": 20,
-          "workContent": "处理美云销首页选择公司失败",
-          "consumedTime": 0.3
-        },
-        {
-          "timestamp": "2026-03-23T03:29:45.940Z",
-          "progress": 100,
-          "oldProgress": 35,
-          "workContent": "财达证券首页新股新债修改成新股申购，查看撤单优化脚本",
-          "consumedTime": 1
-        }
-      ],
-      "progressComment": "财达证券首页新股新债修改成新股申购，查看撤单优化脚本",
-      "consumedTime": 1
-    },
-    {
-      "id": "1b2979ec-667d-4a06-9f9a-8dd53d2f3d2e",
-      "content": "民生卡中心竞品分析报告",
-      "title": "民生卡中心竞品分析报告",
+      "id": "19d9bccb-7d9c-4077-ab4f-6a37d4436b36",
+      "type": "task",
+      "title": "巨魔 6台新设备",
+      "content": "巨魔 6台新设备",
       "status": "in_progress",
       "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 12,
-      "zentaoId": "617",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 0.2,
-      "createdAt": "2026-03-23T02:14:20.307Z",
-      "updatedAt": "2026-03-24T02:12:47.190Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-24T02:12:47.184Z",
-          "progress": 12,
-          "oldProgress": 0,
-          "workContent": "完成联通全民生活任务，切换为移动网络",
-          "consumedTime": 0.2
-        }
-      ],
-      "progressComment": "完成联通全民生活任务，切换为移动网络",
-      "consumedTime": 0.2
-    },
-    {
-      "id": "4bf39e52-6906-41eb-99da-0868740bf9c9",
-      "content": "蓝牙长时间运行两种测试",
-      "title": "蓝牙长时间运行测试",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "618",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 0.1,
-      "createdAt": "2026-03-23T02:14:48.107Z",
-      "updatedAt": "2026-03-23T06:42:37.037Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-23T06:42:37.032Z",
-          "progress": 100,
-          "oldProgress": 0,
-          "workContent": "蓝牙问题测试：手机曾经配对过蓝牙但是无法连接，蓝牙红灯在闪烁，这种情况下，重启 controller、手机、蓝牙断电都不管用，只有手机上忽略蓝牙后重新配对连接才能正常",
-          "consumedTime": 0.1
-        }
-      ],
-      "progressComment": "蓝牙问题测试：手机曾经配对过蓝牙但是无法连接，蓝牙红灯在闪烁，这种情况下，重启 controller、手机、蓝牙断电都不管用，只有手机上忽略蓝牙后重新配对连接才能正常",
-      "consumedTime": 0.1
-    },
-    {
-      "id": "eea6a9e1-76f3-4078-9a58-e760ed3fc931",
-      "content": "巨魔 3 台新设备",
-      "title": "巨魔3台新设备",
-      "status": "in_progress",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 32,
-      "zentaoId": "619",
-      "zentaoExecution": "167",
+      "progress": 33,
+      "zentaoId": 619,
+      "executionId": "167",
+      "executionName": "2026 年工作日志记录",
+      "projectName": "李佳成 2026 年工作日志记录",
+      "projectId": 166,
       "totalConsumedTime": 0.3,
-      "createdAt": "2026-03-23T02:15:07.808Z",
-      "updatedAt": "2026-03-23T03:59:31.747Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-23T03:59:31.744Z",
-          "progress": 32,
-          "oldProgress": 0,
-          "workContent": "已经巨魔完成",
-          "consumedTime": 0.3
-        }
-      ],
-      "progressComment": "已经巨魔完成",
-      "consumedTime": 0.3
+      "createdAt": "2026-04-02T05:58:21.483Z",
+      "updatedAt": "2026-04-02T14:24:48.328Z"
     },
     {
-      "id": "0ccbb6bc-b509-4ca3-8f16-1a2bd58f0a3c",
-      "content": "做一款 app，专门用于测试、h5 等等功能",
-      "title": "测试功能APP开发",
+      "id": "e9cbe43e-8434-4ea1-b674-463b8cccb2c2",
+      "type": "task",
+      "title": "南方航空Appium性能数据",
+      "content": "南方航空Appium性能数据",
       "status": "done",
       "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
       "progress": 100,
-      "zentaoId": null,
-      "zentaoExecution": null,
+      "zentaoId": 699,
+      "executionId": "103",
+      "executionName": "联合航空看板",
+      "projectName": "联合航空",
+      "projectId": 102,
+      "totalConsumedTime": 0.1,
+      "createdAt": "2026-04-02T05:58:21.483Z",
+      "updatedAt": "2026-04-02T06:52:46.907Z",
+      "progressUpdates": [
+        {
+          "timestamp": "2026-04-02T06:52:46.902Z",
+          "progress": 100,
+          "oldProgress": 0,
+          "workContent": "不需要跑了",
+          "consumedTime": 0.1
+        }
+      ],
+      "progressComment": "不需要跑了",
+      "consumedTime": 0.1
+    },
+    {
+      "id": "3bd7ff08-8172-4ff6-a421-c3fd1337706e",
+      "type": "task",
+      "title": "阿迪新版本更新",
+      "content": "阿迪新版本更新",
+      "status": "todo",
+      "priority": 3,
+      "progress": 0,
+      "zentaoId": 695,
+      "executionId": "149",
+      "executionName": "阿迪达斯项目交付",
+      "projectName": "阿迪达斯",
+      "projectId": 119,
       "totalConsumedTime": 0,
-      "createdAt": "2026-03-23T02:15:52.722Z",
-      "updatedAt": "2026-03-24T05:51:29.192Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-24T05:51:29.187Z",
-          "progress": 100,
-          "oldProgress": 0,
-          "workContent": "更新进度至 100%",
-          "consumedTime": 0.01
-        }
-      ],
-      "progressComment": "更新进度至 100%",
-      "consumedTime": 0.01
+      "createdAt": "2026-04-02T05:58:21.483Z",
+      "updatedAt": "2026-04-02T14:24:48.328Z"
     },
     {
-      "id": "ebf27a5e-6c18-4eb8-b12a-4c714b2e8754",
-      "content": "太保修改服务大厅入口脚本",
-      "title": "太保修改服务大厅入口脚本",
-      "status": "done",
+      "id": "c7681138-f003-41ea-ba9c-d23fee58357d",
+      "type": "task",
+      "title": "美的任务处理",
+      "content": "美的任务处理",
+      "status": "todo",
       "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "620",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 0.5,
-      "createdAt": "2026-03-23T03:42:08.348Z",
-      "updatedAt": "2026-03-23T03:42:20.391Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-23T03:42:20.386Z",
-          "progress": 100,
-          "oldProgress": 0,
-          "workContent": "更新进度至 100%",
-          "consumedTime": 0.5
-        }
-      ],
-      "progressComment": "更新进度至 100%",
-      "consumedTime": 0.5
+      "progress": 0,
+      "zentaoId": 691,
+      "executionId": "167",
+      "executionName": "2026 年工作日志记录",
+      "projectName": "李佳成 2026 年工作日志记录",
+      "projectId": 166,
+      "totalConsumedTime": 0,
+      "createdAt": "2026-04-02T05:58:21.483Z",
+      "updatedAt": "2026-04-02T14:24:48.328Z"
     },
     {
-      "id": "1f8ffde5-fe6e-40af-ace3-32aed6231e3a",
-      "content": "江苏农商行补充 3 个业务",
-      "title": "江苏农商行补充业务",
-      "status": "done",
+      "id": "f1403be9-2fd1-4c09-b969-274e327e3771",
+      "type": "task",
+      "title": "中信证券拨测版本更新",
+      "content": "中信证券拨测版本更新",
+      "status": "todo",
       "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "621",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 0.5,
-      "createdAt": "2026-03-23T03:58:53.786Z",
-      "updatedAt": "2026-03-23T03:59:15.202Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-23T03:59:15.198Z",
-          "progress": 100,
-          "oldProgress": 0,
-          "workContent": "补充 E 驾金、我的存款、电子社保卡业务",
-          "consumedTime": 0.5
-        }
-      ],
-      "progressComment": "补充 E 驾金、我的存款、电子社保卡业务",
-      "consumedTime": 0.5
+      "progress": 0,
+      "zentaoId": 599,
+      "executionId": "167",
+      "executionName": "2026 年工作日志记录",
+      "projectName": "李佳成 2026 年工作日志记录",
+      "projectId": 166,
+      "totalConsumedTime": 0,
+      "createdAt": "2026-04-02T05:58:21.483Z",
+      "updatedAt": "2026-04-02T14:24:48.328Z"
     },
     {
-      "id": "de376b30-de67-4986-8ba9-d2e199820dbd",
-      "content": "嘉兴银行 POC",
-      "title": "嘉兴银行POC",
-      "status": "done",
+      "id": "79c34fa2-23c9-4454-bf96-e091a5a39d9d",
+      "type": "bug",
+      "title": "bug测试复现",
+      "content": "bug测试复现",
+      "status": "closed",
+      "severity": 3,
       "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "622",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 2,
-      "createdAt": "2026-03-24T02:12:17.578Z",
-      "updatedAt": "2026-03-24T05:50:48.784Z",
-      "progressUpdates": [
+      "bugType": "codeerror",
+      "productName": "",
+      "openedBy": "",
+      "resolvedBy": "",
+      "resolution": "",
+      "confirmed": true,
+      "assignedTo": "lijc",
+      "assignedToList": [],
+      "cc": [],
+      "comments": [],
+      "zentaoId": 486,
+      "createdAt": "2026-04-02T05:43:37.344Z",
+      "updatedAt": "2026-04-02T13:46:03.958Z",
+      "progress": 0,
+      "consumedTime": 0,
+      "projectName": "",
+      "steps": "bug 测试",
+      "history": [
         {
-          "timestamp": "2026-03-24T05:50:48.779Z",
-          "progress": 100,
-          "oldProgress": 0,
-          "workContent": "完成转账和大额存单部署",
-          "consumedTime": 2
-        }
-      ],
-      "progressComment": "完成转账和大额存单部署",
-      "consumedTime": 2
-    },
-    {
-      "id": "6319c103-b6d6-48bd-a5a5-4fb9209a3a52",
-      "content": "3 月 24 日任务巡检",
-      "title": "3月24日任务巡检",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "623",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 2.5,
-      "createdAt": "2026-03-24T02:13:03.091Z",
-      "updatedAt": "2026-03-24T05:50:59.988Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-24T02:13:52.099Z",
-          "progress": 25,
-          "oldProgress": 0,
-          "workContent": "处理阿迪警报问题，客户问题；修改警报规则，连续 4 个点告警改成连续 3 个。处理直客通节点掉线",
-          "consumedTime": 1
+          "comment": "",
+          "text": "2026-04-01 11:23:55, 由 李佳成 创建。"
         },
         {
-          "timestamp": "2026-03-24T02:14:02.034Z",
-          "progress": 26,
-          "oldProgress": 25,
-          "workContent": "更新进度至 26%",
-          "consumedTime": 0.5
-        },
-        {
-          "timestamp": "2026-03-24T05:50:59.985Z",
-          "progress": 100,
-          "oldProgress": 26,
-          "workContent": "更新进度至 100%",
-          "consumedTime": 1
+          "comment": "",
+          "text": "2026-04-01 11:43:13, 由 李佳成 确认Bug。\n                \n        \n          修改了 Bug类型   ，旧值为 \"automation\"，新值为 \"codeerror\"。\n修改了 是否确认，旧值为 \"0\"，新值为 \"1\"。"
         }
       ],
-      "progressComment": "更新进度至 100%",
-      "consumedTime": 1
+      "assignedDate": "2026-04-01 11:43:13"
     },
     {
-      "id": "20f933cc-680b-45c9-9902-df1986275dbb",
-      "content": "添加直客通 h5 监控",
-      "title": "添加直客通h5监控",
-      "status": "done",
+      "id": "67940283-1dc0-4e24-86cc-d5c0898f1f87",
+      "content": "证书到期升级处理",
+      "title": "证书到期升级处理",
+      "status": "todo",
       "priority": 3,
       "dueDate": null,
       "reminderTime": null,
       "reminder3hTriggered": false,
       "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "624",
+      "progress": 0,
+      "executionId": "167",
+      "executionName": "2026 年工作日志记录",
+      "zentaoId": 702,
       "zentaoExecution": "167",
-      "totalConsumedTime": 1.5,
-      "createdAt": "2026-03-24T02:14:20.314Z",
-      "updatedAt": "2026-03-24T06:39:25.808Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-24T02:14:42.011Z",
-          "progress": 12,
-          "oldProgress": 0,
-          "workContent": "https://zd1.zhiketong.com/NewHome/appid_wx1d104a9ade11c25a?appid=wx1d104a9ade11c25a&zkt_channel_menu=zkt_bottom_menu&source=eb&fs=123818976&hid=206290&zkt_sign=1-1a09848fc02d10d42a404f475533ae33&zkt_scene=sale&tj_bm_user_id=1486546&tj_bm_customize=1&tj_bm_customize_snapshot_id=168302   @温暖  @小红茂 H5中添加监控方便吗，帮我把这个路径了添加上监控",
-          "consumedTime": 1
-        },
-        {
-          "timestamp": "2026-03-24T06:39:25.801Z",
-          "progress": 100,
-          "oldProgress": 12,
-          "workContent": "完成",
-          "consumedTime": 0.5
-        }
-      ],
-      "progressComment": "完成",
-      "consumedTime": 0.5
-    },
-    {
-      "id": "5a61d71a-fd8d-4727-9d1a-083d98c65bcf",
-      "content": "太保公众号任务修改脚本",
-      "title": "太保公众号任务修改脚本",
-      "status": "done",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 100,
-      "zentaoId": "625",
-      "zentaoExecution": "167",
-      "totalConsumedTime": 0.5,
-      "createdAt": "2026-03-24T03:32:11.568Z",
-      "updatedAt": "2026-03-24T03:48:58.863Z",
-      "progressUpdates": [
-        {
-          "timestamp": "2026-03-24T03:48:58.858Z",
-          "progress": 100,
-          "oldProgress": 0,
-          "workContent": "服务大厅改版修改脚本完成",
-          "consumedTime": 0.5
-        }
-      ],
-      "progressComment": "服务大厅改版修改脚本完成",
-      "consumedTime": 0.5
+      "totalConsumedTime": 0,
+      "createdAt": "2026-04-02T13:39:19.419Z",
+      "updatedAt": "2026-04-02T14:24:48.328Z",
+      "executionType": "stage",
+      "projectName": "李佳成 2026 年工作日志记录",
+      "projectId": 166
     }
   ],
-  "lastUpdated": "2026-03-24T06:39:25.808Z"
+  "lastUpdated": "2026-04-02T14:24:48.385Z"
 }

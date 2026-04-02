@@ -13,13 +13,58 @@ const router = express.Router();
  */
 router.post('/task', async (req, res) => {
   try {
-    const { content, zentaoId } = req.body;
+    const { content, zentaoId, executionId } = req.body;
 
     if (!content) {
       return res.status(400).json({ error: '请输入任务内容' });
     }
 
-    const result = await taskManager.addOrUpdateTask(content, { zentaoId });
+    // 如果没有提供 executionId，使用 AI 分析自动选择
+    let finalExecutionId = executionId;
+    if (!finalExecutionId || finalExecutionId === '') {
+      console.log('[API] 未提供执行ID，使用 AI 分析自动选择');
+      console.log('[API] 任务内容:', content);
+      // 获取收藏的执行列表
+      const { getFavoriteExecutions } = await import('../services/executionManager.js');
+      const favoriteExecutions = await getFavoriteExecutions();
+      console.log('[API] 收藏的执行列表:', favoriteExecutions.map(e => `ID:${e.id} 名称:${e.name} 项目:${e.projectName || '未分类'}`).join(', '));
+      if (favoriteExecutions.length > 0) {
+        // 有收藏的执行，使用 AI 匹配
+        const { analyzeTaskForExecution } = await import('../ai/openai.js');
+        const matchedExecutionId = await analyzeTaskForExecution(content, favoriteExecutions);
+        if (matchedExecutionId) {
+          finalExecutionId = matchedExecutionId;
+          const matchedExec = favoriteExecutions.find(e => e.id === matchedExecutionId);
+          console.log('[API] ✓ AI 匹配到执行:', finalExecutionId, matchedExec?.name);
+        } else {
+          console.log('[API] ✗ AI 匹配失败，未找到匹配的执行');
+        }
+      } else {
+        console.log('[API] ! 没有收藏的执行，请先收藏需要使用的执行');
+      }
+      // 如果没有匹配到，使用默认执行
+      if (!finalExecutionId) {
+        const { getDefaultExecution } = await import('../services/executionManager.js');
+        const defaultExec = await getDefaultExecution();
+        if (defaultExec) {
+          finalExecutionId = defaultExec.id;
+          console.log('[API] 使用默认执行:', finalExecutionId, defaultExec.name);
+        } else {
+          // 最后的后备：使用配置中的 executionId
+          const { config } = await import('../config.js');
+          if (config.zentao.executionId) {
+            finalExecutionId = String(config.zentao.executionId);
+            console.log('[API] 使用配置中的执行ID:', finalExecutionId);
+          }
+        }
+      }
+    } else {
+      console.log('[API] 用户手动选择执行ID:', finalExecutionId);
+    }
+
+    console.log('[API] 最终使用的执行ID:', finalExecutionId);
+
+    const result = await taskManager.addOrUpdateTask(content, { zentaoId, executionId: finalExecutionId });
     res.json({
       success: true,
       data: result.task,
@@ -192,6 +237,18 @@ router.delete('/task/:id', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/tasks/all - 删除所有本地任务（不影响禅道任务）
+ */
+router.delete('/tasks/all', async (req, res) => {
+  try {
+    const result = await taskManager.deleteAllTasks();
+    res.json({ success: true, deletedCount: result.deletedCount });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -511,6 +568,12 @@ router.get('/config', async (req, res) => {
           hasUrl: !!cfg.webhook.url,
           type: cfg.webhook.type || 'generic',
           urlPrefix: cfg.webhook.url ? cfg.webhook.url.substring(0, 30) + '...' : '(空)'
+        },
+        zentao: {
+          enabled: cfg.zentao.enabled,
+          url: cfg.zentao.url,
+          username: cfg.zentao.username,
+          hasPassword: !!cfg.zentao.password
         }
       }
     });
@@ -863,173 +926,809 @@ router.post('/zentao/config', async (req, res) => {
   }
 });
 
-// ==================== 禅道代理接口 ====================
+/**
+ * GET /api/zentao/users - 获取禅道用户列表
+ */
+router.get('/zentao/users', async (req, res) => {
+  try {
+    const configModule = await import('../config.js');
+    const users = configModule.config.zentao.users || {};
 
-// 存储 cookie（内存中）
-let zentaoCookies = null;
-let zentaoCookieExpiry = null;
+    res.json({
+      success: true,
+      data: users
+    });
+  } catch (err) {
+    console.error('[API] 获取禅道用户列表失败:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 /**
- * 登录禅道获取 cookie
+ * POST /api/zentao/users - 保存禅道用户列表
+ */
+router.post('/zentao/users', async (req, res) => {
+  try {
+    const { users } = req.body;
+
+    if (!users || typeof users !== 'object') {
+      return res.status(400).json({ error: '用户列表格式错误' });
+    }
+
+    console.log('[API] 保存禅道用户列表，用户数量:', Object.keys(users).length);
+
+    // 更新运行时配置
+    const configModule = await import('../config.js');
+    configModule.config.zentao.users = users;
+    configModule.config.zentao.usersUpdatedAt = new Date().toISOString();
+
+    // 持久化到 data/zentao-users.json 文件
+    const fs = await import('fs');
+    const path = await import('path');
+    const usersFilePath = path.join(process.cwd(), 'data', 'zentao-users.json');
+
+    // 确保 data 目录存在
+    const dataDir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+
+    // 保存用户列表
+    fs.writeFileSync(usersFilePath, JSON.stringify(users, null, 2), 'utf-8');
+
+    console.log('[API] 禅道用户列表已保存到:', usersFilePath);
+    res.json({
+      success: true,
+      message: `用户列表已保存，共 ${Object.keys(users).length} 个用户`,
+      count: Object.keys(users).length
+    });
+  } catch (err) {
+    console.error('[API] 保存禅道用户列表失败:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==================== 禅道代理接口（已废弃） ====================
+// 注意：所有禅道操作已迁移到浏览器端，通过 ZentaoBrowserClient 完成
+// 以下函数和接口已废弃，保留仅为向后兼容，不再使用后端 cookie
+
+/**
+ * @deprecated 已废弃，请使用浏览器端 ZentaoBrowserClient
+ * 登录禅道获取 cookie（已废弃）
  */
 async function loginZentao(baseUrl, username, password) {
-  const loginUrl = `${baseUrl}/zentao/user-login.html`;
-
-  // 首先获取登录页面，提取必要的参数
-  const loginPageResp = await fetch(loginUrl);
-  const loginPageHtml = await loginPageResp.text();
-
-  // 提取 verify 参数（如果有）
-  const verifyMatch = loginPageHtml.match(/name="verify"[^>]*value="([^"]+)"/);
-  const verify = verifyMatch ? verifyMatch[1] : '';
-
-  // 提交登录表单
-  const formResp = await fetch(`${baseUrl}/zentao/user-login.json`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({
-      account: username,
-      password: password,
-      verify: verify || '',
-      keepLogin: 'on',
-    }),
-    redirect: 'manual'
-  });
-
-  // 获取响应的 set-cookie
-  const setCookieHeaders = formResp.headers.getSetCookie();
-  const cookies = {};
-  for (const header of setCookieHeaders) {
-    const match = header.match(/^([^=]+)=([^;]+)/);
-    if (match) {
-      cookies[match[1]] = match[2];
-    }
-  }
-
-  if (cookies.zentaosid) {
-    console.log('[API] 禅道登录成功, session:', cookies.zentaosid.substring(0, 8) + '...');
-    return cookies;
-  }
-
-  throw new Error('登录失败，未获取到 session cookie');
+  console.warn('[API] loginZentao 已废弃，请使用浏览器端 ZentaoBrowserClient');
+  throw new Error('已废弃：请使用浏览器端 ZentaoBrowserClient');
 }
 
 /**
- * 获取有效的禅道 cookie
+ * @deprecated 已废弃，请使用浏览器端 ZentaoBrowserClient
+ * 获取有效的禅道 cookie（已废弃）
  */
 async function getZentaoCookies() {
-  const configModule = await import('../config.js');
-  const config = configModule.config.zentao;
-
-  // 检查配置
-  if (!config.url || !config.username || !config.password) {
-    throw new Error('禅道未配置');
-  }
-
-  // 检查 cookie 是否有效（1小时过期）
-  if (zentaoCookies && zentaoCookieExpiry && Date.now() < zentaoCookieExpiry) {
-    return zentaoCookies;
-  }
-
-  // 重新登录
-  console.log('[API] 禅道 cookie 过期或不存在，重新登录...');
-  zentaoCookies = await loginZentao(config.url, config.username, config.password);
-  zentaoCookieExpiry = Date.now() + 60 * 60 * 1000; // 1小时后过期
-  return zentaoCookies;
+  console.warn('[API] getZentaoCookies 已废弃，请使用浏览器端 ZentaoBrowserClient');
+  throw new Error('已废弃：请使用浏览器端 ZentaoBrowserClient');
 }
 
 /**
- * 将 cookie 对象转换为 Cookie header 字符串
+ * @deprecated 已废弃，请使用浏览器端 ZentaoBrowserClient
+ * 将 cookie 对象转换为 Cookie header 字符串（已废弃）
  */
 function cookiesToString(cookies) {
-  return Object.entries(cookies)
-    .map(([name, value]) => `${name}=${value}`)
-    .join('; ');
+  console.warn('[API] cookiesToString 已废弃');
+  return '';
 }
 
+// ==================== 项目相关接口 ====================
+
 /**
- * POST /api/zentao/task/create - 代理创建禅道任务
+ * GET /api/projects - 获取项目列表
  */
-router.post('/zentao/task/create', async (req, res) => {
+router.get('/projects', async (req, res) => {
   try {
-    const { executionId, username, taskData } = req.body;
+    const { getProjects, getFavoriteProjects } = await import('../services/projectManager.js');
+    const projects = await getProjects();
+    const favorites = await getFavoriteProjects();
 
-    if (!executionId || !taskData || !taskData.title) {
-      return res.status(400).json({ success: false, error: '缺少必要参数' });
-    }
+    // 标记收藏的项目
+    const projectsWithFavorite = projects.map(p => ({
+      ...p,
+      isFavorite: favorites.some(f => f.id === p.id)
+    }));
 
-    // 获取 cookie
-    const cookies = await getZentaoCookies();
-
-    const configModule = await import('../config.js');
-    const baseUrl = configModule.config.zentao.url;
-    const endpoint = `${baseUrl}/zentao/task-create-${executionId}-0-0.html`;
-
-    console.log('[API] 代理创建任务:', taskData.title);
-
-    // 构建 FormData
-    const formData = new FormData();
-    formData.append('execution', executionId);
-    formData.append('type', 'test');
-    formData.append('module', '0');
-    formData.append('assignedTo[]', username);
-    formData.append('teamMember', '');
-    formData.append('mode', 'linear');
-    formData.append('status', 'wait');
-    formData.append('story', '');
-    formData.append('color', '');
-    formData.append('name', taskData.title);
-    formData.append('storyEstimate', '');
-    formData.append('storyDesc', '');
-    formData.append('storyPri', '');
-    formData.append('pri', '3');
-    formData.append('estimate', '');
-    formData.append('desc', taskData.content || taskData.title);
-    formData.append('estStarted', '');
-    formData.append('deadline', taskData.dueDate || '');
-    formData.append('after', 'toTaskList');
-    formData.append('uid', Math.random().toString(36).substring(2, 14));
-
-    for (let i = 0; i < 5; i++) {
-      formData.append('team[]', '');
-      formData.append('teamSource[]', '');
-      formData.append('teamEstimate[]', '');
-    }
-
-    // 发送请求到禅道
-    const zentaoResp = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Cookie': cookiesToString(cookies),
-      },
-      body: formData,
-    });
-
-    const responseText = await zentaoResp.text();
-    console.log('[API] 禅道响应状态:', zentaoResp.status);
-
-    if (!zentaoResp.ok) {
-      throw new Error(`HTTP ${zentaoResp.status}`);
-    }
-
-    // 解析响应
-    let data;
-    try {
-      data = JSON.parse(responseText);
-    } catch (e) {
-      console.error('[API] 响应不是有效的 JSON:', responseText.substring(0, 200));
-      return res.status(500).json({ success: false, error: '响应解析失败', responseText: responseText.substring(0, 500) });
-    }
-
-    res.json({ success: true, data });
+    res.json({ success: true, data: projectsWithFavorite });
   } catch (err) {
-    console.error('[API] 创建禅道任务失败:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+/**
+ * GET /api/projects/favorites - 获取收藏的项目列表
+ */
+router.get('/projects/favorites', async (req, res) => {
+  try {
+    const { getFavoriteProjects } = await import('../services/projectManager.js');
+    const projects = await getFavoriteProjects();
+    res.json({ success: true, data: projects });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/projects/sync - 从禅道同步项目列表
+ */
+router.post('/projects/sync', async (req, res) => {
+  try {
+    const { syncProjectsFromZentao } = await import('../services/projectManager.js');
+    const { projects } = req.body; // 可选：从前端传来的项目数据
+    const syncedProjects = await syncProjectsFromZentao(projects);
+    res.json({ success: true, data: syncedProjects, message: '项目列表已同步' });
+  } catch (err) {
+    console.error('[API] 同步项目列表失败:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/projects/favorites - 设置收藏项目
+ */
+router.post('/projects/favorites', async (req, res) => {
+  try {
+    const { projectIds } = req.body;
+    if (!Array.isArray(projectIds)) {
+      return res.status(400).json({ success: false, error: 'projectIds 必须是数组' });
+    }
+    const { setFavoriteProjects } = await import('../services/projectManager.js');
+    await setFavoriteProjects(projectIds);
+    res.json({ success: true, message: '收藏项目已设置' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/projects/favorites/add - 添加收藏项目
+ */
+router.post('/projects/favorites/add', async (req, res) => {
+  try {
+    const { projectId } = req.body;
+    if (!projectId) {
+      return res.status(400).json({ success: false, error: '缺少 projectId' });
+    }
+    const { addFavoriteProject } = await import('../services/projectManager.js');
+    await addFavoriteProject(projectId);
+    res.json({ success: true, message: '已添加到收藏' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/projects/favorites/remove - 移除收藏项目
+ */
+router.post('/projects/favorites/remove', async (req, res) => {
+  try {
+    const { projectId } = req.body;
+    if (!projectId) {
+      return res.status(400).json({ success: false, error: '缺少 projectId' });
+    }
+    const { removeFavoriteProject } = await import('../services/projectManager.js');
+    await removeFavoriteProject(projectId);
+    res.json({ success: true, message: '已从收藏移除' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/ai/match-project - AI 匹配项目
+ */
+router.post('/ai/match-project', async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content) {
+      return res.status(400).json({ success: false, error: '缺少 content' });
+    }
+
+    // 获取收藏项目
+    const { getFavoriteProjects } = await import('../services/projectManager.js');
+    const favoriteProjects = await getFavoriteProjects();
+
+    if (favoriteProjects.length === 0) {
+      return res.json({ success: true, data: null, message: '没有收藏的项目' });
+    }
+
+    // 构建 AI 提示词
+    const projectsList = favoriteProjects.map(p => `- ${p.id}: ${p.name}`).join('\n');
+
+    const prompt = `你是项目分类助手。根据任务内容，判断其归属于哪个项目。
+
+【可用项目列表】
+${projectsList}
+
+【分析规则】
+1. 根据项目名称判断任务归属
+2. 返回置信度（0-1）
+3. 如果无法确定，返回 null
+
+用户输入：${content}
+
+请只返回JSON：
+{
+  "projectId": "项目ID或null",
+  "projectName": "项目名称",
+  "confidence": 0.95,
+  "reason": "判断原因"
+}`;
+
+    // 调用 AI
+    const { generateResponse } = await import('../ai/openai.js');
+    const aiResponse = await generateResponse(prompt);
+
+    // 解析 AI 响应
+    let matchResult = null;
+    try {
+      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        matchResult = JSON.parse(jsonMatch[0]);
+      }
+    } catch (e) {
+      console.error('[API] 解析 AI 响应失败:', e);
+    }
+
+    res.json({ success: true, data: matchResult });
+  } catch (err) {
+    console.error('[API] AI 匹配项目失败:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/ai/analyze-bug - AI 分析 Bug 生成标题和类型
+ */
+router.post('/ai/analyze-bug', async (req, res) => {
+  try {
+    const { steps } = req.body;
+    if (!steps) {
+      return res.status(400).json({ success: false, error: '缺少 steps' });
+    }
+
+    const prompt = `你是 Bug 分析助手。根据用户提供的 Bug 复现步骤，生成简洁的 Bug 标题并判断类型。
+
+【Bug 类型列表】
+- codeerror: 代码错误（程序报错、异常、崩溃）
+- config: 配置相关（配置错误、环境问题）
+- install: 安装部署（部署失败、依赖问题）
+- security: 安全相关（权限、数据泄露）
+- performance: 性能问题（慢、卡顿、内存占用高）
+- standard: 标准规范（代码风格、命名规范）
+- automation: 测试脚本（测试用例问题）
+- designdefect: 设计缺陷（逻辑错误、交互问题）
+- others: 其他
+
+【分析规则】
+1. 标题要简洁，不超过20字，突出核心问题
+2. 根据复现步骤判断 Bug 类型
+3. 严重程度默认为 3（一般），明显严重的可以设为 2（严重）
+
+用户输入的复现步骤：
+${steps}
+
+请只返回JSON：
+{
+  "title": "简洁的Bug标题",
+  "type": "bug类型代码",
+  "severity": 3
+}`;
+
+    const { generateResponse } = await import('../ai/openai.js');
+    const aiResponse = await generateResponse(prompt);
+
+    // 解析 AI 响应
+    let analysisResult = { title: '未知Bug', type: 'others', severity: 3 };
+    try {
+      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        analysisResult = { ...analysisResult, ...parsed };
+      }
+    } catch (e) {
+      console.error('[API] 解析 AI 响应失败:', e);
+    }
+
+    console.log('[API] Bug 分析结果:', analysisResult);
+    res.json({ success: true, data: analysisResult });
+  } catch (err) {
+    console.error('[API] AI 分析 Bug 失败:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/ai/match-execution - AI 匹配执行
+ */
+router.post('/ai/match-execution', async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content) {
+      return res.status(400).json({ success: false, error: '缺少 content' });
+    }
+
+    // 获取收藏的执行
+    const { getFavoriteExecutions } = await import('../services/executionManager.js');
+    const favoriteExecutions = await getFavoriteExecutions();
+
+    if (favoriteExecutions.length === 0) {
+      return res.json({ success: true, data: null, message: '没有收藏的执行' });
+    }
+
+    // 调用 AI 分析匹配执行
+    const { analyzeTaskForExecution } = await import('../ai/openai.js');
+    const matchedExecutionId = await analyzeTaskForExecution(content, favoriteExecutions);
+
+    let matchResult = null;
+    if (matchedExecutionId) {
+      const matchedExec = favoriteExecutions.find(e => e.id === matchedExecutionId);
+      console.log('[API] 匹配到的执行对象:', JSON.stringify(matchedExec));
+      matchResult = {
+        executionId: matchedExecutionId,
+        executionName: matchedExec?.name || '',
+        projectName: matchedExec?.projectName || '',
+        projectId: matchedExec?.projectId || ''
+      };
+      console.log('[API] ✓ AI 匹配到执行:', JSON.stringify(matchResult));
+    } else {
+      console.log('[API] ✗ AI 匹配失败，未找到匹配的执行');
+    }
+
+    res.json({ success: true, data: matchResult });
+  } catch (err) {
+    console.error('[API] AI 匹配执行失败:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==================== Bug 相关接口 ====================
+
+/**
+ * GET /api/bugs - 获取 Bug 列表
+ */
+router.get('/bugs', async (req, res) => {
+  try {
+    console.log('[API] GET /api/bugs 调用，查询参数:', req.query);
+    const { getBugs } = await import('../services/bugManager.js');
+    const filters = {
+      status: req.query.status,
+      executionId: req.query.executionId
+    };
+    const bugs = await getBugs(filters);
+    console.log('[API] GET /api/bugs 返回，Bug数量:', bugs.length);
+    res.json({ success: true, data: bugs });
+  } catch (err) {
+    console.error('[API] GET /api/bugs 错误:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/bug - 创建 Bug
+ */
+router.post('/bug', async (req, res) => {
+  try {
+    const { createBugWithSync } = await import('../services/bugManager.js');
+    const bugData = req.body;
+
+    console.log('[API] 创建 Bug 请求数据:', bugData);
+
+    // 如果前端没有传递 executionId，尝试从项目信息获取
+    if (!bugData.executionId && bugData.projectId) {
+      const { getProjectById } = await import('../services/projectManager.js');
+      const project = await getProjectById(bugData.projectId);
+      if (project && project.executionId) {
+        bugData.executionId = project.executionId;
+        bugData.executionName = project.name;
+        console.log('[API] 从项目获取执行ID:', project.executionId);
+      }
+    }
+
+    const result = await createBugWithSync(bugData);
+    
+    if (result.syncResult && result.syncResult.needRelogin) {
+      res.json({ success: true, data: result.localBug, needRelogin: true, message: 'Bug 已在本地创建，但在向禅道同步时登录超时，请重新登录' });
+    } else if (result.syncResult && !result.syncResult.success) {
+      res.json({ success: true, data: result.localBug, message: 'Bug已经本地创建，但同步到禅道失败: ' + result.syncResult.message });
+    } else {
+      res.json({ success: true, data: result.localBug, message: 'Bug 已创建并同步至禅道' });
+    }
+  } catch (err) {
+    console.error('[API] 创建 Bug 失败:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * PUT /api/bug/:id - 更新 Bug
+ */
+router.put('/bug/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { updateBugStatus } = await import('../services/bugManager.js');
+    const { status, assignedTo, assignedToList, cc, comment } = req.body;
+
+    const extraData = {};
+    if (assignedTo !== undefined) extraData.assignedTo = assignedTo;
+    if (assignedToList !== undefined) extraData.assignedToList = assignedToList;
+    if (cc !== undefined) extraData.cc = cc;
+    if (comment !== undefined) extraData.comment = comment;
+
+    const bug = await updateBugStatus(id, status, extraData);
+    res.json({ success: true, data: bug, message: 'Bug 已更新' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/bug/:id - 删除 Bug
+ */
+router.delete('/bug/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { deleteBug } = await import('../services/bugManager.js');
+    await deleteBug(id);
+    res.json({ success: true, message: 'Bug 已删除' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/bugs/all - 删除所有 Bug
+ */
+router.delete('/bugs/all', async (req, res) => {
+  try {
+    const { deleteAllBugs } = await import('../services/bugManager.js');
+    const result = await deleteAllBugs();
+    res.json({ success: true, deletedCount: result.deletedCount, message: `已删除 ${result.deletedCount} 个 Bug` });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/bugs/migrate - 迁移Bug数据
+ */
+router.post('/bugs/migrate', async (req, res) => {
+  try {
+    const { migrateBugData } = await import('../services/bugManager.js');
+    const result = await migrateBugData();
+    res.json({
+      success: true,
+      migratedCount: result.migratedCount,
+      total: result.total,
+      message: `已迁移 ${result.migratedCount}/${result.total} 个Bug`
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/bugs/stats - 获取 Bug 统计
+ */
+router.get('/bugs/stats', async (req, res) => {
+  try {
+    const { getBugStats } = await import('../services/bugManager.js');
+    const stats = await getBugStats();
+    res.json({ success: true, data: stats });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * PUT /api/bug/:id/zentaoId - 更新 Bug 的禅道ID
+ */
+router.put('/bug/:id/zentaoId', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { zentaoId } = req.body;
+
+    console.log('[API] 更新 Bug 禅道ID, BugID:', id, 'ZentaoID:', zentaoId);
+
+    const { readTasks, writeTasks } = await import('../utils/storage.js');
+    const data = await readTasks();
+    const tasks = data.tasks || [];
+
+    const bug = tasks.find(t => t.id === id);
+    if (!bug) {
+      return res.status(404).json({ success: false, error: 'Bug not found' });
+    }
+
+    bug.zentaoId = zentaoId;
+    bug.updatedAt = new Date().toISOString();
+
+    await writeTasks({ tasks });
+
+    console.log('[API] Bug 禅道ID已更新');
+    res.json({ success: true, data: bug });
+  } catch (err) {
+    console.error('[API] 更新 Bug 禅道ID失败:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/executions - 获取执行列表（收藏的排在前面）
+ */
+router.get('/executions', async (req, res) => {
+  try {
+    const { getExecutionsOrdered } = await import('../services/executionManager.js');
+    const executions = await getExecutionsOrdered();
+    res.json({ success: true, data: executions });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/executions/update-types - 更新执行类型字段
+ */
+router.post('/executions/update-types', async (req, res) => {
+  try {
+    const { getExecutions } = await import('../services/executionManager.js');
+    // 触发getExecutions会自动更新type字段
+    const executions = await getExecutions();
+    res.json({ success: true, data: executions, message: '执行类型已更新' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/executions/sync - 从禅道同步执行列表
+ */
+router.post('/executions/sync', async (req, res) => {
+  try {
+    const { executions } = req.body; // 可选：从前端传来的执行数据
+    const { syncExecutionsFromZentao } = await import('../services/executionManager.js');
+    const syncedExecutions = await syncExecutionsFromZentao(executions);
+    res.json({ success: true, data: syncedExecutions, message: '执行列表已同步' });
+  } catch (err) {
+    console.error('[API] 同步执行列表失败:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/executions/default - 设置默认执行
+ */
+router.post('/executions/default', async (req, res) => {
+  try {
+    const { executionId } = req.body;
+    if (!executionId) {
+      return res.status(400).json({ success: false, error: '缺少执行ID' });
+    }
+    const { setDefaultExecution } = await import('../services/executionManager.js');
+    await setDefaultExecution(executionId);
+    res.json({ success: true, message: '默认执行已设置' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/executions/favorites - 获取收藏的执行列表
+ */
+router.get('/executions/favorites', async (req, res) => {
+  try {
+    const { getFavoriteExecutions } = await import('../services/executionManager.js');
+    const executions = await getFavoriteExecutions();
+    res.json({ success: true, data: executions });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/executions/favorites - 设置收藏的执行列表
+ */
+router.post('/executions/favorites', async (req, res) => {
+  try {
+    const { executionIds } = req.body;
+    if (!Array.isArray(executionIds)) {
+      return res.status(400).json({ success: false, error: 'executionIds 必须是数组' });
+    }
+    const { setFavoriteExecutions } = await import('../services/executionManager.js');
+    await setFavoriteExecutions(executionIds);
+    res.json({ success: true, message: '收藏执行已设置' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/executions/favorites/add - 添加收藏执行
+ */
+router.post('/executions/favorites/add', async (req, res) => {
+  try {
+    const { executionId } = req.body;
+    if (!executionId) {
+      return res.status(400).json({ success: false, error: '缺少 executionId' });
+    }
+    const { addFavoriteExecution } = await import('../services/executionManager.js');
+    await addFavoriteExecution(executionId);
+    res.json({ success: true, message: '已添加到收藏' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/executions/favorites/remove - 移除收藏执行
+ */
+router.post('/executions/favorites/remove', async (req, res) => {
+  try {
+    const { executionId } = req.body;
+    if (!executionId) {
+      return res.status(400).json({ success: false, error: '缺少 executionId' });
+    }
+    const { removeFavoriteExecution } = await import('../services/executionManager.js');
+    await removeFavoriteExecution(executionId);
+    res.json({ success: true, message: '已从收藏移除' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==================== 禅道双向同步接口 ====================
+
+/**
+ * POST /api/zentao/login - 登录禅道获取cookie
+ */
+router.post('/zentao/login', async (req, res) => {
+  try {
+    // 从后端配置读取，而不是从请求参数读取
+    const { config } = await import('../config.js');
+
+    if (!config.zentao.enabled) {
+      return res.status(400).json({
+        success: false,
+        message: '禅道未启用'
+      });
+    }
+
+    if (!config.zentao.url || !config.zentao.username || !config.zentao.password) {
+      return res.status(400).json({
+        success: false,
+        message: '禅道配置不完整'
+      });
+    }
+
+    const { loginZentao } = await import('../services/zentaoService.js');
+    const cookies = await loginZentao(
+      config.zentao.url,
+      config.zentao.username,
+      config.zentao.password
+    );
+
+    res.json({
+      success: true,
+      data: cookies,
+      message: '登录成功'
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+});
+
+/**
+ * POST /api/zentao/sync-tasks - 从禅道同步任务到本地
+ */
+router.post('/zentao/sync-tasks', async (req, res) => {
+  try {
+    const { tasks } = req.body;
+
+    if (!Array.isArray(tasks)) {
+      return res.status(400).json({
+        success: false,
+        message: 'tasks 必须是数组'
+      });
+    }
+
+    const { importZentaoTasks } = await import('../services/taskManager.js');
+    const result = await importZentaoTasks(tasks);
+
+    res.json({
+      success: true,
+      data: result,
+      message: `任务同步完成: 新增 ${result.added} 个，更新 ${result.updated} 个，跳过 ${result.skipped} 个`
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+});
+
+/**
+ * POST /api/zentao/sync-bugs - 从禅道同步Bug到本地
+ */
+router.post('/zentao/sync-bugs', async (req, res) => {
+  try {
+    const { bugs } = req.body;
+
+    if (!Array.isArray(bugs)) {
+      return res.status(400).json({
+        success: false,
+        message: 'bugs 必须是数组'
+      });
+    }
+
+    const { importZentaoBugs } = await import('../services/bugManager.js');
+    const result = await importZentaoBugs(bugs);
+
+    res.json({
+      success: true,
+      data: result,
+      message: `Bug同步完成: 新增 ${result.added} 个，更新 ${result.updated} 个，跳过 ${result.skipped} 个`
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+});
+
+/**
+ * POST /api/zentao/sync-all - 同步所有数据（手动触发）
+ */
+router.post('/zentao/sync-all', async (req, res) => {
+  try {
+    // 这个接口实际上由浏览器扩展的 background.js 处理
+    // 这里只是提供一个统一的后端接口入口
+    res.json({
+      success: false,
+      message: '请使用浏览器扩展的同步功能，或通过 chrome.runtime.sendMessage 触发'
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+});
+
+/**
+ * @deprecated POST /api/zentao/task/create - 代理创建禅道任务（已废弃）
+ * 请使用浏览器端 ZentaoBrowserClient.createTask()
+ */
+router.post('/zentao/task/create', async (req, res) => {
+  console.warn('[API] /api/zentao/task/create 已废弃，请使用浏览器端 ZentaoBrowserClient');
+  res.status(410).json({
+    success: false,
+    error: '此接口已废弃，请使用浏览器端 ZentaoBrowserClient.createTask()',
+    message: '所有禅道操作已迁移到浏览器端，通过注入脚本到禅道标签页完成'
+  });
+});
+
+/**
+ * @deprecated GET /api/zentao/kanban/params - 从看板页面解析参数（已废弃）
+ * 请使用浏览器端 ZentaoBrowserClient.getKanbanParamsFromHtml()
+ */
+router.get('/zentao/kanban/params', async (req, res) => {
+  console.warn('[API] /api/zentao/kanban/params 已废弃，请使用浏览器端 ZentaoBrowserClient');
+  res.status(410).json({
+    success: false,
+    error: '此接口已废弃，请使用浏览器端 ZentaoBrowserClient.getKanbanParamsFromHtml()',
+    message: '所有禅道操作已迁移到浏览器端，通过注入脚本到禅道标签页完成'
+  });
 });
 
 export default router;

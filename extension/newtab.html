@@ -17,12 +17,77 @@
       font-weight: 500;
       color: #10b981;
     }
+
+    /* 按钮加载状态样式 */
+    .loading {
+      opacity: 0.6;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
+    /* 透明进度 Toast 样式 */
+    .progress-toast-container {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10001;
+      pointer-events: none;
+    }
+
+    .progress-toast {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 24px;
+      background: rgba(59, 130, 246, 0.9);
+      backdrop-filter: blur(10px);
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      animation: progressToastIn 0.3s ease;
+      pointer-events: none;
+      min-width: 200px;
+      max-width: 400px;
+    }
+
+    .progress-toast-spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .progress-toast-message {
+      font-size: 14px;
+      font-weight: 500;
+      color: white;
+    }
+
+    @keyframes progressToastIn {
+      from {
+        opacity: 0;
+        transform: translateY(-20px);
+      }
+      to {
+        opacity: 0.9;
+        transform: translateY(0);
+      }
+    }
   </style>
 </head>
 
 <body>
   <!-- Toast 容器 -->
   <div id="toastContainer" class="toast-container"></div>
+
+  <!-- 进度 Toast 容器 -->
+  <div id="progressToastContainer" class="progress-toast-container"></div>
 
   <!-- 确认对话框 -->
   <div id="confirmDialog" class="confirm-dialog">
@@ -102,6 +167,26 @@
       <!-- 快速操作 -->
       <div class="sidebar-section">
         <h3 class="add-task-title">📝 添加任务</h3>
+
+        <!-- 执行选择器 -->
+        <div class="execution-selector-wrapper" id="executionSelectorWrapper" style="display: none;">
+          <div class="execution-selector-header">
+            <span class="execution-label">所属执行:</span>
+            <button id="refreshExecutionsBtn" class="icon-btn-mini" title="刷新执行列表">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 4v6h-6"></path>
+                <path d="M1 20v-6h6"></path>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+              </svg>
+            </button>
+          </div>
+          <select id="executionSelect" class="execution-select">
+            <option value="" selected>自动选择 (AI分析)</option>
+            <!-- 动态填充 -->
+          </select>
+          <span class="ai-indicator" id="aiIndicator" style="display: none;">AI</span>
+        </div>
+
         <div class="add-task-form">
           <div class="task-input-wrapper">
             <textarea id="taskInput" placeholder=" " rows="3"></textarea>
@@ -144,14 +229,35 @@
           <button id="testMonthlyBtn" class="btn-test"
             style="padding: 6px 12px; font-size: 12px; background: #d35400; border: none; border-radius: 4px; color: white; cursor: pointer;">月末晚月报</button>
         </div>
+
+        <!-- 禅道同步状态 -->
+        <div class="sidebar-section" style="margin-top: 24px;">
+          <h3 style="margin-bottom: 8px; font-size: 14px;">🔄 禅道同步</h3>
+          <div style="background: #f8f9fa; padding: 12px; border-radius: 8px; border: 1px solid #e9ecef;">
+            <div id="zentaoSyncStatus" style="font-size: 12px; color: #6c757d; margin-bottom: 8px;">
+              上次同步: 加载中...
+            </div>
+            <button id="manualSyncButton" class="btn-secondary" style="width: 100%; font-size: 13px; padding: 8px;">
+              立即同步
+            </button>
+          </div>
+        </div>
       </div>
 
     </aside>
 
     <!-- 主内容区 -->
     <main class="main-content">
-      <!-- 任务看板 -->
-      <section class="task-board">
+      <!-- Tab 切换 -->
+      <div class="mode-tabs">
+        <button class="tab-btn active" data-mode="task">📋 任务</button>
+        <button class="tab-btn" data-mode="bug">🐛 Bug</button>
+      </div>
+
+      <!-- 任务模式 -->
+      <div class="mode-content active" id="taskMode">
+        <!-- 任务看板 -->
+        <section class="task-board">
         <div class="task-board-header">
           <div class="task-board-left">
             <h2 id="taskBoardTitle">📋 今日任务</h2>
@@ -215,7 +321,318 @@
           </div>
         </div>
       </section>
+      </div>
+
+      <!-- Bug 模式 -->
+      <div class="mode-content" id="bugMode">
+        <!-- Bug 看板 -->
+        <section class="task-board">
+          <div class="task-board-header">
+            <div class="task-board-left">
+              <h2 id="bugBoardTitle">🐛 Bug 列表</h2>
+              <div class="task-board-stats">
+                <div class="stat-item">
+                  <span class="stat-label">未确认</span>
+                  <span class="stat-value" id="bugUnconfirmedCount">0</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">已确认</span>
+                  <span class="stat-value" id="bugActivatedCount">0</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">已解决</span>
+                  <span class="stat-value" id="bugClosedCount">0</span>
+                </div>
+              </div>
+            </div>
+            <div class="task-board-center">
+              <input type="text" id="bugSearchInput" placeholder="搜索 Bug..." class="header-search">
+            </div>
+            <div class="task-board-right">
+              <button id="addBugBtn" class="header-btn">➕ 添加 Bug</button>
+              <button id="bugSettingsBtn" class="header-btn">⚙️ 设置</button>
+            </div>
+          </div>
+
+          <div class="task-columns">
+            <!-- 未确认列 -->
+            <div class="task-column">
+              <div class="column-header">
+                <h3>🟡 未确认</h3>
+                <span class="column-count" id="bugUnconfirmedListCount">0</span>
+              </div>
+              <div class="task-list" id="bugUnconfirmedList">
+                <!-- Bug 卡片将由JS动态生成 -->
+              </div>
+            </div>
+
+            <!-- 已确认列 -->
+            <div class="task-column">
+              <div class="column-header">
+                <h3>🔵 已确认</h3>
+                <span class="column-count" id="bugActivatedListCount">0</span>
+              </div>
+              <div class="task-list" id="bugActivatedList">
+                <!-- Bug 卡片将由JS动态生成 -->
+              </div>
+            </div>
+
+            <!-- 已解决列 -->
+            <div class="task-column">
+              <div class="column-header">
+                <h3>⚪ 已解决</h3>
+                <span class="column-count" id="bugClosedListCount">0</span>
+              </div>
+              <div class="task-list" id="bugClosedList">
+                <!-- Bug 卡片将由JS动态生成 -->
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
     </main>
+  </div>
+
+  <!-- Bug 创建弹窗 -->
+  <div id="bugModal" class="modal">
+    <div class="modal-content" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3>🐛 添加 Bug</h3>
+        <button class="close-btn" id="closeBugModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">所属项目 *</label>
+          <select id="bugProject" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+            <option value="">请选择项目</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size:  13px; color: var(--text-secondary);">指派人</label>
+          <div class="multi-select-container" id="bugAssigneeContainer">
+            <div class="multi-select-display" id="bugAssigneeDisplay">
+              <span class="multi-select-placeholder">请选择指派人</span>
+            </div>
+            <div class="multi-select-dropdown" id="bugAssigneeDropdown" style="display: none;">
+              <div class="multi-select-options" id="bugAssigneeOptions">
+                <!-- 用户选项将通过 JS 动态生成 -->
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">抄送人</label>
+          <div class="multi-select-container" id="bugCcContainer">
+            <div class="multi-select-display" id="bugCcDisplay">
+              <span class="multi-select-placeholder">请选择抄送人</span>
+            </div>
+            <div class="multi-select-dropdown" id="bugCcDropdown" style="display: none;">
+              <div class="multi-select-options" id="bugCcOptions">
+                <!-- 用户选项将通过 JS 动态生成 -->
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">Bug 标题 *</label>
+          <input type="text" id="bugTitle" class="form-control" placeholder="简要描述 Bug" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+        </div>
+        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="flex: 1;">
+            <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">严重程度</label>
+            <select id="bugSeverity" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+              <option value="1">1 - 致命</option>
+              <option value="2">2 - 严重</option>
+              <option value="3" selected>3 - 一般</option>
+              <option value="4">4 - 提示</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">Bug 类型</label>
+            <select id="bugType" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+              <option value="codeerror" selected>代码错误</option>
+              <option value="config">配置相关</option>
+              <option value="install">安装部署</option>
+              <option value="security">安全相关</option>
+              <option value="performance">性能问题</option>
+              <option value="standard">标准规范</option>
+              <option value="automation">测试脚本</option>
+              <option value="designdefect">设计缺陷</option>
+              <option value="others">其他</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">重现步骤 *</label>
+          <textarea id="bugSteps" rows="6" class="form-control" placeholder="[步骤]&#10;1. ...&#10;&#10;[结果]&#10;...&#10;&#10;[期望]&#10;..." style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical;"></textarea>
+        </div>
+        <div style="display: flex; justify-content: flex-end; align-items: center; gap: 12px;">
+          <span id="bugDraftSaved" style="font-size: 12px; color: var(--text-muted); display: none; white-space: nowrap;">草稿已自动保存</span>
+          <button id="submitBugBtn" class="btn-primary">提交 Bug</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bug 详情弹窗 -->
+  <div id="bugDetailModal" class="modal">
+    <div class="modal-content" style="max-width: 500px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
+          <h3 style="margin: 0;">🐛 Bug 详情</h3>
+          <div id="bugDetailHeaderInfo" style="display: flex; align-items: center; gap: 8px;">
+            <!-- 优先级和状态动态填充 -->
+          </div>
+        </div>
+        <button class="close-btn" id="closeBugDetailModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="bugDetailContent">
+          <!-- Bug 详情内容动态填充 -->
+        </div>
+        <div id="bugDetailActions" class="bug-detail-actions">
+          <!-- 操作按钮动态填充 -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bug 修复弹窗 -->
+  <div id="bugResolveModal" class="modal">
+    <div class="modal-content" style="max-width: 450px;">
+      <div class="modal-header">
+        <h3>🔧 解决 Bug</h3>
+        <button class="close-btn" id="closeBugResolveModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">解决方式</label>
+          <select id="resolveResolution" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+            <option value="fixed">已解决</option>
+            <option value="postponed">延期处理</option>
+            <option value="bydesign">设计如此</option>
+            <option value="notrepro">无法复现</option>
+            <option value="duplicate">重复 Bug</option>
+            <option value="external">外部原因</option>
+            <option value="willnotfix">不予解决</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">指派人</label>
+          <div class="multi-select-container" id="resolveAssigneeContainer">
+            <div class="multi-select-display" id="resolveAssigneeDisplay">
+              <span class="multi-select-placeholder">请选择指派人</span>
+            </div>
+            <div class="multi-select-dropdown" id="resolveAssigneeDropdown" style="display: none;">
+              <div class="multi-select-options" id="resolveAssigneeOptions">
+                <!-- 用户选项将通过 JS 动态生成 -->
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">备注</label>
+          <textarea id="resolveComment" rows="3" class="form-control" placeholder="填写备注信息..." style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical;"></textarea>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px;">
+          <button id="cancelResolveBtn" class="btn-secondary">取消</button>
+          <button id="confirmResolveBtn" class="btn-primary">确认</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Bug 激活弹窗 -->
+  <div id="bugActivateModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>⚡ 确认 Bug</h3>
+        <button class="close-btn" id="closeBugActivateModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">指派人</label>
+          <div class="multi-select-container" id="activateAssigneeContainer">
+            <div class="multi-select-display" id="activateAssigneeDisplay">
+              <span class="multi-select-placeholder">请选择指派人</span>
+            </div>
+            <div class="multi-select-dropdown" id="activateAssigneeDropdown" style="display: none;">
+              <div class="multi-select-options" id="activateAssigneeOptions">
+                <!-- 用户选项将通过 JS 动态生成 -->
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">抄送人</label>
+          <div class="multi-select-container" id="activateCcContainer">
+            <div class="multi-select-display" id="activateCcDisplay">
+              <span class="multi-select-placeholder">请选择抄送人</span>
+            </div>
+            <div class="multi-select-dropdown" id="activateCcDropdown" style="display: none;">
+              <div class="multi-select-options" id="activateCcOptions">
+                <!-- 用户选项将通过 JS 动态生成 -->
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">备注</label>
+          <textarea id="activateComment" rows="3" class="form-control" placeholder="填写备注信息..." style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical;"></textarea>
+        </div>
+        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="flex: 1;">
+            <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">优先级</label>
+            <select id="activatePri" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+              <option value="0">0 - 挂起</option>
+              <option value="1">1 - 致命</option>
+              <option value="2">2 - 严重</option>
+              <option value="3" selected>3 - 一般</option>
+              <option value="4">4 - 提示</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">Bug 类型</label>
+            <select id="activateType" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+              <option value="codeerror" selected>代码错误</option>
+              <option value="config">配置相关</option>
+              <option value="install">安装部署</option>
+              <option value="security">安全相关</option>
+              <option value="performance">性能问题</option>
+              <option value="standard">标准规范</option>
+              <option value="automation">测试脚本</option>
+              <option value="designdefect">设计缺陷</option>
+              <option value="others">其他</option>
+            </select>
+          </div>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px;">
+          <button id="cancelActivateBtn" class="btn-secondary">取消</button>
+          <button id="confirmActivateBtn" class="btn-primary">确认</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bug 关闭弹窗 -->
+  <div id="bugCloseModal" class="modal">
+    <div class="modal-content" style="max-width: 450px;">
+      <div class="modal-header">
+        <h3>🔒 关闭 Bug</h3>
+        <button class="close-btn" id="closeBugCloseModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">备注</label>
+          <textarea id="closeComment" rows="4" class="form-control" placeholder="填写关闭备注（可选）..." style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical;"></textarea>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px;">
+          <button id="cancelCloseBtn" class="btn-secondary">取消</button>
+          <button id="confirmCloseBtn" class="btn-primary">确认关闭</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- 任务详情弹窗 -->
@@ -385,8 +802,26 @@
           </div>
           <div style="display: flex; gap: 8px; margin-top: 12px;">
             <button id="testZentao" class="btn-secondary">🧪 测试连接</button>
+            <button id="updateZentaoUsers" class="btn-secondary">🔄 更新用户列表</button>
           </div>
           <span id="zentaoTestResult" class="test-result"></span>
+          <span id="zentaoUsersResult" class="test-result"></span>
+        </div>
+
+        <!-- 执行收藏配置 -->
+        <div class="settings-section">
+          <h4>⭐ 常用执行（AI 将优先匹配这些执行）</h4>
+          <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+            <button id="syncExecutionsBtn" class="btn-secondary">🔄 从禅道同步执行</button>
+            <span id="syncExecutionsResult" class="test-result"></span>
+          </div>
+          <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+            <input type="checkbox" id="showClosedExecutions" style="cursor: pointer;">
+            <label for="showClosedExecutions" style="cursor: pointer; font-size: 13px;">显示已关闭的执行</label>
+          </div>
+          <div id="executionFavoritesList" class="project-favorites-list">
+            <p class="hint">点击「从禅道同步执行」加载执行列表</p>
+          </div>
         </div>
 
 
@@ -473,8 +908,6 @@
       </div>
     </div>
   </div>
-  </div>
-  </div>
 
   <!-- 设置时间模态框 -->
   <div id="datetimeModal" class="modal">
@@ -502,6 +935,12 @@
   <script src="storage-webdav.js"></script>
   <script src="sync.js"></script>
   <script src="sync-ui.js"></script>
+
+  <!-- 禅道标签页和按钮状态管理器 -->
+  <script src="zentaoTabManager.js"></script>
+  <script src="buttonStateManager.js"></script>
+
+  <!-- 旧的 BugMode 翻转按钮已移除，现在使用 Tab 切换 -->
 
   <script src="newtab.js"></script>
 </body>

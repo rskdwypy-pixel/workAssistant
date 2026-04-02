@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -11,6 +11,22 @@ const envFilePath = join(__dirname, '../.env');
 
 // 加载 .env 文件
 dotenv.config({ path: envFilePath });
+
+// 加载禅道用户列表
+function loadZentaoUsers() {
+  const usersFilePath = join(__dirname, '../data/zentao-users.json');
+  try {
+    if (existsSync(usersFilePath)) {
+      const usersData = readFileSync(usersFilePath, 'utf-8');
+      const users = JSON.parse(usersData);
+      console.log('[Config] 已加载禅道用户列表，用户数量:', Object.keys(users).length);
+      return users;
+    }
+  } catch (err) {
+    console.warn('[Config] 加载禅道用户列表失败:', err.message);
+  }
+  return {};
+}
 
 const config = {
   // AI 配置
@@ -44,7 +60,9 @@ const config = {
     url: process.env.ZENTAO_URL || '',
     username: process.env.ZENTAO_USERNAME || '',
     password: process.env.ZENTAO_PASSWORD || '',
-    createTaskUrl: process.env.ZENTAO_CREATE_TASK_URL || ''
+    createTaskUrl: process.env.ZENTAO_CREATE_TASK_URL || '',
+    users: loadZentaoUsers(),
+    usersUpdatedAt: null
   },
 
   // 数据目录

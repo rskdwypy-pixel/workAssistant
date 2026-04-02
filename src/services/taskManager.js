@@ -9,6 +9,25 @@ async function getAllTasks(filters = {}) {
   const data = await readTasks();
   let tasks = data.tasks || [];
 
+  // 去重：基于 zentaoId 或 id
+  const taskMap = new Map();
+  tasks.forEach(task => {
+    // 确保 zentaoId 是数字类型（如果存在）
+    if (task.zentaoId && typeof task.zentaoId === 'string') {
+      task.zentaoId = parseInt(task.zentaoId, 10);
+    }
+    // 优先使用 zentaoId 去重（对于已同步到禅道的任务）
+    // 如果没有 zentaoId，使用本地 id 去重
+    const key = task.zentaoId || task.id;
+    // 如果有重复，保留最新的（按 updatedAt）
+    const existing = taskMap.get(key);
+    if (!existing ||
+        new Date(task.updatedAt || task.createdAt) > new Date(existing.updatedAt || existing.createdAt)) {
+      taskMap.set(key, task);
+    }
+  });
+  tasks = Array.from(taskMap.values());
+
   // 行数据迁移：旧的 reminderTriggered 逻辑迁移至新的双标志位逻辑
   let needsSave = false;
   tasks.forEach(task => {
@@ -201,6 +220,14 @@ async function addOrUpdateTask(content, options = {}) {
   if (parsedProgress > 0 && parsedProgress < 100) parsedStatus = 'in_progress';
   if (parsedProgress === 100) parsedStatus = 'done';
 
+  // 获取执行信息
+  let executionName = null;
+  if (options.executionId) {
+    const { getExecutionById } = await import('./executionManager.js');
+    const execution = await getExecutionById(options.executionId);
+    executionName = execution?.name || `执行 ${options.executionId}`;
+  }
+
   const newTask = {
     title: analysis.data.title || content.slice(0, 20),
     status: parsedStatus,
@@ -209,7 +236,9 @@ async function addOrUpdateTask(content, options = {}) {
     reminderTime: analysis.data.reminderTime || null,
     reminder3hTriggered: analysis.data.reminderTime ? (new Date(analysis.data.reminderTime).getTime() - Date.now() <= 3 * 3600000) : false,
     reminderExactTriggered: false,
-    progress: parsedProgress
+    progress: parsedProgress,
+    executionId: options.executionId || null,
+    executionName: executionName
   };
 
   // 查找相似任务
@@ -224,6 +253,8 @@ async function addOrUpdateTask(content, options = {}) {
       reminderTime: newTask.reminderTime || similarTask.reminderTime,
       zentaoId: options.zentaoId || similarTask.zentaoId,  // 优先使用传入的，否则保留原值
       zentaoExecution: options.zentaoExecution || similarTask.zentaoExecution,  // 优先使用传入的，否则保留原值
+      executionId: options.executionId || similarTask.executionId,
+      executionName: executionName || similarTask.executionName,
       updatedAt: new Date().toISOString()
     });
 
@@ -237,7 +268,7 @@ async function addOrUpdateTask(content, options = {}) {
     content: content,
     ...newTask,
     zentaoId: options.zentaoId || null,        // 支持传入浏览器端已创建的 zentaoId
-    zentaoExecution: options.zentaoExecution || null,  // 禅道执行 ID
+    zentaoExecution: options.zentaoExecution || options.executionId || null,  // 禅道执行 ID，兼容旧字段
     totalConsumedTime: 0,  // 累计消耗工时（用于计算剩余工时）
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -260,10 +291,17 @@ async function updateTaskStatus(taskId, status) {
     throw new Error('任务不存在');
   }
 
+  const oldStatus = task.status;
   task.status = status;
   task.updatedAt = new Date().toISOString();
 
   await writeTasks(data);
+
+  // 同步到禅道
+  if (task.zentaoId && status !== oldStatus) {
+    await syncTaskToZentao(task, { status }, oldStatus);
+  }
+
   return task;
 }
 
@@ -319,12 +357,48 @@ async function updateTask(taskId, updates) {
     }
   }
 
+  // 保存更新前的旧状态，用于同步时比较
+  const oldStatus = task.status;
+
   Object.assign(task, updates, {
     updatedAt: new Date().toISOString()
   });
 
   await writeTasks(data);
+
+  // 同步到禅道（传入旧状态用于比较）
+  await syncTaskToZentao(task, updates, oldStatus);
+
   return task;
+}
+
+/**
+ * @deprecated 同步任务到禅道（已废弃）
+ * 所有禅道操作已迁移到浏览器端，通过 ZentaoBrowserClient 完成
+ * 前端在调用后端 API 之前已经通过浏览器端完成同步
+ */
+async function syncTaskToZentao(task, updates, oldStatus) {
+  // 已废弃：所有禅道操作通过浏览器端 ZentaoBrowserClient 完成
+  // 前端已经处理了禅道同步，后端不再重复执行
+  if (task.zentaoId) {
+    console.log('[TaskManager] 禅道同步已迁移到浏览器端，跳过后端同步');
+  }
+}
+
+/**
+ * @deprecated 同步任务到看板（已废弃）
+ * 所有禅道操作已迁移到浏览器端
+ */
+async function syncTaskToKanban(task, updates, kanbanId) {
+  console.warn('[TaskManager] syncTaskToKanban 已废弃，请使用浏览器端 ZentaoBrowserClient');
+}
+
+/**
+ * @deprecated 同步任务到阶段/迭代/看板执行（已废弃）
+ * 所有禅道操作已迁移到浏览器端，通过 ZentaoBrowserClient 完成
+ */
+async function syncTaskToExecution(task, updates, oldStatus) {
+  console.warn('[TaskManager] syncTaskToExecution 已废弃，请使用浏览器端 ZentaoBrowserClient');
 }
 
 /**
@@ -342,6 +416,18 @@ async function deleteTask(taskId) {
   await writeTasks(data);
 
   return { success: true };
+}
+
+/**
+ * 删除所有本地任务（不影响禅道任务）
+ */
+async function deleteAllTasks() {
+  const data = await readTasks();
+  const deletedCount = data.tasks.length;
+  data.tasks = [];
+  await writeTasks(data);
+
+  return { success: true, deletedCount };
 }
 
 /**
@@ -464,6 +550,98 @@ async function batchUpdateTasks(updates) {
 }
 
 
+/**
+ * 批量导入禅道任务（去重）
+ * @param {Array} zentaoTasks - 从禅道获取的任务列表
+ * @returns {Promise<Object>} { added, updated, skipped }
+ */
+async function importZentaoTasks(zentaoTasks) {
+  console.log('[TaskManager] ========== 批量导入禅道任务 ==========');
+  console.log('[TaskManager] 导入任务数量:', zentaoTasks.length);
+
+  const data = await readTasks();
+  const tasks = data.tasks || [];
+
+  // Build a Map for O(1) lookups instead of O(n²) find() in loop
+  const existingTasksMap = new Map();
+  tasks.forEach(t => {
+    // 只对 type === 'task' 且有 zentaoId 的任务建立索引
+    // 避免与 Bug 或其他类型的项冲突
+    if (t.type === 'task' && t.zentaoId) {
+      existingTasksMap.set(t.zentaoId, t);
+    }
+  });
+
+  let added = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  for (const zentaoTask of zentaoTasks) {
+    try {
+      // O(1) lookup instead of O(n) find()
+      const existingTask = existingTasksMap.get(zentaoTask.zentaoId);
+
+      if (existingTask) {
+        // 更新现有任务
+        console.log('[TaskManager] 更新现有任务:', zentaoTask.zentaoId, zentaoTask.title);
+
+        // 只更新特定字段，保留本地修改的字段
+        Object.assign(existingTask, {
+          title: zentaoTask.title,
+          content: zentaoTask.title, // 禅道任务没有详细描述，使用标题
+          status: zentaoTask.status,
+          priority: zentaoTask.priority,
+          zentaoId: parseInt(zentaoTask.zentaoId, 10), // 确保是数字类型
+          executionId: zentaoTask.executionId ? String(zentaoTask.executionId) : existingTask.executionId,
+          executionName: zentaoTask.executionName || existingTask.executionName,
+          projectName: zentaoTask.projectName || existingTask.projectName,
+          projectId: zentaoTask.projectId || existingTask.projectId,
+          progress: zentaoTask.progress,
+          totalConsumedTime: zentaoTask.consumed || 0,
+          updatedAt: new Date().toISOString()
+        });
+
+        updated++;
+      } else {
+        // 创建新任务
+        console.log('[TaskManager] 创建新任务:', zentaoTask.zentaoId, zentaoTask.title);
+
+        const newTask = {
+          id: uuidv4(),
+          type: 'task',
+          title: zentaoTask.title,
+          content: zentaoTask.title,
+          status: zentaoTask.status,
+          priority: zentaoTask.priority,
+          progress: zentaoTask.progress,
+          zentaoId: parseInt(zentaoTask.zentaoId, 10), // 确保是数字类型
+          executionId: zentaoTask.executionId ? String(zentaoTask.executionId) : '',
+          executionName: zentaoTask.executionName || '',
+          projectName: zentaoTask.projectName || '',
+          projectId: zentaoTask.projectId || '',
+          totalConsumedTime: zentaoTask.consumed || 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+
+        tasks.unshift(newTask);
+        added++;
+      }
+    } catch (err) {
+      console.error('[TaskManager] 导入任务失败:', zentaoTask, err);
+      skipped++;
+    }
+  }
+
+  // 保存到文件
+  await writeTasks({ tasks });
+
+  console.log('[TaskManager] ========== 导入完成 ==========');
+  console.log('[TaskManager] 新增:', added, '更新:', updated, '跳过:', skipped);
+
+  return { added, updated, skipped };
+}
+
 export {
   getAllTasks,
   getTodayTasks,
@@ -474,7 +652,9 @@ export {
   updateTaskStatus,
   updateTask,
   deleteTask,
+  deleteAllTasks,
   getTaskStats,
   getCalendarData,
-  batchUpdateTasks
+  batchUpdateTasks,
+  importZentaoTasks
 };
