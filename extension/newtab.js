@@ -6833,14 +6833,39 @@ const BugManager = {
     const severityClass = `bug-severity-${bug.severity || 3}`;
     const severityText = ['', '致命', '严重', '一般', '提示'][bug.severity || 3];
 
-    // 获取用户列表用于显示名称
+    // 获取用户列表用于显示名称（账号 -> 姓名的映射）
     const users = ZentaoBrowserClient.getUsers() || {};
+
+    // 辅助函数：将用户账号或姓名转换为显示文本
+    // 如果是账号（如 "lijc"），从 users 映射中查找姓名
+    // 如果是姓名（如 "李佳成"），直接使用
+    const getDisplayName = (user) => {
+      if (!user) return '';
+      // 如果已经在 users 映射中找到，说明是账号
+      if (users[user]) {
+        return users[user];
+      }
+      // 否则判断是否是账号（通常账号较短，不含中文）
+      // 如果包含中文，认为是姓名，直接返回
+      if (/[\u4e00-\u9fa5]/.test(user)) {
+        return user;
+      }
+      // 否则返回原文
+      return user;
+    };
 
     // 格式化指派人显示
     let assigneeDisplay = '';
     if (bug.assignedTo) {
-      const assigneeName = users[bug.assignedTo] || bug.assignedTo;
-      assigneeDisplay = `<span class="bug-assignee">👤 ${escapeHtml(assigneeName)}</span>`;
+      let assigneeNames = '';
+      if (Array.isArray(bug.assignedTo)) {
+        assigneeNames = bug.assignedTo.map(getDisplayName).filter(n => n).join(', ');
+      } else {
+        assigneeNames = getDisplayName(bug.assignedTo);
+      }
+      if (assigneeNames) {
+        assigneeDisplay = `<span class="bug-assignee">👤 ${escapeHtml(assigneeNames)}</span>`;
+      }
     }
 
     // Bug ID 显示和链接（直接在标题后面）
@@ -8091,26 +8116,53 @@ const BugManager = {
       <span style="font-size: 12px; color: var(--text-secondary);">${statusText}</span>
     `;
 
-    // 获取用户列表用于显示名称
+    // 获取用户列表用于显示名称（账号 -> 姓名的映射）
     const users = ZentaoBrowserClient.getUsers() || {};
+
+    // 辅助函数：将用户账号或姓名转换为显示文本
+    const getDisplayName = (user) => {
+      if (!user) return '';
+      // 如果已经在 users 映射中找到，说明是账号
+      if (users[user]) {
+        return users[user];
+      }
+      // 否则判断是否是账号（通常账号较短，不含中文）
+      // 如果包含中文，认为是姓名，直接返回
+      if (/[\u4e00-\u9fa5]/.test(user)) {
+        return user;
+      }
+      // 否则返回原文
+      return user;
+    };
 
     // 格式化指派人
     let assigneeText = '';
     if (bug.assignedTo) {
-      const assignedTo = bug.assignedTo;
-      if (Array.isArray(assignedTo)) {
-        if (assignedTo.length > 0) {
-          assigneeText = assignedTo.map(acc => users[acc] || acc).join(', ');
-        }
-      } else {
-        assigneeText = users[assignedTo] || assignedTo;
+      let assigneeList = [];
+      if (Array.isArray(bug.assignedTo)) {
+        assigneeList = bug.assignedTo;
+      } else if (typeof bug.assignedTo === 'string') {
+        // 字符串格式，按空格或逗号分隔
+        assigneeList = bug.assignedTo.split(/[\s,]+/).filter(a => a);
+      }
+      if (assigneeList.length > 0) {
+        assigneeText = assigneeList.map(getDisplayName).join(', ');
       }
     }
 
     // 格式化抄送人
     let ccText = '';
-    if (bug.cc && Array.isArray(bug.cc) && bug.cc.length > 0) {
-      ccText = bug.cc.map(cc => users[cc] || cc).join(', ');
+    if (bug.cc) {
+      let ccList = [];
+      if (Array.isArray(bug.cc)) {
+        ccList = bug.cc;
+      } else if (typeof bug.cc === 'string') {
+        // 字符串格式，按空格分隔
+        ccList = bug.cc.split(/\s+/).filter(cc => cc);
+      }
+      if (ccList.length > 0) {
+        ccText = ccList.map(getDisplayName).join(', ');
+      }
     }
 
     content.innerHTML = `
