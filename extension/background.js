@@ -3228,18 +3228,14 @@ async function syncFromZentaoInBackground(config) {
                 resolution
               });
 
-              // 如果已解决，跳过不同步
-              if (isResolved) {
-                console.log('[Content] Bug', zentaoId, '已解决，跳过同步');
-                return;
-              }
-
-              // 根据确认状态设置状态
+              // 根据确认状态和解决状态设置状态
               let status = 'unconfirmed';
-              if (isConfirmed) {
-                status = 'activated';
+              if (isResolved) {
+                status = 'closed';  // 已解决的 Bug 状态为 closed
+              } else if (isConfirmed) {
+                status = 'activated';  // 已确认但未解决的 Bug 状态为 activated
               } else if (isUnconfirmed) {
-                status = 'unconfirmed';
+                status = 'unconfirmed';  // 未确认的 Bug 状态为 unconfirmed
               }
 
               // 打印完整的 bug 信息
