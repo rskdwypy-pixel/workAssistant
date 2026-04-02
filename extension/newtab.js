@@ -8409,6 +8409,16 @@ const BugManager = {
     // 加载用户列表到下拉框
     await this.loadActivateUserOptions();
 
+    // 强制清空抄送人选择（避免带入上次的值）
+    const ccContainer = document.getElementById('activateCcContainer');
+    if (ccContainer && ccContainer._selectedUsers) {
+      ccContainer._selectedUsers.clear();
+    }
+    const ccDisplay = document.getElementById('activateCcDisplay');
+    if (ccDisplay) {
+      ccDisplay.innerHTML = '<span class="multi-select-placeholder">请选择抄送人</span>';
+    }
+
     // 保存当前操作的 Bug ID
     modal.dataset.bugId = bugId;
     modal.dataset.zentaoBugId = bug.zentaoId;
@@ -8564,9 +8574,12 @@ const BugManager = {
         assigneeDisplay.innerHTML = '<span class="multi-select-placeholder">请选择指派人</span>';
       }
 
+      const ccContainer = document.getElementById('activateCcContainer');
+      if (ccContainer && ccContainer._selectedUsers) {
+        ccContainer._selectedUsers.clear();
+      }
       const ccDisplay = document.getElementById('activateCcDisplay');
-      if (ccDisplay && ccDisplay._selectedUsers) {
-        ccDisplay._selectedUsers.clear();
+      if (ccDisplay) {
         ccDisplay.innerHTML = '<span class="multi-select-placeholder">请选择抄送人</span>';
       }
     }
