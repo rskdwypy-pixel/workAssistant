@@ -3304,7 +3304,13 @@ async function syncFromZentaoInBackground(config) {
           bug.assignedDate = bugDetail.assignedDate;
           bug.cc = bugDetail.cc;
 
-          console.log(`[Background] ✓ Bug ${bug.zentaoId} 详情获取完成`);
+          console.log(`[Background] ✓ Bug ${bug.zentaoId} 详情获取完成，包含:`, {
+            steps: bug.steps.substring(0, 50),
+            historyCount: bug.history.length,
+            assignedTo: bug.assignedTo,
+            assignedDate: bug.assignedDate,
+            cc: bug.cc
+          });
         } catch (err) {
           console.error(`[Background] ✗ Bug ${bug.zentaoId} 详情获取失败:`, err);
           // 即使失败也保留 Bug，只是详情信息为空
@@ -3322,12 +3328,33 @@ async function syncFromZentaoInBackground(config) {
       }
 
       console.log('[Background] ✓ 所有 Bug 详情获取完成');
+
+      // 打印第一个 Bug 的完整信息，验证数据是否正确合并
+      if (zentaoBugs.length > 0) {
+        console.log('[Background] Bug 数据示例（详情合并后）:', JSON.stringify(zentaoBugs[0], null, 2));
+      }
     }
 
     // 6. 发送到后端API保存
     console.log('[Background] ========== 步骤6: 保存到本地数据库 ==========');
     console.log('[Background] 准备发送任务数据:', zentaoTasks.length, '个任务');
     console.log('[Background] 准备发送Bug数据:', zentaoBugs.length, '个Bug');
+
+    // 打印 Bug 数据样本，验证新字段是否被包含
+    if (zentaoBugs.length > 0) {
+      const sampleBug = zentaoBugs[0];
+      console.log('[Background] Bug 数据样本（发送到后端前）:', {
+        zentaoId: sampleBug.zentaoId,
+        title: sampleBug.title,
+        hasSteps: !!sampleBug.steps,
+        stepsLength: sampleBug.steps?.length || 0,
+        hasHistory: !!sampleBug.history,
+        historyCount: sampleBug.history?.length || 0,
+        assignedTo: sampleBug.assignedTo,
+        assignedDate: sampleBug.assignedDate,
+        cc: sampleBug.cc
+      });
+    }
 
     const [tasksResult, bugsResult] = await Promise.all([
       fetch(`${API_BASE_URL}/api/zentao/sync-tasks`, {

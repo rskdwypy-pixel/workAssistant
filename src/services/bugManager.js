@@ -381,6 +381,11 @@ async function importZentaoBugs(zentaoBugs) {
   console.log('[BugManager] ========== 批量导入禅道Bug ==========');
   console.log('[BugManager] 导入Bug数量:', zentaoBugs.length);
 
+  // 打印第一个 Bug 的详细信息
+  if (zentaoBugs.length > 0) {
+    console.log('[BugManager] 第一个 Bug 数据（接收到的原始数据）:', JSON.stringify(zentaoBugs[0], null, 2));
+  }
+
   const data = await readTasks();
   const tasks = data.tasks || [];
 

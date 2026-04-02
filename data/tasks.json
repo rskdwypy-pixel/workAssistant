@@ -1,6 +1,40 @@
 {
   "tasks": [
     {
+      "id": "e39745f6-226d-49e9-b8ba-2eaa6c8af7a6",
+      "type": "task",
+      "title": "上海电信项目寄设备",
+      "content": "上海电信项目寄设备",
+      "status": "in_progress",
+      "priority": 3,
+      "progress": 29,
+      "zentaoId": 700,
+      "executionId": "167",
+      "executionName": "2026 年工作日志记录",
+      "projectName": "李佳成 2026 年工作日志记录",
+      "projectId": 166,
+      "totalConsumedTime": 0.2,
+      "createdAt": "2026-04-02T08:37:00.229Z",
+      "updatedAt": "2026-04-02T08:37:00.229Z"
+    },
+    {
+      "id": "cc34e0c8-52f4-41f1-9fc1-0cb054cbc335",
+      "type": "task",
+      "title": "卡中心3月竞品分析报告",
+      "content": "卡中心3月竞品分析报告",
+      "status": "todo",
+      "priority": 3,
+      "progress": 0,
+      "zentaoId": 701,
+      "executionId": "148",
+      "executionName": "民生卡中心项目交付",
+      "projectName": "民生卡中心",
+      "projectId": 130,
+      "totalConsumedTime": 0,
+      "createdAt": "2026-04-02T08:37:00.228Z",
+      "updatedAt": "2026-04-02T08:37:00.228Z"
+    },
+    {
       "id": "62bbb465-ab40-4820-9c66-241c21df36c4",
       "type": "bug",
       "title": "iOS录制器链接录制应用后，点击左侧录屏与右侧控件树自动定位的控件无法精准对齐",
@@ -115,7 +149,7 @@
       "projectId": 166,
       "totalConsumedTime": 0.3,
       "createdAt": "2026-04-02T05:58:21.483Z",
-      "updatedAt": "2026-04-02T06:03:28.509Z"
+      "updatedAt": "2026-04-02T08:37:00.228Z"
     },
     {
       "id": "e9cbe43e-8434-4ea1-b674-463b8cccb2c2",
@@ -160,7 +194,7 @@
       "projectId": 119,
       "totalConsumedTime": 0,
       "createdAt": "2026-04-02T05:58:21.483Z",
-      "updatedAt": "2026-04-02T06:03:28.509Z"
+      "updatedAt": "2026-04-02T08:37:00.228Z"
     },
     {
       "id": "c7681138-f003-41ea-ba9c-d23fee58357d",
@@ -177,7 +211,7 @@
       "projectId": 166,
       "totalConsumedTime": 0,
       "createdAt": "2026-04-02T05:58:21.483Z",
-      "updatedAt": "2026-04-02T06:03:28.509Z"
+      "updatedAt": "2026-04-02T08:37:00.228Z"
     },
     {
       "id": "f1403be9-2fd1-4c09-b969-274e327e3771",
@@ -194,7 +228,7 @@
       "projectId": 166,
       "totalConsumedTime": 0,
       "createdAt": "2026-04-02T05:58:21.483Z",
-      "updatedAt": "2026-04-02T06:03:28.509Z"
+      "updatedAt": "2026-04-02T08:37:00.227Z"
     },
     {
       "id": "3430e87c-77d1-4900-be8d-0e07bdb6bae4",
@@ -427,5 +461,5 @@
       "executionType": "kanban"
     }
   ],
-  "lastUpdated": "2026-04-02T07:09:38.227Z"
+  "lastUpdated": "2026-04-02T08:37:00.229Z"
 }
