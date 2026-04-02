@@ -4517,22 +4517,26 @@ const ZentaoBrowserClient = {
 
     console.log('[ZentaoBrowser] 开始从禅道页面加载用户列表...');
 
-    // 使用 ZentaoTabManager 复用已存在的禅道标签页
+    // 创建临时标签页获取用户列表（不使用 ZentaoTabManager，避免关闭用户标签页）
     const targetUrl = `${baseUrl}/zentao/my-team.html`;
     const tab = await ZentaoTabManager.getOrCreateTab({
       baseUrl,
       targetUrl,
       active: false,
-      reload: false  // 不刷新，避免不必要的页面加载
+      reload: false
     });
+
+    // 标记这是临时标签页，需要在加载完成后关闭
+    let shouldCloseTab = false;
 
     // 如果标签页不在目标页面，导航过去
     if (!tab.url.includes('my-team.html')) {
       console.log('[ZentaoBrowser] 标签页不在 my-team.html，导航中...');
       await ZentaoTabManager.navigateTo(tab, targetUrl, { waitTimeout: 10000 });
+      // 导航后不关闭，因为这是复用的标签页
     } else {
-      // 等待一下确保页面已加载
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // 如果已经在目标页面，说明是复用的标签页，不关闭
+      console.log('[ZentaoBrowser] 标签页已在目标页面，复用现有标签页');
     }
 
     // 注入脚本提取用户 - 参考 Gemini 方案的纯函数设计
@@ -4614,8 +4618,8 @@ const ZentaoBrowserClient = {
       this.usersLoaded = true;
     }
 
-    // 关闭临时标签页
-    await chrome.tabs.remove(tab.id);
+    // 不关闭标签页，因为它是通过 ZentaoTabManager 复用的，可能是用户正在使用的标签页
+    console.log('[ZentaoBrowser] 用户列表加载完成，保留标签页');
 
     return this.users;
   },
@@ -8323,11 +8327,13 @@ const BugManager = {
       console.warn('[BugManager] 用户列表未加载，尝试从禅道加载...');
       await ZentaoBrowserClient.loadUsersFromTeamPage();
       users = await ZentaoBrowserClient.getUsers();
+      console.log('[BugManager] 从禅道加载后用户数量:', Object.keys(users).length);
     } else if (userCount < 5) {
       // 用户列表数量太少，可能是加载不完整，尝试重新加载
       console.warn('[BugManager] 用户列表数量过少(', userCount, '个)，可能加载不完整，尝试重新加载...');
       await ZentaoBrowserClient.loadUsersFromTeamPage();
       users = await ZentaoBrowserClient.getUsers();
+      console.log('[BugManager] 重新加载后用户数量:', Object.keys(users).length);
     }
 
     if (!users || Object.keys(users).length === 0) {
@@ -8355,10 +8361,14 @@ const BugManager = {
 
     // 获取用户列表
     let users = await ZentaoBrowserClient.getUsers();
-    if (!users || Object.keys(users).length === 0) {
+    const userCount = users ? Object.keys(users).length : 0;
+    console.log('[BugManager] 获取到用户列表，用户数量:', userCount);
+
+    if (!users || userCount === 0) {
       console.warn('[BugManager] 用户列表未加载，尝试加载...');
       await ZentaoBrowserClient.loadUsersFromTeamPage();
       users = await ZentaoBrowserClient.getUsers();
+      console.log('[BugManager] 从禅道加载后用户数量:', Object.keys(users).length);
     }
 
     if (!users || Object.keys(users).length === 0) {
@@ -8366,12 +8376,12 @@ const BugManager = {
       return;
     }
 
-    console.log('[BugManager] 加载用户列表到修复表单，用户数量:', Object.keys(users).length);
+    console.log('[BugManager] 加载用户列表到解决表单，用户数量:', Object.keys(users).length);
 
     // 初始化单选组件
     this.initSingleSelect(container, users);
 
-    console.log('[BugManager] 修复表单用户选项加载完成');
+    console.log('[BugManager] 解决表单用户选项加载完成');
   },
 
   /**
@@ -8382,7 +8392,18 @@ const BugManager = {
     const dropdown = container.querySelector('.multi-select-dropdown');
     const optionsContainer = container.querySelector('.multi-select-options');
 
-    if (!display || !dropdown || !optionsContainer) return;
+    if (!display || !dropdown || !optionsContainer) {
+      console.warn('[BugManager] initSingleSelect: 容器元素未找到');
+      return;
+    }
+
+    const userCount = Object.keys(users).length;
+    console.log('[BugManager] initSingleSelect: 初始化单选组件，用户数量:', userCount);
+
+    if (userCount === 0) {
+      console.warn('[BugManager] initSingleSelect: 用户列表为空，跳过初始化');
+      return;
+    }
 
     const selectedValue = display.dataset.value || '';
 
