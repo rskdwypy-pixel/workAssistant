@@ -6773,7 +6773,10 @@ const BugManager = {
     let closedCount = 0;
 
     console.log('[BugManager] 开始遍历 Bug 并渲染...');
-    this.bugs.forEach((bug, index) => {
+
+    // 使用 for...of 循环以便使用 await
+    for (let index = 0; index < this.bugs.length; index++) {
+      const bug = this.bugs[index];
       console.log(`[BugManager] 处理 Bug ${index + 1}:`, {
         id: bug.id,
         title: bug.title,
@@ -6787,7 +6790,7 @@ const BugManager = {
         console.warn(`[BugManager] ⚠ Bug ${index + 1} 的 type 不是 'bug':`, bug.type, bug.title);
       }
 
-      const card = this.createBugCard(bug);
+      const card = await this.createBugCard(bug);
 
       if (bug.status === 'unconfirmed') {
         unconfirmedList.appendChild(card);
@@ -6804,7 +6807,7 @@ const BugManager = {
       } else {
         console.log(`[BugManager] → Bug "${bug.title}" 状态未知: ${bug.status}`);
       }
-    });
+    }
 
     console.log('[BugManager] 渲染统计:', {
       unconfirmed: unconfirmedCount,
@@ -6825,7 +6828,7 @@ const BugManager = {
     document.getElementById('bugClosedCount').textContent = closedCount;
   },
 
-  createBugCard(bug) {
+  async createBugCard(bug) {
     const card = document.createElement('div');
     card.className = 'task-card bug-card';
     card.dataset.bugId = bug.id;
@@ -6834,7 +6837,7 @@ const BugManager = {
     const severityText = ['', '致命', '严重', '一般', '提示'][bug.severity || 3];
 
     // 获取用户列表用于显示名称（账号 -> 姓名的映射）
-    const users = ZentaoBrowserClient.getUsers() || {};
+    const users = await ZentaoBrowserClient.getUsers() || {};
 
     // 调试日志
     console.log('[BugManager] createBugCard - Bug:', bug.id, 'assignedTo:', bug.assignedTo, 'users:', users);
@@ -8103,7 +8106,7 @@ const BugManager = {
   /**
    * 显示 Bug 详情弹窗
    */
-  showBugDetail(bugId) {
+  async showBugDetail(bugId) {
     const bug = this.bugs.find(b => b.id === bugId);
     if (!bug) return;
 
@@ -8124,7 +8127,7 @@ const BugManager = {
     `;
 
     // 获取用户列表用于显示名称（账号 -> 姓名的映射）
-    const users = ZentaoBrowserClient.getUsers() || {};
+    const users = await ZentaoBrowserClient.getUsers() || {};
 
     // 辅助函数：将用户账号或姓名转换为显示文本
     const getDisplayName = (user) => {
