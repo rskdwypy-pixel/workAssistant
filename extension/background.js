@@ -2716,6 +2716,55 @@ async function deleteBugInZentao(params) {
   return results[0].result;
 }
 
+/**
+ * 关闭 Bug
+ */
+async function closeBugInZentao(params) {
+  const { baseUrl, bugId, comment } = params;
+  console.log('[Background] 关闭 Bug:', { bugId, comment });
+
+  const targetTab = await ensureZentaoTab(baseUrl);
+  if (!targetTab) {
+    return { success: false, reason: 'no_zentao_tab' };
+  }
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: targetTab.id },
+    func: (bugId, comment) => {
+      return new Promise((resolve) => {
+        const formData = new FormData();
+        formData.append('status', 'closed');
+        formData.append('comment', comment || '');
+        formData.append('uid', Math.random().toString(36).substring(2, 14));
+
+        const endpoint = `${window.location.origin}/zentao/bug-close-${bugId}.html?onlybody=yes`;
+        fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          body: formData
+        })
+        .then(r => {
+          console.log('[Bug Close] 响应状态:', r.status, r.statusText);
+          // 只检查HTTP状态码，2xx都认为成功
+          if (r.ok || (r.status >= 200 && r.status < 300)) {
+            console.log('[Bug Close] ✓ 关闭成功（HTTP状态码正常）');
+            resolve({ success: true });
+          } else {
+            console.error('[Bug Close] ✗ 关闭失败（HTTP状态码异常）');
+            resolve({ success: false, reason: 'http_error', status: r.status });
+          }
+        })
+        .catch(err => resolve({ success: false, reason: err.message }));
+      });
+    },
+    args: [bugId, comment]
+  });
+
+  return results[0].result;
+}
+
 // 在消息监听器中添加对应的 action 处理
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'checkAndSyncZentao') {
@@ -2734,6 +2783,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'resolveBugInZentao') {
     resolveBugInZentao(request)
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, reason: err.message }));
+    return true;
+  }
+
+  if (request.action === 'closeBugInZentao') {
+    closeBugInZentao(request)
       .then(sendResponse)
       .catch(err => sendResponse({ success: false, reason: err.message }));
     return true;

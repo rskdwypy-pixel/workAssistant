@@ -6686,6 +6686,40 @@ const BugManager = {
     if (confirmActivateBtn) {
       confirmActivateBtn.addEventListener('click', () => this.confirmActivation());
     }
+
+    // Bug 关闭弹窗关闭按钮
+    const closeBugCloseBtn = document.getElementById('closeBugCloseModal');
+    if (closeBugCloseBtn) {
+      closeBugCloseBtn.addEventListener('click', () => this.hideCloseModal());
+    }
+
+    // 取消关闭按钮
+    const cancelCloseBtn = document.getElementById('cancelCloseBtn');
+    if (cancelCloseBtn) {
+      cancelCloseBtn.addEventListener('click', () => this.hideCloseModal());
+    }
+
+    // 点击弹框外部关闭
+    const bugCloseModal = document.getElementById('bugCloseModal');
+    if (bugCloseModal) {
+      bugCloseModal.addEventListener('click', (e) => {
+        if (e.target === bugCloseModal) {
+          this.hideCloseModal();
+        }
+      });
+    }
+
+    // 确认关闭按钮
+    const confirmCloseBtn = document.getElementById('confirmCloseBtn');
+    if (confirmCloseBtn) {
+      confirmCloseBtn.addEventListener('click', () => {
+        const modal = document.getElementById('bugCloseModal');
+        const bugId = modal?.dataset.bugId;
+        if (bugId) {
+          this.closeBug(bugId);
+        }
+      });
+    }
   },
 
   async loadBugs() {
@@ -6894,6 +6928,8 @@ const BugManager = {
       quickActionButton = `<button class="bug-quick-btn bug-activate-btn" title="确认 Bug">⚡ 确认</button>`;
     } else if (bug.status === 'activated') {
       quickActionButton = `<button class="bug-quick-btn bug-resolve-btn" title="解决 Bug">🔧 解决</button>`;
+    } else if (bug.status === 'closed') {
+      quickActionButton = `<button class="bug-quick-btn bug-close-btn" title="关闭 Bug">🔒 关闭</button>`;
     }
 
     card.innerHTML = `
@@ -6951,6 +6987,14 @@ const BugManager = {
       resolveBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this.showResolveModal(bug.id);
+      });
+    }
+
+    const closeBtn = card.querySelector('.bug-close-btn');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.showCloseModal(bug.id);
       });
     }
 
@@ -9084,6 +9128,113 @@ const BugManager = {
       Toast.error('解决失败: ' + err.message);
     } finally {
       restoreButton();
+    }
+  },
+
+  /**
+   * 显示关闭弹窗
+   */
+  async showCloseModal(bugId) {
+    const bug = this.bugs.find(b => b.id === bugId);
+    if (!bug) return;
+
+    // 先隐藏详情弹窗
+    this.hideBugDetail();
+
+    const modal = document.getElementById('bugCloseModal');
+    if (!modal) return;
+
+    // 保存当前操作的 Bug ID
+    modal.dataset.bugId = bugId;
+
+    // 清空表单
+    document.getElementById('closeComment').value = '';
+
+    modal.style.display = 'flex';
+  },
+
+  /**
+   * 隐藏关闭弹窗
+   */
+  hideCloseModal() {
+    const modal = document.getElementById('bugCloseModal');
+    if (modal) {
+      modal.style.display = 'none';
+      // 清空表单
+      document.getElementById('closeComment').value = '';
+    }
+  },
+
+  /**
+   * 关闭 Bug
+   */
+  async closeBug(bugId) {
+    const bug = this.bugs.find(b => b.id === bugId);
+    if (!bug) return;
+
+    if (!bug.zentaoId) {
+      Toast.warning('该 Bug 未同步到禅道');
+      return;
+    }
+
+    const modal = document.getElementById('bugCloseModal');
+    const comment = document.getElementById('closeComment').value.trim();
+
+    if (!comment) {
+      Toast.warning('请填写关闭备注');
+      return;
+    }
+
+    // 使用 ButtonStateManager 管理按钮状态
+    const restoreButton = ButtonStateManager.setLoading('confirmCloseBtn', {
+      loadingText: '关闭中...'
+    });
+
+    Toast.info('正在关闭 Bug...');
+
+    try {
+      const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
+      const configResult = await configResp.json();
+      const baseUrl = configResult.data?.url?.replace(/\/$/, '');
+
+      if (!baseUrl) {
+        Toast.error('禅道未配置');
+        return;
+      }
+
+      // 调用 background.js 关闭 Bug
+      const response = await chrome.runtime.sendMessage({
+        action: 'closeBugInZentao',
+        baseUrl,
+        bugId: bug.zentaoId,
+        comment
+      });
+
+      if (response && response.success) {
+        Toast.success('Bug 已关闭');
+        // 从列表中移除该 Bug
+        await this.removeBug(bugId);
+        this.hideCloseModal();
+        this.hideBugDetail(); // 同时关闭详情弹窗
+      } else {
+        Toast.error('关闭失败: ' + (response?.reason || '未知错误'));
+      }
+    } catch (err) {
+      console.error('[BugManager] 关闭 Bug 失败:', err);
+      Toast.error('关闭失败: ' + err.message);
+    } finally {
+      restoreButton();
+    }
+  },
+
+  /**
+   * 从列表中移除 Bug
+   */
+  async removeBug(bugId) {
+    const index = this.bugs.findIndex(b => b.id === bugId);
+    if (index !== -1) {
+      this.bugs.splice(index, 1);
+      await this.renderBugs();
     }
   },
 
