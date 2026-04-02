@@ -9,6 +9,21 @@ async function getAllTasks(filters = {}) {
   const data = await readTasks();
   let tasks = data.tasks || [];
 
+  // 去重：基于 zentaoId 或 id
+  const taskMap = new Map();
+  tasks.forEach(task => {
+    // 优先使用 zentaoId 去重（对于已同步到禅道的任务）
+    // 如果没有 zentaoId，使用本地 id 去重
+    const key = task.zentaoId || task.id;
+    // 如果有重复，保留最新的（按 updatedAt）
+    const existing = taskMap.get(key);
+    if (!existing ||
+        new Date(task.updatedAt || task.createdAt) > new Date(existing.updatedAt || existing.createdAt)) {
+      taskMap.set(key, task);
+    }
+  });
+  tasks = Array.from(taskMap.values());
+
   // 行数据迁移：旧的 reminderTriggered 逻辑迁移至新的双标志位逻辑
   let needsSave = false;
   tasks.forEach(task => {
