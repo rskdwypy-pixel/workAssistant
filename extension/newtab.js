@@ -7176,7 +7176,7 @@ const BugManager = {
       const analysisResult = await analysisResponse.json();
 
       let bugTitle = '未知 Bug';
-      let bugType = 'others';
+      let bugType = 'codeerror';  // 默认为代码错误
       let bugSeverity = '3';
 
       if (analysisResult.success && analysisResult.data) {
