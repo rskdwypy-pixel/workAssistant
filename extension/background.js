@@ -59,27 +59,29 @@ async function checkAndSyncZentao(force = false) {
     }
 
     // 2. 检查上次同步时间（除非强制同步）
-    if (!force) {
-      const lastSyncTime = await getLastSyncTime();
-      const now = Date.now();
-      const timeSinceLastSync = now - lastSyncTime;
+    // 【已注释】禁用24小时自动同步逻辑，只允许手动同步
+    // if (!force) {
+    //   const lastSyncTime = await getLastSyncTime();
+    //   const now = Date.now();
+    //   const timeSinceLastSync = now - lastSyncTime;
 
-      if (lastSyncTime > 0 && timeSinceLastSync < SYNC_INTERVAL) {
-        const hoursUntilNextSync = Math.ceil((SYNC_INTERVAL - timeSinceLastSync) / (60 * 60 * 1000));
-        console.log(`[Background] 距离上次同步不足24小时，还需等待 ${hoursUntilNextSync} 小时`);
-        console.log('[Background] 上次同步时间:', new Date(lastSyncTime).toLocaleString('zh-CN'));
-        return { success: false, reason: 'too_soon', hoursUntilNextSync };
-      }
+    //   if (lastSyncTime > 0 && timeSinceLastSync < SYNC_INTERVAL) {
+    //     const hoursUntilNextSync = Math.ceil((SYNC_INTERVAL - timeSinceLastSync) / (60 * 60 * 1000));
+    //     console.log(`[Background] 距离上次同步不足24小时，还需等待 ${hoursUntilNextSync} 小时`);
+    //     console.log('[Background] 上次同步时间:', new Date(lastSyncTime).toLocaleString('zh-CN'));
+    //     return { success: false, reason: 'too_soon', hoursUntilNextSync };
+    //   }
 
-      if (lastSyncTime === 0) {
-        console.log('[Background] 首次同步，开始从禅道同步数据...');
-      } else {
-        console.log('[Background] 距离上次同步已超过24小时，开始同步...');
-        console.log('[Background] 上次同步时间:', new Date(lastSyncTime).toLocaleString('zh-CN'));
-      }
-    } else {
-      console.log('[Background] 强制同步模式，跳过时间检查');
-    }
+    //   if (lastSyncTime === 0) {
+    //     console.log('[Background] 首次同步，开始从禅道同步数据...');
+    //   } else {
+    //     console.log('[Background] 距离上次同步已超过24小时，开始同步...');
+    //     console.log('[Background] 上次同步时间:', new Date(lastSyncTime).toLocaleString('zh-CN'));
+    //   }
+    // } else {
+    //   console.log('[Background] 强制同步模式，跳过时间检查');
+    // }
+    console.log('[Background] 手动触发同步（自动同步已禁用）');
 
     // 3. 执行同步
     return await syncFromZentaoInBackground(config);
@@ -2816,6 +2818,50 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 /**
+ * 发送进度更新到 newtab 页面
+ * @param {number} currentStep - 当前步骤
+ * @param {number} totalSteps - 总步骤数
+ * @param {string} message - 进度消息
+ */
+function sendProgressUpdate(currentStep, totalSteps, message) {
+  console.log(`[Background] 发送进度更新: ${currentStep}/${totalSteps} - ${message}`);
+
+  // 查找所有标签页，找到扩展的 newtab 页面
+  chrome.tabs.query({}).then(tabs => {
+    // 扩展页面的 URL 可能是：
+    // - chrome-extension://<id>/newtab.html
+    // - moz-extension://<id>/newtab.html (Firefox)
+    const newtabTabs = tabs.filter(tab => {
+      if (!tab.url) return false;
+      // 匹配扩展页面的 URL 格式
+      return tab.url.includes('newtab.html') ||
+             tab.url.includes('/newtab') ||
+             tab.url.match(/chrome-extension:\/\/[^\/]+\/newtab/) ||
+             tab.url.match(/moz-extension:\/\/[^\/]+\/newtab/);
+    });
+
+    if (newtabTabs.length > 0) {
+      console.log(`[Background] 找到 ${newtabTabs.length} 个 newtab 标签页:`, newtabTabs.map(t => t.url));
+
+      newtabTabs.forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, {
+          action: 'updateProgress',
+          currentStep,
+          totalSteps,
+          message
+        }).catch(err => {
+          // 忽略错误，可能标签页未准备好
+          console.log('[Background] 发送到标签页失败:', tab.id, err.message);
+        });
+      });
+    } else {
+      console.log('[Background] 未找到 newtab 标签页，跳过进度更新');
+      console.log('[Background] 当前所有标签页 URL:', tabs.map(t => `${t.id}: ${t.url}`));
+    }
+  });
+}
+
+/**
  * 从禅道同步数据到本地（后台任务）
  * 正确流程：使用同一个标签页依次访问页面获取数据
  * @param {Object} config - 禅道配置（可选，如果不提供则自动获取）
@@ -2843,6 +2889,7 @@ async function syncFromZentaoInBackground(config) {
 
     // 1. 先登录禅道获取 cookie
     console.log('[Background] ========== 步骤1: 登录禅道 ==========');
+    sendProgressUpdate(1, 7, '正在登录禅道...');
     const loginResult = await fetch(`${API_BASE_URL}/api/zentao/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2862,6 +2909,7 @@ async function syncFromZentaoInBackground(config) {
 
     // 2. 使用 ZentaoTabManager 获取或创建禅道标签页
     console.log('[Background] ========== 步骤2: 获取禅道标签页 ==========');
+    sendProgressUpdate(2, 7, '正在获取禅道标签页...');
     const myUrl = `${baseUrl}/zentao/my.html`;
     zentaoTab = await ZentaoTabManager.getOrCreateTab({
       baseUrl,
@@ -2870,17 +2918,18 @@ async function syncFromZentaoInBackground(config) {
       reload: false
     });
 
-    console.log('[Background] ✓ 禅道标签页已就绪:', zentaoTab.id, zentaoTab.url);
+    console.log('[Background] ✓ 禪道标签页已就绪:', zentaoTab.id, zentaoTab.url);
 
     // 等待页面加载完成
     await waitForTabLoad(zentaoTab.id);
     console.log('[Background] ✓ 页面加载完成');
 
-    // 额外等待确保JavaScript执行完成
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // 额外等待确保JavaScript执行完成（从2秒减少到500ms）
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     // 3. 从我的地盘页面获取任务和Bug数量
     console.log('[Background] ========== 步骤3: 获取任务和Bug数量 ==========');
+    sendProgressUpdate(3, 7, '正在获取任务和Bug数量...');
     const countResults = await chrome.scripting.executeScript({
       target: { tabId: zentaoTab.id },
       func: () => {
@@ -2983,6 +3032,7 @@ async function syncFromZentaoInBackground(config) {
 
     // 4. 跳转到任务列表页面并获取数据
     console.log('[Background] ========== 步骤4: 获取任务列表 ==========');
+    sendProgressUpdate(4, 7, '正在获取任务列表...');
     let zentaoTasks = [];
 
     if (taskCount > 0) {
@@ -2991,11 +3041,18 @@ async function syncFromZentaoInBackground(config) {
 
       await chrome.tabs.update(zentaoTab.id, { url: taskUrl });
       await waitForTabLoad(zentaoTab.id);
-      await new Promise(resolve => setTimeout(resolve, 5000));  // 等待AJAX加载（增加到5秒）
 
-      const taskResults = await chrome.scripting.executeScript({
-        target: { tabId: zentaoTab.id },
-        func: () => {
+      // 使用轮询检测任务列表是否加载完成，而不是固定等待5秒
+      const maxRetries = 10;  // 最多重试10次
+      const retryDelay = 500;  // 每次等待500ms
+      let taskResults = null;
+
+      for (let i = 0; i < maxRetries; i++) {
+        console.log(`[Background] 尝试获取任务列表 (${i + 1}/${maxRetries})...`);
+
+        const tempResults = await chrome.scripting.executeScript({
+          target: { tabId: zentaoTab.id },
+          func: () => {
           const tasks = [];
 
           // 首先尝试直接查找 #myTaskList
@@ -3015,7 +3072,7 @@ async function syncFromZentaoInBackground(config) {
 
           if (!tbody) {
             console.log('[Content] 未找到 #myTaskList（主页面和iframe都没找到）');
-            return tasks;
+            return { tasks, tbodyFound: false };
           }
 
           const rows = tbody.querySelectorAll('tr[data-status="wait"], tr[data-status="doing"]');
@@ -3140,12 +3197,31 @@ async function syncFromZentaoInBackground(config) {
             }
           });
 
-          return tasks;
+          return { tasks, tbodyFound: true };
         }
       });
 
-      zentaoTasks = taskResults[0]?.result || [];
-      console.log('[Background] ✓ 解析到', zentaoTasks.length, '个任务');
+      const result = tempResults[0]?.result;
+      if (result && result.tbodyFound) {
+        // tbody 找到了，即使任务为空也认为成功
+        taskResults = tempResults;
+        zentaoTasks = result.tasks || [];
+        console.log('[Background] ✓ 找到任务列表，解析到', zentaoTasks.length, '个任务');
+        break;  // 成功获取，退出循环
+      } else {
+        console.log('[Background] 任务列表尚未加载，等待', retryDelay, 'ms后重试...');
+        if (i < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+        }
+      }
+    }
+
+    if (!taskResults) {
+      console.log('[Background] 警告: 未能找到任务列表，可能页面加载异常');
+      zentaoTasks = [];
+    }
+
+    console.log('[Background] ✓ 解析到', zentaoTasks.length, '个任务');
       if (zentaoTasks.length > 0) {
         console.log('[Background] 任务数据示例:', JSON.stringify(zentaoTasks[0], null, 2));
       }
@@ -3155,6 +3231,7 @@ async function syncFromZentaoInBackground(config) {
 
     // 5. 跳转到Bug列表页面并获取数据
     console.log('[Background] ========== 步骤5: 获取Bug列表 ==========');
+    sendProgressUpdate(5, 7, '正在获取Bug列表...');
     let zentaoBugs = [];
 
     if (bugCount > 0) {
@@ -3163,11 +3240,18 @@ async function syncFromZentaoInBackground(config) {
 
       await chrome.tabs.update(zentaoTab.id, { url: bugUrl });
       await waitForTabLoad(zentaoTab.id);
-      await new Promise(resolve => setTimeout(resolve, 5000));  // 等待AJAX加载（增加到5秒）
 
-      const bugResults = await chrome.scripting.executeScript({
-        target: { tabId: zentaoTab.id },
-        func: () => {
+      // 使用轮询检测Bug列表是否加载完成，而不是固定等待5秒
+      const maxRetries = 10;  // 最多重试10次
+      const retryDelay = 500;  // 每次等待500ms
+      let bugResults = null;
+
+      for (let i = 0; i < maxRetries; i++) {
+        console.log(`[Background] 尝试获取Bug列表 (${i + 1}/${maxRetries})...`);
+
+        const tempResults = await chrome.scripting.executeScript({
+          target: { tabId: zentaoTab.id },
+          func: () => {
           const bugs = [];
 
           // 首先尝试直接查找 #bugList
@@ -3188,13 +3272,13 @@ async function syncFromZentaoInBackground(config) {
           if (!table) {
             console.log('[Content] 未找到 #bugList（主页面和iframe都没找到）');
             console.log('[Content] 主页面表格数:', document.querySelectorAll('table').length);
-            return bugs;
+            return { bugs, tableFound: false };
           }
 
           const tbody = table.querySelector('tbody');
           if (!tbody) {
             console.log('[Content] 未找到 tbody');
-            return bugs;
+            return { bugs, tableFound: false };
           }
 
           const rows = tbody.querySelectorAll('tr');
@@ -3330,19 +3414,39 @@ async function syncFromZentaoInBackground(config) {
             }
           });
 
-          return bugs;
+          return { bugs, tableFound: true };
         }
       });
 
-      zentaoBugs = bugResults[0]?.result || [];
-      console.log('[Background] ✓ 解析到', zentaoBugs.length, '个Bug');
+      const result = tempResults[0]?.result;
+      if (result && result.tableFound) {
+        // table 找到了，即使Bug为空也认为成功
+        bugResults = tempResults;
+        zentaoBugs = result.bugs || [];
+        console.log('[Background] ✓ 找到Bug列表，解析到', zentaoBugs.length, '个Bug');
+        break;  // 成功获取，退出循环
+      } else {
+        console.log('[Background] Bug列表尚未加载，等待', retryDelay, 'ms后重试...');
+        if (i < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+        }
+      }
+    }
+
+    if (!bugResults) {
+      console.log('[Background] 警告: 未能找到Bug列表，可能页面加载异常');
+      zentaoBugs = [];
+    }
+
+    console.log('[Background] ✓ 解析到', zentaoBugs.length, '个Bug');
     } else {
       console.log('[Background] Bug数量为0，跳过Bug列表');
     }
 
     // 5.5. 为每个 Bug 获取详情信息（重现步骤、历史记录、指派人、抄送人）
     if (zentaoBugs.length > 0) {
-      console.log('[Background] ========== 步骤5.5: 获取 Bug 详情信息 ==========');
+      console.log('[Background] ========== 步骤6: 获取 Bug 详情信息 ==========');
+      sendProgressUpdate(6, 7, `正在获取 ${zentaoBugs.length} 个 Bug 的详情信息...`);
       console.log('[Background] 开始为', zentaoBugs.length, '个 Bug 获取详情信息...');
 
       // 为每个 Bug 获取详情
@@ -3377,9 +3481,9 @@ async function syncFromZentaoInBackground(config) {
           bug.cc = '';
         }
 
-        // 添加延迟避免请求过快
+        // 添加延迟避免请求过快（从500ms减少到100ms）
         if (i < zentaoBugs.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise(resolve => setTimeout(resolve, 100));
         }
       }
 
@@ -3392,7 +3496,8 @@ async function syncFromZentaoInBackground(config) {
     }
 
     // 6. 发送到后端API保存
-    console.log('[Background] ========== 步骤6: 保存到本地数据库 ==========');
+    console.log('[Background] ========== 步骤7: 保存到本地数据库 ==========');
+    sendProgressUpdate(7, 7, '正在保存到本地数据库...');
     console.log('[Background] 准备发送任务数据:', zentaoTasks.length, '个任务');
     console.log('[Background] 准备发送Bug数据:', zentaoBugs.length, '个Bug');
 
@@ -3716,8 +3821,8 @@ async function waitForTabLoad(tabId) {
     const listener = (updatedTabId, changeInfo) => {
       if (updatedTabId === tabId && changeInfo.status === 'complete') {
         chrome.tabs.onUpdated.removeListener(listener);
-        // 额外等待确保DOM渲染完成
-        setTimeout(resolve, 1000);
+        // 额外等待确保DOM渲染完成（从1000ms减少到100ms）
+        setTimeout(resolve, 100);
       }
     };
 

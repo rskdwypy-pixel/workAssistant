@@ -24,12 +24,70 @@
       cursor: not-allowed;
       pointer-events: none;
     }
+
+    /* 透明进度 Toast 样式 */
+    .progress-toast-container {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10001;
+      pointer-events: none;
+    }
+
+    .progress-toast {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 24px;
+      background: rgba(59, 130, 246, 0.9);
+      backdrop-filter: blur(10px);
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      animation: progressToastIn 0.3s ease;
+      pointer-events: none;
+      min-width: 200px;
+      max-width: 400px;
+    }
+
+    .progress-toast-spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .progress-toast-message {
+      font-size: 14px;
+      font-weight: 500;
+      color: white;
+    }
+
+    @keyframes progressToastIn {
+      from {
+        opacity: 0;
+        transform: translateY(-20px);
+      }
+      to {
+        opacity: 0.9;
+        transform: translateY(0);
+      }
+    }
   </style>
 </head>
 
 <body>
   <!-- Toast 容器 -->
   <div id="toastContainer" class="toast-container"></div>
+
+  <!-- 进度 Toast 容器 -->
+  <div id="progressToastContainer" class="progress-toast-container"></div>
 
   <!-- 确认对话框 -->
   <div id="confirmDialog" class="confirm-dialog">

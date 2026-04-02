@@ -124,12 +124,15 @@ const ZentaoSync = {
     }
 
     try {
-      Toast.info('正在从禅道同步数据...');
+      // 使用进度 Toast 显示同步进度（共7步）
+      ProgressToast.show('正在登录禅道...', 1, 7);
 
       // 通过 background.js 触发同步
       const response = await chrome.runtime.sendMessage({
         action: 'manualSyncFromZentao'
       });
+
+      ProgressToast.hide();
 
       if (response && response.success) {
         Toast.success(`同步完成！已同步 ${response.data.tasksSynced} 个任务和 ${response.data.bugsSynced} 个Bug`);
@@ -150,6 +153,7 @@ const ZentaoSync = {
         Toast.error(`同步失败: ${reason}`);
       }
     } catch (err) {
+      ProgressToast.hide();
       console.error('[ZentaoSync] 手动同步失败:', err);
       Toast.error(`同步失败: ${err.message}`);
     } finally {
@@ -203,26 +207,28 @@ const ZentaoSync = {
 async function checkAndSyncZentaoOnNewTab() {
   console.log('[NewTab] ========== newtab 页面打开，检查禅道同步 ==========');
 
-  try {
-    // 异步调用 background.js 检查同步
-    const response = await chrome.runtime.sendMessage({
-      action: 'checkAndSyncZentao',
-      force: false  // 不强制，遵守24小时限制
-    });
+  // 【已注释】禁用自动同步逻辑，只允许手动同步
+  // try {
+  //   // 异步调用 background.js 检查同步
+  //   const response = await chrome.runtime.sendMessage({
+  //     action: 'checkAndSyncZentao',
+  //     force: false  // 不强制，遵守24小时限制
+  //   });
 
-    if (response && response.success) {
-      console.log('[NewTab] ✓ 禅道同步完成');
-      // 重新加载任务列表以显示同步的数据
-      await loadTasks();
-    } else if (response && response.reason === 'too_soon') {
-      console.log('[NewTab] 距离上次同步不足24小时，跳过自动同步');
-      console.log('[NewTab] 还需等待:', response.hoursUntilNextSync, '小时');
-    } else if (response && response.reason === 'zentao_not_enabled') {
-      console.log('[NewTab] 禅道未启用，跳过同步');
-    }
-  } catch (err) {
-    console.error('[NewTab] 禅道同步检查失败:', err);
-  }
+  //   if (response && response.success) {
+  //     console.log('[NewTab] ✓ 禅道同步完成');
+  //     // 重新加载任务列表以显示同步的数据
+  //     await loadTasks();
+  //   } else if (response && response.reason === 'too_soon') {
+  //     console.log('[NewTab] 距离上次同步不足24小时，跳过自动同步');
+  //     console.log('[NewTab] 还需等待:', response.hoursUntilNextSync, '小时');
+  //   } else if (response && response.reason === 'zentao_not_enabled') {
+  //     console.log('[NewTab] 禅道未启用，跳过同步');
+  //   }
+  // } catch (err) {
+  //   console.error('[NewTab] 禅道同步检查失败:', err);
+  // }
+  console.log('[NewTab] 自动同步已禁用，仅允许手动同步');
 }
 
 // ==================== Toast 通知系统 ====================
@@ -288,6 +294,114 @@ const Toast = {
 
   info(message, duration) {
     return this.show(message, 'info', duration);
+  },
+
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+};
+
+// ==================== 进度 Toast 系统 ====================
+const ProgressToast = {
+  container: null,
+  currentToast: null,
+  currentStep: 0,
+  totalSteps: 0,
+
+  init() {
+    this.container = document.getElementById('progressToastContainer');
+  },
+
+  /**
+   * 显示进度 toast
+   * @param {string} message - 进度消息
+   * @param {number} currentStep - 当前步骤（可选）
+   * @param {number} totalSteps - 总步骤数（可选）
+   */
+  show(message, currentStep = null, totalSteps = null) {
+    if (!this.container) this.init();
+
+    console.log(`[ProgressToast] show() 被调用: message="${message}", currentStep=${currentStep}, totalSteps=${totalSteps}`);
+
+    // 如果提供了步骤信息，更新格式
+    let displayMessage = message;
+    if (currentStep !== null && totalSteps !== null) {
+      this.currentStep = currentStep;
+      this.totalSteps = totalSteps;
+      displayMessage = `${currentStep}/${totalSteps} ${message}`;
+    }
+
+    console.log(`[ProgressToast] displayMessage="${displayMessage}", hasToast=${!!this.currentToast}, inDOM=${this.currentToast?.parentNode ? 'yes' : 'no'}`);
+
+    // 如果已有 toast，只更新消息
+    if (this.currentToast && this.currentToast.parentNode) {
+      const messageEl = this.currentToast.querySelector('.progress-toast-message');
+      if (messageEl) {
+        messageEl.textContent = displayMessage;
+        console.log(`[ProgressToast] 更新已有 toast: "${displayMessage}"`);
+      }
+      return this.currentToast;
+    }
+
+    // 创建新的进度 toast
+    console.log(`[ProgressToast] 创建新 toast: "${displayMessage}"`);
+    const toast = document.createElement('div');
+    toast.className = 'progress-toast';
+    toast.innerHTML = `
+      <div class="progress-toast-spinner"></div>
+      <span class="progress-toast-message">${this.escapeHtml(displayMessage)}</span>
+    `;
+
+    this.container.appendChild(toast);
+    this.currentToast = toast;
+
+    return toast;
+  },
+
+  /**
+   * 更新进度 toast 消息
+   * @param {string} message - 新的进度消息
+   * @param {number} currentStep - 当前步骤（可选）
+   * @param {number} totalSteps - 总步骤数（可选）
+   */
+  update(message, currentStep = null, totalSteps = null) {
+    return this.show(message, currentStep, totalSteps);
+  },
+
+  /**
+   * 隐藏进度 toast
+   */
+  hide() {
+    if (this.currentToast && this.currentToast.parentNode) {
+      this.currentToast.style.opacity = '0';
+      setTimeout(() => {
+        if (this.currentToast && this.currentToast.parentNode) {
+          this.currentToast.parentNode.removeChild(this.currentToast);
+        }
+        this.currentToast = null;
+        this.currentStep = 0;
+        this.totalSteps = 0;
+      }, 200);
+    }
+  },
+
+  /**
+   * 显示进度 toast 并在异步操作期间保持显示
+   * @param {string} message - 进度消息
+   * @param {Function} asyncOperation - 异步操作函数
+   * @param {number} currentStep - 当前步骤（可选）
+   * @param {number} totalSteps - 总步骤数（可选）
+   */
+  async withProgress(message, asyncOperation, currentStep = null, totalSteps = null) {
+    this.show(message, currentStep, totalSteps);
+    try {
+      const result = await asyncOperation();
+      return result;
+    } finally {
+      this.hide();
+    }
   },
 
   escapeHtml(text) {
@@ -764,6 +878,29 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 初始化 Toast
   Toast.init();
+
+  // 初始化 ProgressToast
+  if (typeof ProgressToast !== 'undefined') {
+    ProgressToast.init();
+  }
+
+  // 监听来自 background.js 的进度更新消息
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    console.log('[NewTab] 收到消息:', message.action, message);
+
+    if (message.action === 'updateProgress') {
+      const { currentStep, totalSteps, message: progressMessage } = message;
+      console.log(`[NewTab] 收到进度更新: ${currentStep}/${totalSteps} - ${progressMessage}`);
+      console.log(`[NewTab] ProgressToast 是否存在:`, typeof ProgressToast !== 'undefined');
+
+      if (typeof ProgressToast !== 'undefined') {
+        ProgressToast.update(progressMessage, currentStep, totalSteps);
+      } else {
+        console.log('[NewTab] ProgressToast 未定义');
+      }
+    }
+    // 注意：不返回 true，因为这是单向消息，不需要响应
+  });
 
   // 恢复调试模式状态
   const savedDebugMode = localStorage.getItem('debugMode');
@@ -2446,6 +2583,8 @@ async function addTask() {
           console.log('[AddTask] 尝试使用浏览器端创建禅道任务...');
           console.log('[AddTask] AI 分析的执行 ID:', aiExecutionId, '类型:', typeof aiExecutionId);
 
+          ProgressToast.show('正在创建禅道任务...');
+
           const zentaoResult = await ZentaoBrowserClient.createTask({
             title: aiTitle,
             content: content,
@@ -2468,8 +2607,10 @@ async function addTask() {
           } else {
             console.log('[AddTask] 浏览器端创建失败:', zentaoResult.reason);
           }
+          ProgressToast.hide();
         }
       } catch (err) {
+        ProgressToast.hide();
         console.log('[AddTask] 浏览器端创建禅道任务出错:', err.message);
       }
 
@@ -7656,6 +7797,7 @@ const BugManager = {
         // 检查是否有执行ID
         if (!executionId) {
           console.error('[BugManager] ✗ 缺少 executionId，无法创建Bug');
+          ProgressToast.hide();
           Toast.error('缺少执行ID，无法创建Bug');
           return;
         }
@@ -7675,12 +7817,15 @@ const BugManager = {
           // ========== 看板执行 Bug 创建 ==========
           console.log('[BugManager] 使用看板逻辑创建 Bug');
 
+          ProgressToast.show('正在创建禅道 Bug...');
+
           try {
             console.log('[BugManager] 尝试获取看板参数, executionId:', executionId);
             const kanbanParams = await ZentaoBrowserClient.getKanbanParamsFromHtml(executionId, 'bug', 'unconfirmed');
 
             if (!kanbanParams) {
               console.error('[BugManager] ✗ 无法获取看板参数');
+              ProgressToast.hide();
               Toast.error('无法获取看板参数，请确保已打开禅道Bug看板页面');
               return;
             }
@@ -7694,6 +7839,7 @@ const BugManager = {
             if (missingParams.length > 0) {
               console.error('[BugManager] ✗ 看板参数不完整，缺少必需参数:', missingParams);
               console.error('[BugManager] 获取到的参数:', kanbanParams);
+              ProgressToast.hide();
               Toast.error('看板参数获取失败，缺少: ' + missingParams.join(', ') + '。请刷新禅道页面后重试。');
               return;
             }
@@ -7714,6 +7860,7 @@ const BugManager = {
             });
           } catch (e) {
             console.error('[BugManager] 获取看板参数异常:', e);
+            ProgressToast.hide();
             Toast.error('获取看板参数失败: ' + e.message);
             return;
           }
@@ -7740,6 +7887,8 @@ const BugManager = {
           // ========== 普通执行 Bug 创建 ==========
           console.log('[BugManager] 使用普通执行逻辑创建 Bug');
 
+          ProgressToast.show('正在创建禅道 Bug...');
+
           // 获取 productID
           const productIdResponse = await new Promise(resolve => {
             const timeout = setTimeout(() => {
@@ -7759,6 +7908,7 @@ const BugManager = {
 
           if (!productIdResponse || !productIdResponse.success) {
             console.error('[BugManager] ✗ 获取 productID 失败:', productIdResponse?.reason);
+            ProgressToast.hide();
             Toast.error('获取 productID 失败: ' + (productIdResponse?.reason || '未知错误'));
             return;
           }
@@ -7955,24 +8105,29 @@ const BugManager = {
           } else {
              console.log('[BugManager] ✗ 禅道 Bug 可能创建成功，但无法提取 ID', data);
           }
+          ProgressToast.hide();
         } else if (syncResponse === null || syncResponse === undefined) {
+          ProgressToast.hide();
           console.error('[BugManager] 禅道 Bug 同步响应为空，可能消息处理失败');
           Toast.error('禅道同步失败：未收到响应，请检查扩展是否正常工作');
           return;
         } else if (syncResponse && syncResponse.success !== undefined) {
           console.warn('[BugManager] 禅道 Bug 同步失败, success:', syncResponse.success, 'reason:', syncResponse.reason, 'data:', syncResponse.data);
           if (syncResponse.reason === 'no_zentao_tab') {
+             ProgressToast.hide();
              Toast.error('未找到禅道标签页，请先在浏览器中登录禅道');
              return;
           } else if (typeof syncResponse.reason === 'string' && (syncResponse.reason.includes('超时') || syncResponse.reason.includes('登录'))) {
              needRelogin = true;
           } else {
+             ProgressToast.hide();
              Toast.warning('禅道同步失败，将在本地保存 (' + (syncResponse.reason || '未知错误') + ')');
           }
         }
       }
 
       if (needRelogin) {
+        ProgressToast.hide();
         console.log('[BugManager] 需要重新登录禅道');
         Toast.warning('禅道登录已超时，正在重新登录...');
 
@@ -7992,6 +8147,7 @@ const BugManager = {
         }
       }
     } catch (syncError) {
+      ProgressToast.hide();
       console.error('[BugManager] 禅道同步失败，将继续保存到本地:', syncError);
       // 禅道同步失败不影响本地保存，继续执行
     }
@@ -9012,7 +9168,7 @@ const BugManager = {
       comment
     });
 
-    Toast.info('正在确认 Bug...');
+    ProgressToast.show('正在确认 Bug...');
 
     try {
       const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
@@ -9020,6 +9176,7 @@ const BugManager = {
       const baseUrl = configResult.data?.url?.replace(/\/$/, '');
 
       if (!baseUrl) {
+        ProgressToast.hide();
         Toast.error('禅道未配置');
         return;
       }
@@ -9035,6 +9192,8 @@ const BugManager = {
         type,
         comment
       });
+
+      ProgressToast.hide();
 
       if (response && response.success) {
         Toast.success('Bug 已激活');
@@ -9053,6 +9212,7 @@ const BugManager = {
         Toast.error('确认失败: ' + (response?.reason || '未知错误'));
       }
     } catch (err) {
+      ProgressToast.hide();
       console.error('[BugManager] 激活 Bug 异常:', err);
       Toast.error('确认失败: ' + err.message);
     }
@@ -9086,7 +9246,7 @@ const BugManager = {
       loadingText: '修复中...'
     });
 
-    Toast.info('正在解决 Bug...');
+    ProgressToast.show('正在解决 Bug...');
 
     try {
       const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
@@ -9094,6 +9254,7 @@ const BugManager = {
       const baseUrl = configResult.data?.url?.replace(/\/$/, '');
 
       if (!baseUrl) {
+        ProgressToast.hide();
         Toast.error('禅道未配置');
         return;
       }
@@ -9112,6 +9273,8 @@ const BugManager = {
         comment
       });
 
+      ProgressToast.hide();
+
       if (response && response.success) {
         Toast.success('Bug 已修复');
         // 更新本地 Bug 状态和数据
@@ -9127,6 +9290,7 @@ const BugManager = {
         Toast.error('解决失败: ' + (response?.reason || '未知错误'));
       }
     } catch (err) {
+      ProgressToast.hide();
       console.error('[BugManager] 修复 Bug 失败:', err);
       Toast.error('解决失败: ' + err.message);
     } finally {
@@ -9188,7 +9352,7 @@ const BugManager = {
       loadingText: '关闭中...'
     });
 
-    Toast.info('正在关闭 Bug...');
+    ProgressToast.show('正在关闭 Bug...');
 
     try {
       const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
@@ -9196,6 +9360,7 @@ const BugManager = {
       const baseUrl = configResult.data?.url?.replace(/\/$/, '');
 
       if (!baseUrl) {
+        ProgressToast.hide();
         Toast.error('禅道未配置');
         return;
       }
@@ -9208,6 +9373,8 @@ const BugManager = {
         comment
       });
 
+      ProgressToast.hide();
+
       if (response && response.success) {
         Toast.success('Bug 已关闭');
         // 从列表中移除该 Bug
@@ -9218,6 +9385,7 @@ const BugManager = {
         Toast.error('关闭失败: ' + (response?.reason || '未知错误'));
       }
     } catch (err) {
+      ProgressToast.hide();
       console.error('[BugManager] 关闭 Bug 失败:', err);
       Toast.error('关闭失败: ' + err.message);
     } finally {
