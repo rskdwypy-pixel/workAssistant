@@ -8289,7 +8289,7 @@ const BugManager = {
     if (bug.status === 'unconfirmed') {
       const activateBtn = document.createElement('button');
       activateBtn.className = 'btn-primary';
-      activateBtn.textContent = '激活';
+      activateBtn.textContent = '确认';
       activateBtn.style.marginLeft = '8px';
       activateBtn.onclick = () => this.activateBug(bugId);
       actions.appendChild(activateBtn);
@@ -8303,7 +8303,7 @@ const BugManager = {
     } else if (bug.status === 'activated') {
       const resolveBtn = document.createElement('button');
       resolveBtn.className = 'btn-primary';
-      resolveBtn.textContent = '修复';
+      resolveBtn.textContent = '已解决';
       resolveBtn.style.marginLeft = '8px';
       resolveBtn.onclick = () => this.showResolveModal(bugId);
       actions.appendChild(resolveBtn);
