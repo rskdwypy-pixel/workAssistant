@@ -6836,6 +6836,9 @@ const BugManager = {
     // 获取用户列表用于显示名称（账号 -> 姓名的映射）
     const users = ZentaoBrowserClient.getUsers() || {};
 
+    // 调试日志
+    console.log('[BugManager] createBugCard - Bug:', bug.id, 'assignedTo:', bug.assignedTo, 'users:', users);
+
     // 辅助函数：将用户账号或姓名转换为显示文本
     // 如果是账号（如 "lijc"），从 users 映射中查找姓名
     // 如果是姓名（如 "李佳成"），直接使用
@@ -6843,14 +6846,17 @@ const BugManager = {
       if (!user) return '';
       // 如果已经在 users 映射中找到，说明是账号
       if (users[user]) {
+        console.log('[BugManager] getDisplayName - 账号转姓名:', user, '->', users[user]);
         return users[user];
       }
       // 否则判断是否是账号（通常账号较短，不含中文）
       // 如果包含中文，认为是姓名，直接返回
       if (/[\u4e00-\u9fa5]/.test(user)) {
+        console.log('[BugManager] getDisplayName - 已经是姓名:', user);
         return user;
       }
       // 否则返回原文
+      console.log('[BugManager] getDisplayName - 无法识别，返回原文:', user);
       return user;
     };
 
@@ -6866,6 +6872,7 @@ const BugManager = {
       if (assigneeNames) {
         assigneeDisplay = `<span class="bug-assignee">👤 ${escapeHtml(assigneeNames)}</span>`;
       }
+      console.log('[BugManager] assigneeDisplay:', assigneeDisplay);
     }
 
     // Bug ID 显示和链接（直接在标题后面）
