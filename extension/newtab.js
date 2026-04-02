@@ -6572,6 +6572,16 @@ const BugManager = {
       cancelResolveBtn.addEventListener('click', () => this.hideResolveModal());
     }
 
+    // 点击弹框外部关闭
+    const bugResolveModal = document.getElementById('bugResolveModal');
+    if (bugResolveModal) {
+      bugResolveModal.addEventListener('click', (e) => {
+        if (e.target === bugResolveModal) {
+          this.hideResolveModal();
+        }
+      });
+    }
+
     // 确认修复按钮
     const confirmResolveBtn = document.getElementById('confirmResolveBtn');
     if (confirmResolveBtn) {
@@ -6594,6 +6604,16 @@ const BugManager = {
     const cancelActivateBtn = document.getElementById('cancelActivateBtn');
     if (cancelActivateBtn) {
       cancelActivateBtn.addEventListener('click', () => this.hideActivateModal());
+    }
+
+    // 点击弹框外部关闭
+    const bugActivateModal = document.getElementById('bugActivateModal');
+    if (bugActivateModal) {
+      bugActivateModal.addEventListener('click', (e) => {
+        if (e.target === bugActivateModal) {
+          this.hideActivateModal();
+        }
+      });
     }
 
     // 确认激活按钮
