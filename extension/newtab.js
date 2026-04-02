@@ -4945,21 +4945,23 @@ const ZentaoBrowserClient = {
         }
 
         if (taskId) {
-          return { success: true, taskId };
+          return { success: true, taskId: parseInt(taskId, 10) };
         }
 
         // 尝试解析 JSON 如果服务端直接返回 id（极少数情况）
         if (data.id) {
-          console.log('[ZentaoBrowser] ✓ 从响应中获取到任务ID:', data.id);
-          return { success: true, taskId: data.id };
+          const taskId = parseInt(data.id, 10);
+          console.log('[ZentaoBrowser] ✓ 从响应中获取到任务ID:', taskId);
+          return { success: true, taskId };
         }
 
         // 如果直接提取失败，尝试访问页面
         console.log('[ZentaoBrowser] 尝试从页面提取任务ID');
         taskId = await this.extractTaskIdFromHtml(data.locate);
         if (taskId) {
-          console.log('[ZentaoBrowser] ✓ 从页面提取到任务ID:', taskId);
-          return { success: true, taskId };
+          const numericTaskId = parseInt(taskId, 10);
+          console.log('[ZentaoBrowser] ✓ 从页面提取到任务ID:', numericTaskId);
+          return { success: true, taskId: numericTaskId };
         }
       } else if (data && data.message) {
         console.warn('[ZentaoBrowser] 创建任务失败，提示:', data.message);
@@ -5010,8 +5012,9 @@ const ZentaoBrowserClient = {
       for (const pattern of patterns) {
         const match = html.match(pattern);
         if (match && match[1]) {
-          console.log('[ZentaoBrowser] ✓ 从 HTML 提取到任务ID:', match[1], '模式:', pattern.source);
-          return match[1];
+          const taskId = parseInt(match[1], 10);
+          console.log('[ZentaoBrowser] ✓ 从 HTML 提取到任务ID:', taskId, '模式:', pattern.source);
+          return taskId;
         }
       }
 
@@ -5023,7 +5026,7 @@ const ZentaoBrowserClient = {
         const latestTaskId = await this.getLatestTaskId(executionId);
         if (latestTaskId) {
           console.log('[ZentaoBrowser] ✓ 获取到最新任务ID:', latestTaskId);
-          return latestTaskId;
+          return parseInt(latestTaskId, 10);
         }
       }
 

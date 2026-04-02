@@ -12,10 +12,13 @@ async function getAllTasks(filters = {}) {
   // 去重：基于 zentaoId 或 id
   const taskMap = new Map();
   tasks.forEach(task => {
+    // 确保 zentaoId 是数字类型（如果存在）
+    if (task.zentaoId && typeof task.zentaoId === 'string') {
+      task.zentaoId = parseInt(task.zentaoId, 10);
+    }
     // 优先使用 zentaoId 去重（对于已同步到禅道的任务）
     // 如果没有 zentaoId，使用本地 id 去重
-    // 重要：将 zentaoId 转换为字符串，确保类型一致（700 和 '700' 被视为相同）
-    const key = task.zentaoId ? String(task.zentaoId) : task.id;
+    const key = task.zentaoId || task.id;
     // 如果有重复，保留最新的（按 updatedAt）
     const existing = taskMap.get(key);
     if (!existing ||
@@ -588,7 +591,7 @@ async function importZentaoTasks(zentaoTasks) {
           content: zentaoTask.title, // 禅道任务没有详细描述，使用标题
           status: zentaoTask.status,
           priority: zentaoTask.priority,
-          zentaoId: zentaoTask.zentaoId,
+          zentaoId: parseInt(zentaoTask.zentaoId, 10), // 确保是数字类型
           executionId: zentaoTask.executionId ? String(zentaoTask.executionId) : existingTask.executionId,
           executionName: zentaoTask.executionName || existingTask.executionName,
           projectName: zentaoTask.projectName || existingTask.projectName,
@@ -611,7 +614,7 @@ async function importZentaoTasks(zentaoTasks) {
           status: zentaoTask.status,
           priority: zentaoTask.priority,
           progress: zentaoTask.progress,
-          zentaoId: zentaoTask.zentaoId,
+          zentaoId: parseInt(zentaoTask.zentaoId, 10), // 确保是数字类型
           executionId: zentaoTask.executionId ? String(zentaoTask.executionId) : '',
           executionName: zentaoTask.executionName || '',
           projectName: zentaoTask.projectName || '',

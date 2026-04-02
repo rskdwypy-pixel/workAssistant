@@ -395,6 +395,11 @@ async function importZentaoBugs(zentaoBugs) {
   // Build a Map for O(1) lookups instead of O(n²) find() in loop
   const existingBugsMap = new Map();
   tasks.forEach(t => {
+    // 确保 zentaoId 是数字类型（如果存在）
+    if (t.type === 'bug' && t.zentaoId && typeof t.zentaoId === 'string') {
+      t.zentaoId = parseInt(t.zentaoId, 10);
+    }
+    // 只对 type === 'bug' 且有 zentaoId 的任务建立索引
     if (t.type === 'bug' && t.zentaoId) {
       existingBugsMap.set(t.zentaoId, t);
     }
@@ -431,6 +436,7 @@ async function importZentaoBugs(zentaoBugs) {
           assignedTo: zentaoBug.assignedTo || existingBug.assignedTo || '',
           assignedDate: zentaoBug.assignedDate || existingBug.assignedDate || '',
           cc: zentaoBug.cc || existingBug.cc || [],
+          zentaoId: parseInt(zentaoBug.zentaoId, 10), // 确保是数字类型
           updatedAt: new Date().toISOString()
         });
 
@@ -461,7 +467,7 @@ async function importZentaoBugs(zentaoBugs) {
           cc: zentaoBug.cc || [],
           assignedToList: [],
           comments: [],
-          zentaoId: zentaoBug.zentaoId,
+          zentaoId: parseInt(zentaoBug.zentaoId, 10), // 确保是数字类型
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           progress: 0,
