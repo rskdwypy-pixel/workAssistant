@@ -1,3 +1,6 @@
+// 导入禅道标签页管理器
+importScripts('zentaoTabManager.js');
+
 // API配置
 const API_BASE_URL = 'http://localhost:3721';
 
@@ -1415,143 +1418,16 @@ async function executeInZentaoPage(params) {
 async function ensureZentaoTab(baseUrl, kanbanId) {
   console.log('[Background] ensureZentaoTab 调用:', { baseUrl, kanbanId });
 
-  // 查找所有标签页
-  const allTabs = await chrome.tabs.query({});
-  console.log('[Background] 当前所有标签页数量:', allTabs.length);
-  allTabs.forEach((tab, i) => {
-    console.log(`[Background]   标签 ${i}:`, tab.url?.substring(0, 80));
+  // 使用 ZentaoTabManager 统一管理标签页
+  const targetUrl = kanbanId ? `${baseUrl}/zentao/execution-kanban-${kanbanId}.html` : null;
+
+  return await ZentaoTabManager.getOrCreateTab({
+    baseUrl,
+    kanbanId,
+    targetUrl,
+    active: true,  // 保持原有的行为，设为可见
+    reload: false  // 不自动刷新，让调用方决定
   });
-
-  // 如果提供了 kanbanId，优先查找匹配的看板页面
-  if (kanbanId) {
-    // 查找 execution-kanban-{kanbanId}.html 或 kanban-view-{kanbanId}.html 页面
-    const kanbanTab = allTabs.find(tab =>
-      tab.url &&
-      tab.url.includes('zentao') &&
-      !tab.url.includes('user-login') &&
-      (tab.url.includes(`execution-kanban-${kanbanId}`) ||
-       tab.url.includes(`kanban-view-${kanbanId}`))
-    );
-
-    if (kanbanTab) {
-      console.log('[Background] ✓ 找到匹配的看板页面，刷新以确保cookie有效:', kanbanTab.url);
-      // 刷新页面以确保 cookie/session 有效
-      await chrome.tabs.reload(kanbanTab.id);
-      // 等待刷新完成
-      await new Promise(resolve => {
-        const listener = (tabId, changeInfo) => {
-          if (tabId === kanbanTab.id && changeInfo.status === 'complete') {
-            chrome.tabs.onUpdated.removeListener(listener);
-            setTimeout(resolve, 500);
-          }
-        };
-        chrome.tabs.onUpdated.addListener(listener);
-        setTimeout(() => {
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve();
-        }, 10000);
-      });
-      return kanbanTab;
-    }
-
-    // 没有找到匹配的页面，创建一个新的标签页（设为可见以便调试）
-    console.log('[Background] ✗ 未找到匹配的看板页面，创建新页面');
-    const newUrl = `${baseUrl}/zentao/execution-kanban-${kanbanId}.html`;
-    console.log('[Background] 创建标签页 URL:', newUrl);
-    const newTab = await chrome.tabs.create({
-      url: newUrl,
-      active: true  // 设为可见以便调试
-    });
-    console.log('[Background] 新标签页已创建, ID:', newTab.id);
-
-    // 等待页面加载完成，并重新获取 tab 信息以确保 URL 正确
-    await new Promise(resolve => {
-      const listener = (tabId, changeInfo) => {
-        if (tabId === newTab.id && changeInfo.status === 'complete') {
-          chrome.tabs.onUpdated.removeListener(listener);
-          // 再等待一小段时间确保页面完全稳定
-          setTimeout(resolve, 500);
-        }
-      };
-      chrome.tabs.onUpdated.addListener(listener);
-
-      // 超时保护
-      setTimeout(() => {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }, 10000);
-    });
-
-    // 重新获取 tab 信息以确保 URL 已更新
-    const updatedTab = await chrome.tabs.get(newTab.id);
-    console.log('[Background] 新页面已加载，URL:', updatedTab.url);
-    return updatedTab;
-  }
-
-  // 查找任何禅道页面（排除登录页面）
-  const zentaoTab = allTabs.find(tab =>
-    tab.url &&
-    tab.url.includes('zentao') &&
-    !tab.url.includes('user-login')
-  );
-
-  if (zentaoTab) {
-    console.log('[Background] 使用禅道页面:', zentaoTab.url, '状态:', zentaoTab.status);
-
-    // 如果页面还在加载中，等待它完成
-    if (zentaoTab.status !== 'complete') {
-      console.log('[Background] 禅道页面还在加载中，等待完成...');
-      await new Promise(resolve => {
-        const listener = (tabId, changeInfo) => {
-          if (tabId === zentaoTab.id && changeInfo.status === 'complete') {
-            chrome.tabs.onUpdated.removeListener(listener);
-            console.log('[Background] 禅道页面加载完成');
-            setTimeout(resolve, 300); // 额外等待确保页面稳定
-          }
-        };
-        chrome.tabs.onUpdated.addListener(listener);
-        // 超时保护
-        setTimeout(() => {
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve();
-        }, 5000);
-      });
-    }
-
-    return zentaoTab;
-  }
-
-  // 未找到禅道页面，自动创建一个
-  console.log('[Background] 未找到禅道页面，创建新页面');
-  const myUrl = `${baseUrl}/zentao/my.html`;
-  console.log('[Background] 创建禅道标签页 URL:', myUrl);
-  const newTab = await chrome.tabs.create({
-    url: myUrl,
-    active: false  // 设为不可见
-  });
-  console.log('[Background] 新禅道标签页已创建, ID:', newTab.id);
-
-  // 等待页面加载完成
-  await new Promise(resolve => {
-    const listener = (tabId, changeInfo) => {
-      if (tabId === newTab.id && changeInfo.status === 'complete') {
-        chrome.tabs.onUpdated.removeListener(listener);
-        setTimeout(resolve, 500);
-      }
-    };
-    chrome.tabs.onUpdated.addListener(listener);
-
-    // 超时保护
-    setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(listener);
-      resolve();
-    }, 10000);
-  });
-
-  // 重新获取 tab 信息以确保 URL 已更新
-  const updatedTab = await chrome.tabs.get(newTab.id);
-  console.log('[Background] 新禅道页面已加载，URL:', updatedTab.url);
-  return updatedTab;
 }
 
 // 更新禅道任务状态
@@ -2794,39 +2670,16 @@ async function activateBugInZentao(params) {
 async function ensureZentaoTabByUrl(baseUrl, targetUrl) {
   console.log('[Background] ensureZentaoTabByUrl 调用:', { baseUrl, targetUrl });
 
-  // 查找是否已打开该页面
-  const allTabs = await chrome.tabs.query({});
-  let existingTab = allTabs.find(tab => tab.url && tab.url.includes(targetUrl));
-
-  if (existingTab) {
-    console.log('[Background] 找到已存在的标签页:', existingTab.id, existingTab.url);
-    return existingTab;
-  }
-
-  // 未找到，创建新标签页
-  console.log('[Background] 未找到目标标签页，创建新标签页');
+  // 使用 ZentaoTabManager 统一管理标签页
   try {
-    const newTab = await chrome.tabs.create({ url: targetUrl, active: false });
-
-    // 等待页面加载完成
-    await new Promise(resolve => {
-      const listener = (tabId, changeInfo) => {
-        if (tabId === newTab.id && changeInfo.status === 'complete') {
-          chrome.tabs.onUpdated.removeListener(listener);
-          setTimeout(resolve, 1000);
-        }
-      };
-      chrome.tabs.onUpdated.addListener(listener);
-      setTimeout(() => {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }, 15000);
+    return await ZentaoTabManager.getOrCreateTab({
+      baseUrl,
+      targetUrl,
+      active: false,
+      reload: false
     });
-
-    console.log('[Background] 新标签页已创建并加载:', newTab.id);
-    return newTab;
   } catch (error) {
-    console.error('[Background] 创建标签页失败:', error);
+    console.error('[Background] 获取或创建标签页失败:', error);
     return null;
   }
 }

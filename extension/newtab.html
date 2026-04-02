@@ -17,6 +17,13 @@
       font-weight: 500;
       color: #10b981;
     }
+
+    /* 按钮加载状态样式 */
+    .loading {
+      opacity: 0.6;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
   </style>
 </head>
 
@@ -866,6 +873,10 @@
   <script src="storage-webdav.js"></script>
   <script src="sync.js"></script>
   <script src="sync-ui.js"></script>
+
+  <!-- 禅道标签页和按钮状态管理器 -->
+  <script src="zentaoTabManager.js"></script>
+  <script src="buttonStateManager.js"></script>
 
   <!-- 旧的 BugMode 翻转按钮已移除，现在使用 Tab 切换 -->
 

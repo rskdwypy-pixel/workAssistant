@@ -86,20 +86,11 @@ const ZentaoSync = {
 
     syncStatusElement.textContent = `上次同步: ${formattedTime}`;
 
-    // 检查是否可以同步
-    const now = Date.now();
-    const canSync = lastSyncTimestamp === 0 || (now - lastSyncTimestamp) >= SYNC_INTERVAL;
+    // 立即同步按钮始终可用，不受24小时限制（用户可以随时手动同步）
     const syncButton = document.getElementById('manualSyncButton');
-
     if (syncButton) {
-      if (canSync) {
-        syncButton.disabled = false;
-        syncButton.title = '立即从禅道同步数据';
-      } else {
-        const hoursUntilNextSync = Math.ceil((SYNC_INTERVAL - (now - lastSyncTimestamp)) / (60 * 60 * 1000));
-        syncButton.disabled = true;
-        syncButton.title = `还需等待 ${hoursUntilNextSync} 小时后才能再次同步`;
-      }
+      syncButton.disabled = false;
+      syncButton.title = '立即从禅道同步数据';
     }
   },
 
@@ -2304,8 +2295,6 @@ let isAddingTask = false;
 
 // 添加任务
 async function addTask() {
-  if (isAddingTask) return;
-
   const input = document.getElementById('taskInput');
   const btn = document.getElementById('addTaskBtn');
   const content = input.value.trim();
@@ -2315,13 +2304,17 @@ async function addTask() {
     return;
   }
 
-  isAddingTask = true;
   const originalVal = content;
+
+  // 使用 ButtonStateManager 管理按钮状态
+  const restoreButton = ButtonStateManager.setLoading('addTaskBtn', {
+    loadingText: '添加中...',
+    disableInput: true,
+    inputId: 'taskInput'
+  });
 
   // 立即清空输入框，防止用户觉得自己没触发，并显示提示
   input.value = '';
-  input.disabled = true;
-  if (btn) btn.disabled = true;
   const originalPlaceholder = input.placeholder;
   input.placeholder = '✨ AI 正在努力分析并提取任务属性，请稍候...';
 
@@ -2556,10 +2549,8 @@ async function addTask() {
     Toast.error('添加失败，请确保后端服务正在运行');
     console.warn('添加任务错误:', err);
   } finally {
-    isAddingTask = false;
-    input.disabled = false;
+    restoreButton();
     input.placeholder = originalPlaceholder;
-    if (btn) btn.disabled = false;
     input.focus();
   }
 }
@@ -7439,6 +7430,13 @@ const BugManager = {
       return;
     }
 
+    // 使用 ButtonStateManager 管理按钮状态
+    const restoreButton = ButtonStateManager.setLoading('submitBugBtn', {
+      loadingText: '提交中...'
+    });
+
+    try {
+
     const bugData = {
       projectId,
       title,
@@ -7803,9 +7801,13 @@ const BugManager = {
           return;
         }
       }
+    } catch (syncError) {
+      console.error('[BugManager] 禅道同步失败，将继续保存到本地:', syncError);
+      // 禅道同步失败不影响本地保存，继续执行
+    }
 
-      // 保存到本地
-      console.log('[BugManager] ========== 保存 Bug 到本地 ==========');
+    // 保存到本地
+    console.log('[BugManager] ========== 保存 Bug 到本地 ==========');
       console.log('[BugManager] 准备保存的 Bug 数据:', JSON.stringify(bugData, null, 2));
       console.log('[BugManager] Bug 数据关键字段:', {
         title: bugData.title,
@@ -7852,6 +7854,8 @@ const BugManager = {
     } catch (err) {
       console.error('[BugManager] 创建 Bug 失败:', err);
       Toast.error('创建失败: ' + err.message);
+    } finally {
+      restoreButton();
     }
   },
 
@@ -8741,6 +8745,11 @@ const BugManager = {
 
     const comment = document.getElementById('resolveComment').value;
 
+    // 使用 ButtonStateManager 管理按钮状态
+    const restoreButton = ButtonStateManager.setLoading('confirmResolveBtn', {
+      loadingText: '修复中...'
+    });
+
     Toast.info('正在修复 Bug...');
 
     try {
@@ -8784,6 +8793,8 @@ const BugManager = {
     } catch (err) {
       console.error('[BugManager] 修复 Bug 失败:', err);
       Toast.error('修复失败: ' + err.message);
+    } finally {
+      restoreButton();
     }
   },
 
