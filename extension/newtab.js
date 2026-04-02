@@ -8301,6 +8301,50 @@ const BugManager = {
     // 保存当前操作的 Bug ID
     modal.dataset.bugId = bugId;
 
+    // 设置默认指派人（使用 Bug 的指派人）
+    if (bug.assignedTo && bug.assignedTo !== '') {
+      const assigneeDisplay = document.getElementById('resolveAssigneeDisplay');
+      if (assigneeDisplay) {
+        // 获取用户列表
+        const users = await ZentaoBrowserClient.getUsers();
+
+        let userAccount = bug.assignedTo;
+        let displayName = bug.assignedTo;
+        let foundValidAccount = false;
+
+        // 如果 assignedTo 是账号
+        if (users && users[bug.assignedTo]) {
+          displayName = users[bug.assignedTo];
+          foundValidAccount = true;
+        } else {
+          // 如果 assignedTo 是姓名（包含中文），尝试反向查找账号
+          if (/[\u4e00-\u9fa5]/.test(bug.assignedTo)) {
+            console.log('[BugManager] assignedTo 是姓名，尝试反向查找账号:', bug.assignedTo);
+            const foundAccount = Object.keys(users).find(account => users[account] === bug.assignedTo);
+            if (foundAccount) {
+              userAccount = foundAccount;
+              foundValidAccount = true;
+              console.log('[BugManager] 找到账号:', foundAccount);
+            } else {
+              // 如果找不到账号，使用姓名作为显示文本，但设置 dataset.value 为空
+              console.log('[BugManager] 未找到对应账号，使用姓名');
+              assigneeDisplay.dataset.value = '';
+              assigneeDisplay.innerHTML = `<span class="multi-select-tag"><span class="multi-select-tag-name">${displayName}</span></span>`;
+            }
+          } else {
+            // 不是中文也不是账号中的用户，直接使用
+            foundValidAccount = true;
+          }
+        }
+
+        // 只有找到有效账号时才设置显示值
+        if (foundValidAccount) {
+          assigneeDisplay.dataset.value = userAccount;
+          assigneeDisplay.innerHTML = `<span class="multi-select-tag"><span class="multi-select-tag-name">${displayName}</span></span>`;
+        }
+      }
+    }
+
     modal.style.display = 'flex';
   },
 
@@ -8396,42 +8440,103 @@ const BugManager = {
     }
 
     // 设置默认指派人（使用 Bug 创建时的指派人）
-    if (bug.assignedTo) {
+    if (bug.assignedTo && bug.assignedTo !== '') {
       const assigneeDisplay = document.getElementById('activateAssigneeDisplay');
       if (assigneeDisplay) {
-        assigneeDisplay.dataset.value = bug.assignedTo;
-        // 获取用户列表来显示名称
+        // 获取用户列表
         const users = await ZentaoBrowserClient.getUsers();
+
+        let userAccount = bug.assignedTo;
+        let displayName = bug.assignedTo;
+        let foundValidAccount = false;
+
+        // 如果 assignedTo 是账号
         if (users && users[bug.assignedTo]) {
-          assigneeDisplay.innerHTML = `<span class="multi-select-tag"><span class="multi-select-tag-name">${users[bug.assignedTo]}</span></span>`;
+          displayName = users[bug.assignedTo];
+          foundValidAccount = true;
+        } else {
+          // 如果 assignedTo 是姓名（包含中文），尝试反向查找账号
+          if (/[\u4e00-\u9fa5]/.test(bug.assignedTo)) {
+            console.log('[BugManager] assignedTo 是姓名，尝试反向查找账号:', bug.assignedTo);
+            const foundAccount = Object.keys(users).find(account => users[account] === bug.assignedTo);
+            if (foundAccount) {
+              userAccount = foundAccount;
+              foundValidAccount = true;
+              console.log('[BugManager] 找到账号:', foundAccount);
+            } else {
+              // 如果找不到账号，使用姓名作为显示文本，但设置 dataset.value 为空
+              console.log('[BugManager] 未找到对应账号，使用姓名');
+              assigneeDisplay.dataset.value = '';
+              assigneeDisplay.innerHTML = `<span class="multi-select-tag"><span class="multi-select-tag-name">${displayName}</span></span>`;
+            }
+          } else {
+            // 不是中文也不是账号中的用户，直接使用
+            foundValidAccount = true;
+          }
+        }
+
+        // 只有找到有效账号时才设置显示值
+        if (foundValidAccount) {
+          assigneeDisplay.dataset.value = userAccount;
+          assigneeDisplay.innerHTML = `<span class="multi-select-tag"><span class="multi-select-tag-name">${displayName}</span></span>`;
         }
       }
     }
 
     // 设置默认抄送人（使用 Bug 创建时的抄送人）
-    if (bug.cc && bug.cc.length > 0) {
-      const ccContainer = document.getElementById('activateCcContainer');
-      if (ccContainer && ccContainer._selectedUsers) {
-        // 清空现有选择
-        ccContainer._selectedUsers.clear();
-        // 添加 Bug 的抄送人
-        bug.cc.forEach(ccAccount => {
-          ccContainer._selectedUsers.add(ccAccount);
-        });
-        // 更新显示
-        const users = await ZentaoBrowserClient.getUsers();
-        this.updateMultiSelectDisplayById('activateCc', ccContainer._selectedUsers, users);
-        // 更新下拉列表中的选中状态
-        const optionsContainer = document.getElementById('activateCcOptions');
-        if (optionsContainer) {
-          optionsContainer.querySelectorAll('.multi-select-option').forEach(option => {
-            const account = option.dataset.value;
-            if (ccContainer._selectedUsers.has(account)) {
-              option.classList.add('selected');
-            } else {
-              option.classList.remove('selected');
+    if (bug.cc) {
+      let ccList = [];
+
+      // 处理不同的 cc 格式
+      if (Array.isArray(bug.cc)) {
+        ccList = bug.cc;
+      } else if (typeof bug.cc === 'string' && bug.cc.trim() !== '') {
+        // 字符串格式，按空格分隔
+        ccList = bug.cc.split(/\s+/).filter(cc => cc);
+      }
+
+      if (ccList.length > 0) {
+        const ccContainer = document.getElementById('activateCcContainer');
+        if (ccContainer && ccContainer._selectedUsers) {
+          const users = await ZentaoBrowserClient.getUsers();
+
+          // 清空现有选择
+          ccContainer._selectedUsers.clear();
+
+          // 添加 Bug 的抄送人（需要转换为账号）
+          ccList.forEach(ccItem => {
+            let ccAccount = ccItem;
+
+            // 如果是姓名，尝试反向查找账号
+            if (/[\u4e00-\u9fa5]/.test(ccItem) && users) {
+              const foundAccount = Object.keys(users).find(account => users[account] === ccItem);
+              if (foundAccount) {
+                ccAccount = foundAccount;
+              }
+            }
+
+            // 只有当是有效的账号格式（不包含中文）或者是查找成功时才添加
+            if (!/[\u4e00-\u9fa5]/.test(ccAccount) || ccItem === ccAccount) {
+              ccContainer._selectedUsers.add(ccAccount);
             }
           });
+
+          console.log('[BugManager] 设置的抄送人账号:', Array.from(ccContainer._selectedUsers));
+
+          // 更新显示
+          this.updateMultiSelectDisplayById('activateCc', ccContainer._selectedUsers, users);
+          // 更新下拉列表中的选中状态
+          const optionsContainer = document.getElementById('activateCcOptions');
+          if (optionsContainer) {
+            optionsContainer.querySelectorAll('.multi-select-option').forEach(option => {
+              const account = option.dataset.value;
+              if (ccContainer._selectedUsers.has(account)) {
+                option.classList.add('selected');
+              } else {
+                option.classList.remove('selected');
+              }
+            });
+          }
         }
       }
     }
