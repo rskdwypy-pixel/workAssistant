@@ -136,8 +136,22 @@ const ZentaoTabManager = {
   async waitForTabLoad(tabId, timeout = 15000) {
     console.log('[ZentaoTabManager] waitForTabLoad 调用:', { tabId, timeout });
 
-    return new Promise((resolve) => {
+    return new Promise(async (resolve) => {
       let resolved = false;
+
+      // 先检查标签页当前状态，如果已经加载完成则直接返回
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        if (tab.status === 'complete') {
+          console.log('[ZentaoTabManager] ✓ 标签页已加载完成（检查时已complete）');
+          // 额外等待确保DOM渲染完成
+          setTimeout(() => resolve(true), 1000);
+          return;
+        }
+      } catch (err) {
+        console.error('[ZentaoTabManager] 获取标签页状态失败:', err);
+      }
+
       const listener = (updatedTabId, changeInfo) => {
         if (updatedTabId === tabId && changeInfo.status === 'complete') {
           if (resolved) return;  // 防止重复调用
