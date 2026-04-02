@@ -9180,11 +9180,6 @@ const BugManager = {
     const modal = document.getElementById('bugCloseModal');
     const comment = document.getElementById('closeComment').value.trim();
 
-    if (!comment) {
-      Toast.warning('请填写关闭备注');
-      return;
-    }
-
     // 使用 ButtonStateManager 管理按钮状态
     const restoreButton = ButtonStateManager.setLoading('confirmCloseBtn', {
       loadingText: '关闭中...'
