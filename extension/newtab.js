@@ -4511,24 +4511,23 @@ const ZentaoBrowserClient = {
 
     console.log('[ZentaoBrowser] 开始从禅道页面加载用户列表...');
 
-    // 创建临时标签页获取用户列表
-    const tab = await chrome.tabs.create({ url: `${baseUrl}/zentao/my-team.html`, active: false });
-
-    // 等待页面加载完成 - 直接从源代码提取，不需要等待动态渲染
-    await new Promise(resolve => {
-      const listener = (tabId, changeInfo) => {
-        if (tabId === tab.id && changeInfo.status === 'complete') {
-          chrome.tabs.onUpdated.removeListener(listener);
-          // 只需等待页面基础加载完成，不需要等待JavaScript渲染
-          setTimeout(resolve, 500);
-        }
-      };
-      chrome.tabs.onUpdated.addListener(listener);
-      setTimeout(() => {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }, 10000); // 10秒超时
+    // 使用 ZentaoTabManager 复用已存在的禅道标签页
+    const targetUrl = `${baseUrl}/zentao/my-team.html`;
+    const tab = await ZentaoTabManager.getOrCreateTab({
+      baseUrl,
+      targetUrl,
+      active: false,
+      reload: false  // 不刷新，避免不必要的页面加载
     });
+
+    // 如果标签页不在目标页面，导航过去
+    if (!tab.url.includes('my-team.html')) {
+      console.log('[ZentaoBrowser] 标签页不在 my-team.html，导航中...');
+      await ZentaoTabManager.navigateTo(tab, targetUrl, { waitTimeout: 10000 });
+    } else {
+      // 等待一下确保页面已加载
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
 
     // 注入脚本提取用户 - 参考 Gemini 方案的纯函数设计
     console.log('[ZentaoBrowser] 准备注入脚本，tab ID:', tab.id, 'URL:', tab.url);
@@ -6944,10 +6943,14 @@ const BugManager = {
 
       const bugDetailUrl = `${baseUrl}/zentao/bug-view-${bugId}.html`;
 
-      // 在新标签页中打开
-      chrome.tabs.create({ url: bugDetailUrl, active: true });
+      // 使用 ZentaoTabManager 复用已存在的禅道标签页
+      const tab = await ZentaoTabManager.getOrCreateTab({
+        baseUrl,
+        targetUrl: bugDetailUrl,
+        active: true
+      });
 
-      console.log('[BugManager] 打开禅道 Bug 详情:', bugDetailUrl);
+      console.log('[BugManager] 使用标签页', tab.id, '打开禅道 Bug 详情:', bugDetailUrl);
     } catch (error) {
       console.error('[BugManager] 打开 Bug 详情失败:', error);
       Toast.error('打开 Bug 详情失败');
@@ -8544,50 +8547,36 @@ const BugManager = {
         return null;
       }
 
-      // 创建临时标签页获取 Bug 详情
-      const tab = await chrome.tabs.create({ url: `${baseUrl}/zentao/bug-view-${zentaoBugId}.html`, active: false });
-
-      // 等待页面加载完成
-      await new Promise(resolve => {
-        const listener = (tabId, changeInfo) => {
-          if (tabId === tab.id && changeInfo.status === 'complete') {
-            chrome.tabs.onUpdated.removeListener(listener);
-            setTimeout(resolve, 500);
-          }
-        };
-        chrome.tabs.onUpdated.addListener(listener);
-        setTimeout(() => {
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve();
-        }, 10000);
+      // 使用 ZentaoTabManager 复用已存在的禅道标签页获取 Bug 详情
+      const bugDetailUrl = `${baseUrl}/zentao/bug-view-${zentaoBugId}.html`;
+      const tab = await ZentaoTabManager.getOrCreateTab({
+        baseUrl,
+        targetUrl: bugDetailUrl,
+        active: false
       });
 
       // 注入脚本提取 Bug 详情
-      const results = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => {
-          // 提取指派人
-          const assignedToElement = document.querySelector('#openedBy');
-          const assignedTo = assignedToElement ? assignedToElement.value.trim() : '';
+      const results = await ZentaoTabManager.executeScript(tab, () => {
+        // 提取指派人
+        const assignedToElement = document.querySelector('#openedBy');
+        const assignedTo = assignedToElement ? assignedToElement.value.trim() : '';
 
-          // 提取抄送人列表
-          const ccList = [];
-          const ccElements = document.querySelectorAll('input[name="cc[]"]');
-          ccElements.forEach(element => {
-            if (element.value) {
-              ccList.push(element.value.trim());
-            }
-          });
+        // 提取抄送人列表
+        const ccList = [];
+        const ccElements = document.querySelectorAll('input[name="cc[]"]');
+        ccElements.forEach(element => {
+          if (element.value) {
+            ccList.push(element.value.trim());
+          }
+        });
 
-          return {
-            assignedTo,
-            cc: ccList
-          };
-        }
+        return {
+          assignedTo,
+          cc: ccList
+        };
       });
 
-      // 关闭标签页
-      await chrome.tabs.remove(tab.id);
+      // 不关闭标签页，因为它是复用的已存在的标签页
 
       if (results && results.length > 0 && results[0].result) {
         console.log('[BugManager] 从禅道获取到 Bug 详情:', results[0].result);
@@ -9064,11 +9053,11 @@ window.testGetKanbanParamsSimple = async function(executionId = 148) {
     console.log('');
     console.log('[Test] 正在打开禅道标签页...');
 
-    // 直接打开新标签页
-    const newTab = await new Promise(resolve => {
-      chrome.tabs.create({ url: kanbanUrl, active: true }, (tab) => {
-        resolve(tab);
-      });
+    // 使用 ZentaoTabManager 复用已存在的禅道标签页
+    const newTab = await ZentaoTabManager.getOrCreateTab({
+      baseUrl: configResult.data.url,
+      targetUrl: kanbanUrl,
+      active: true
     });
 
     console.log('[Test] ✓ 标签页已打开，ID:', newTab.id);
