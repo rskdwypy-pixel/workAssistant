@@ -7118,10 +7118,21 @@ const BugManager = {
       if (bugSteps) {
         bugSteps.value = initialContent;
       }
+      // 设置默认类型为代码错误
+      const bugType = document.getElementById('bugType');
+      if (bugType) {
+        bugType.value = 'codeerror';
+      }
     } else {
       // 恢复草稿（只有在没有初始内容时）
       if (this.draft) {
         this.restoreDraft();
+      } else {
+        // 没有草稿时，设置默认值
+        const bugType = document.getElementById('bugType');
+        if (bugType) {
+          bugType.value = 'codeerror';
+        }
       }
     }
 
