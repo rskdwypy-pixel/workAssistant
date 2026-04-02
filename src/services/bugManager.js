@@ -130,6 +130,9 @@ async function getBugs(filters = {}) {
 
   console.log('[BugManager] 总任务数量:', allTasks.length);
 
+  // 打印前5个任务的 type，帮助调试
+  console.log('[BugManager] 前5个任务的 type:', allTasks.slice(0, 5).map(t => ({ id: t.id, type: t.type, title: t.title?.substring(0, 30) })));
+
   // 统计不同类型的任务
   const typeStats = {};
   allTasks.forEach(t => {

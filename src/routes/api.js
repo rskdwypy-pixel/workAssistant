@@ -1296,14 +1296,17 @@ router.post('/ai/match-execution', async (req, res) => {
  */
 router.get('/bugs', async (req, res) => {
   try {
+    console.log('[API] GET /api/bugs 调用，查询参数:', req.query);
     const { getBugs } = await import('../services/bugManager.js');
     const filters = {
       status: req.query.status,
       executionId: req.query.executionId
     };
     const bugs = await getBugs(filters);
+    console.log('[API] GET /api/bugs 返回，Bug数量:', bugs.length);
     res.json({ success: true, data: bugs });
   } catch (err) {
+    console.error('[API] GET /api/bugs 错误:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
