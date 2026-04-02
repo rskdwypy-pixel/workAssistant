@@ -982,6 +982,16 @@ function bindEvents() {
     checkServiceStatus();
   });
 
+  // Bug 标签页的设置按钮
+  const bugSettingsBtn = document.getElementById('bugSettingsBtn');
+  if (bugSettingsBtn) {
+    bugSettingsBtn.addEventListener('click', () => {
+      loadSettings();
+      document.getElementById('settingsModal').classList.add('active');
+      checkServiceStatus();
+    });
+  }
+
   document.getElementById('closeSettings').addEventListener('click', () => {
     document.getElementById('settingsModal').classList.remove('active');
   });
@@ -5944,10 +5954,10 @@ const TagCloud = {
   }
 };
 
-// 在页面加载时初始化云标签
-document.addEventListener('DOMContentLoaded', () => {
-  TagCloud.init();
-});
+// 在页面加载时初始化云标签（已删除功能）
+// document.addEventListener('DOMContentLoaded', () => {
+//   TagCloud.init();
+// });
 
 // ==================== Bug 模式切换 ====================
 
