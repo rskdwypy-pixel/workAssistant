@@ -546,7 +546,9 @@ async function importZentaoTasks(zentaoTasks) {
   // Build a Map for O(1) lookups instead of O(n²) find() in loop
   const existingTasksMap = new Map();
   tasks.forEach(t => {
-    if (t.zentaoId) {
+    // 只对 type === 'task' 且有 zentaoId 的任务建立索引
+    // 避免与 Bug 或其他类型的项冲突
+    if (t.type === 'task' && t.zentaoId) {
       existingTasksMap.set(t.zentaoId, t);
     }
   });
