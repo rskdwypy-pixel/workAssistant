@@ -959,7 +959,8 @@
         }
       ],
       "progressComment": "更新进度至 100%",
-      "consumedTime": 1
+      "consumedTime": 1,
+      "type": "task"
     },
     {
       "id": "55bdfbd5-2cd0-4192-9a73-f482dbfb5eac",
@@ -988,7 +989,8 @@
         }
       ],
       "progressComment": "更新进度至 100%",
-      "consumedTime": 1
+      "consumedTime": 1,
+      "type": "task"
     },
     {
       "id": "21c9b3d3-0e6e-4751-a300-c78b6b338ed8",
@@ -1006,7 +1008,8 @@
       "createdAt": "2026-03-01T12:43:43.452Z",
       "updatedAt": "2026-03-01T12:50:46.797Z",
       "zentaoExecution": "167",
-      "order": 2
+      "order": 2,
+      "type": "task"
     },
     {
       "id": "862f9a1d-c318-4a87-8c95-06530d9de72d",
@@ -1034,7 +1037,8 @@
         }
       ],
       "progressComment": "更新进度至 100%",
-      "consumedTime": 1
+      "consumedTime": 1,
+      "type": "task"
     },
     {
       "id": "06f8dbe2-a255-4ad0-b6ae-15fc8b21226d",
@@ -1054,7 +1058,8 @@
       "totalConsumedTime": 0,
       "createdAt": "2026-03-27T08:30:24.590Z",
       "updatedAt": "2026-03-27T08:30:30.214Z",
-      "executionType": "kanban"
+      "executionType": "kanban",
+      "type": "task"
     },
     {
       "id": "88917afa-bbe7-4b8a-b70b-24a3a1c2a1ba",
@@ -1074,7 +1079,8 @@
       "totalConsumedTime": 0,
       "createdAt": "2026-04-01T10:24:46.252Z",
       "updatedAt": "2026-04-01T10:24:50.671Z",
-      "executionType": "kanban"
+      "executionType": "kanban",
+      "type": "task"
     },
     {
       "id": "a60920c2-cb2f-4790-828d-460ff2d61cd0",
@@ -1087,7 +1093,8 @@
       "createdAt": "2026-02-27T03:36:57.454Z",
       "updatedAt": "2026-02-27T13:07:54.764Z",
       "progress": 100,
-      "order": 8
+      "order": 8,
+      "type": "task"
     },
     {
       "id": "30f8994c-10b9-45fa-b966-557e630e6d04",
@@ -1101,7 +1108,8 @@
       "updatedAt": "2026-02-27T13:07:54.764Z",
       "reminder3hTriggered": true,
       "reminderExactTriggered": true,
-      "order": 7
+      "order": 7,
+      "type": "task"
     },
     {
       "id": "10e7a513-6d24-46a1-b86d-87526a8ea58d",
@@ -1115,7 +1123,8 @@
       "progress": 100,
       "createdAt": "2026-02-27T12:41:54.132Z",
       "updatedAt": "2026-02-27T13:07:54.764Z",
-      "order": 5
+      "order": 5,
+      "type": "task"
     },
     {
       "id": "acaeba35-3f3d-46f0-a135-711bb1a5eeee",
@@ -1129,7 +1138,8 @@
       "progress": 100,
       "createdAt": "2026-02-27T12:46:06.417Z",
       "updatedAt": "2026-02-27T13:07:54.764Z",
-      "order": 6
+      "order": 6,
+      "type": "task"
     },
     {
       "id": "500f7306-3b70-4fbc-8500-f234d6a8a073",
@@ -1144,8 +1154,9 @@
       "createdAt": "2026-02-28T01:45:50.556Z",
       "updatedAt": "2026-02-28T03:02:34.075Z",
       "priority": 1,
-      "order": 6
+      "order": 6,
+      "type": "task"
     }
   ],
-  "lastUpdated": "2026-04-02T02:58:25.499Z"
+  "lastUpdated": "2026-04-02T03:02:19.531Z"
 }
