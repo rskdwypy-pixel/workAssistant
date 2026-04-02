@@ -3289,46 +3289,39 @@ async function syncFromZentaoInBackground(config) {
       console.log('[Background] ========== 步骤5.5: 获取 Bug 详情信息 ==========');
       console.log('[Background] 开始为', zentaoBugs.length, '个 Bug 获取详情信息...');
 
-      // 获取禅道配置
-      const config = await getConfig();
-      const baseUrl = config?.zentaoUrl?.replace(/\/$/, '');
-      if (!baseUrl) {
-        console.warn('[Background] 未配置禅道 URL，跳过 Bug 详情获取');
-      } else {
-        // 为每个 Bug 获取详情
-        for (let i = 0; i < zentaoBugs.length; i++) {
-          const bug = zentaoBugs[i];
-          console.log(`[Background] [${i + 1}/${zentaoBugs.length}] 获取 Bug ${bug.zentaoId} 详情...`);
+      // 为每个 Bug 获取详情
+      for (let i = 0; i < zentaoBugs.length; i++) {
+        const bug = zentaoBugs[i];
+        console.log(`[Background] [${i + 1}/${zentaoBugs.length}] 获取 Bug ${bug.zentaoId} 详情...`);
 
-          try {
-            const bugDetail = await fetchBugDetail(baseUrl, bug.zentaoId);
+        try {
+          const bugDetail = await fetchBugDetail(baseUrl, bug.zentaoId);
 
-            // 将详情信息合并到 Bug 对象
-            bug.steps = bugDetail.steps;
-            bug.history = bugDetail.history;
-            bug.assignedTo = bugDetail.assignedTo;
-            bug.assignedDate = bugDetail.assignedDate;
-            bug.cc = bugDetail.cc;
+          // 将详情信息合并到 Bug 对象
+          bug.steps = bugDetail.steps;
+          bug.history = bugDetail.history;
+          bug.assignedTo = bugDetail.assignedTo;
+          bug.assignedDate = bugDetail.assignedDate;
+          bug.cc = bugDetail.cc;
 
-            console.log(`[Background] ✓ Bug ${bug.zentaoId} 详情获取完成`);
-          } catch (err) {
-            console.error(`[Background] ✗ Bug ${bug.zentaoId} 详情获取失败:`, err);
-            // 即使失败也保留 Bug，只是详情信息为空
-            bug.steps = '';
-            bug.history = [];
-            bug.assignedTo = '';
-            bug.assignedDate = '';
-            bug.cc = '';
-          }
-
-          // 添加延迟避免请求过快
-          if (i < zentaoBugs.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
+          console.log(`[Background] ✓ Bug ${bug.zentaoId} 详情获取完成`);
+        } catch (err) {
+          console.error(`[Background] ✗ Bug ${bug.zentaoId} 详情获取失败:`, err);
+          // 即使失败也保留 Bug，只是详情信息为空
+          bug.steps = '';
+          bug.history = [];
+          bug.assignedTo = '';
+          bug.assignedDate = '';
+          bug.cc = '';
         }
 
-        console.log('[Background] ✓ 所有 Bug 详情获取完成');
+        // 添加延迟避免请求过快
+        if (i < zentaoBugs.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
       }
+
+      console.log('[Background] ✓ 所有 Bug 详情获取完成');
     }
 
     // 6. 发送到后端API保存
