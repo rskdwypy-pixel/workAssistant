@@ -6732,7 +6732,7 @@ const BugManager = {
         console.log('[BugManager] type=bug 的数量:', bugCount);
         console.log('[BugManager] type!=bug 的数量:', taskCount);
 
-        this.renderBugs();
+        await this.renderBugs();
       } else {
         console.error('[BugManager] API 返回失败:', result.error);
       }
@@ -6742,7 +6742,7 @@ const BugManager = {
     console.log('[BugManager] ========== loadBugs 结束 ==========');
   },
 
-  renderBugs() {
+  async renderBugs() {
     console.log('[BugManager] ========== renderBugs 开始 ==========');
     console.log('[BugManager] 待渲染的 Bug 数量:', this.bugs.length);
 
@@ -9044,7 +9044,7 @@ const BugManager = {
       console.log('[BugManager] 更新后状态:', bug.status);
 
       // 重新渲染 Bug 列表
-      this.renderBugs();
+      await this.renderBugs();
       console.log('[BugManager] Bug 列表已重新渲染');
     } else {
       console.error('[BugManager] 未找到 Bug:', bugId);
