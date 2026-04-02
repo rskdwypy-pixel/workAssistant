@@ -7121,14 +7121,18 @@ const BugManager = {
     } else {
       // 恢复草稿（只有在没有初始内容时）
       if (this.draft) {
+        console.log('[BugManager] 草稿中的 type:', this.draft.type);
         this.restoreDraft();
+        console.log('[BugManager] 恢复草稿后的 bugType.value:', document.getElementById('bugType').value);
       }
     }
 
     // 强制设置默认类型为代码错误（覆盖草稿中的值）
     const bugType = document.getElementById('bugType');
     if (bugType) {
+      console.log('[BugManager] 强制设置 bugType 为 codeerror，当前值:', bugType.value);
       bugType.value = 'codeerror';
+      console.log('[BugManager] 设置后的 bugType.value:', bugType.value);
     }
 
     modal.style.display = 'flex';
