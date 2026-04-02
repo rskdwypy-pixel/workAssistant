@@ -29,10 +29,17 @@ const ZentaoTabManager = {
 
       // 如果需要导航到特定URL
       if (targetUrl && !zentaoTab.url.includes(targetUrl)) {
-        console.log('[ZentaoTabManager] 导航禅道标签页到:', targetUrl);
+        console.log('[ZentaoTabManager] 需要导航:', {
+          current: zentaoTab.url,
+          target: targetUrl,
+          reason: '当前URL不包含目标URL'
+        });
         await this._navigateTo(zentaoTab, targetUrl);
       } else if (reload) {
+        console.log('[ZentaoTabManager] 需要刷新当前页面');
         await this._reloadTab(zentaoTab);
+      } else {
+        console.log('[ZentaoTabManager] ✓ 无需导航，标签页已就绪');
       }
 
       return zentaoTab;
@@ -43,14 +50,23 @@ const ZentaoTabManager = {
       const kanbanTab = await this._findKanbanTab(kanbanId);
       if (kanbanTab) {
         console.log('[ZentaoTabManager] ✓ 找到看板标签页:', kanbanTab.id, kanbanTab.url);
+
         if (reload) {
+          console.log('[ZentaoTabManager] 需要刷新看板标签页');
           await this._reloadTab(kanbanTab);
         }
+
         // 如果需要导航到特定URL
         if (targetUrl && !kanbanTab.url.includes(targetUrl)) {
-          console.log('[ZentaoTabManager] 导航看板标签页到:', targetUrl);
+          console.log('[ZentaoTabManager] 需要导航看板标签页:', {
+            current: kanbanTab.url,
+            target: targetUrl
+          });
           await this._navigateTo(kanbanTab, targetUrl);
+        } else {
+          console.log('[ZentaoTabManager] ✓ 看板标签页已就绪，无需导航');
         }
+
         return kanbanTab;
       }
     }
@@ -121,8 +137,12 @@ const ZentaoTabManager = {
     console.log('[ZentaoTabManager] waitForTabLoad 调用:', { tabId, timeout });
 
     return new Promise((resolve) => {
+      let resolved = false;
       const listener = (updatedTabId, changeInfo) => {
         if (updatedTabId === tabId && changeInfo.status === 'complete') {
+          if (resolved) return;  // 防止重复调用
+          resolved = true;
+
           chrome.tabs.onUpdated.removeListener(listener);
           // 额外等待确保DOM渲染完成
           setTimeout(() => {
@@ -136,6 +156,9 @@ const ZentaoTabManager = {
 
       // 超时保护
       setTimeout(() => {
+        if (resolved) return;  // 已经 resolve，不再执行超时逻辑
+        resolved = true;
+
         chrome.tabs.onUpdated.removeListener(listener);
         console.warn('[ZentaoTabManager] ⚠ 标签页加载超时');
         resolve(false);
@@ -196,9 +219,18 @@ const ZentaoTabManager = {
    * @private
    */
   async _navigateTo(tab, url) {
-    console.log('[ZentaoTabManager] _navigateTo 调用:', { tabId: tab.id, url });
+    console.log('[ZentaoTabManager] _navigateTo 调用:', { tabId: tab.id, currentUrl: tab.url, targetUrl: url });
+
+    // 如果已经在目标 URL，直接返回
+    if (tab.url === url) {
+      console.log('[ZentaoTabManager] ✓ 标签页已在目标URL，无需导航');
+      return tab;
+    }
+
+    console.log('[ZentaoTabManager] 开始导航...');
     await chrome.tabs.update(tab.id, { url });
-    await this.waitForTabLoad(tab.id, 15000);
+    await this.waitForTabLoad(tab.id, 20000);  // 增加超时到 20 秒
+    console.log('[ZentaoTabManager] ✓ 导航完成');
   },
 
   /**
