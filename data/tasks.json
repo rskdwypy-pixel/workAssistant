@@ -1041,48 +1041,6 @@
       "type": "task"
     },
     {
-      "id": "06f8dbe2-a255-4ad0-b6ae-15fc8b21226d",
-      "content": "阿迪新版本更新",
-      "title": "阿迪新版本更新",
-      "status": "todo",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 0,
-      "executionId": "149",
-      "executionName": "/阿迪达斯项目交付",
-      "zentaoId": "695",
-      "zentaoExecution": "149",
-      "totalConsumedTime": 0,
-      "createdAt": "2026-03-27T08:30:24.590Z",
-      "updatedAt": "2026-03-27T08:30:30.214Z",
-      "executionType": "kanban",
-      "type": "task"
-    },
-    {
-      "id": "88917afa-bbe7-4b8a-b70b-24a3a1c2a1ba",
-      "content": "南方航空因为兼容性问题需要使用 appium 方式来跑性能数据",
-      "title": "南方航空Appium性能数据",
-      "status": "todo",
-      "priority": 3,
-      "dueDate": null,
-      "reminderTime": null,
-      "reminder3hTriggered": false,
-      "reminderExactTriggered": false,
-      "progress": 0,
-      "executionId": "103",
-      "executionName": "/联合航空看板",
-      "zentaoId": "699",
-      "zentaoExecution": "103",
-      "totalConsumedTime": 0,
-      "createdAt": "2026-04-01T10:24:46.252Z",
-      "updatedAt": "2026-04-01T10:24:50.671Z",
-      "executionType": "kanban",
-      "type": "task"
-    },
-    {
       "id": "a60920c2-cb2f-4790-828d-460ff2d61cd0",
       "content": "iOS 签名修改",
       "title": "iOS签名修改",
@@ -1158,5 +1116,5 @@
       "type": "task"
     }
   ],
-  "lastUpdated": "2026-04-02T03:02:19.531Z"
+  "lastUpdated": "2026-04-02T03:05:38.338Z"
 }
