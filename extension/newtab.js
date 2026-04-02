@@ -6533,6 +6533,16 @@ const BugManager = {
       closeBtn.addEventListener('click', () => this.hideBugModal());
     }
 
+    // 点击弹框外部关闭
+    const bugModal = document.getElementById('bugModal');
+    if (bugModal) {
+      bugModal.addEventListener('click', (e) => {
+        if (e.target === bugModal) {
+          this.hideBugModal();
+        }
+      });
+    }
+
     // 提交 Bug
     const submitBtn = document.getElementById('submitBugBtn');
     if (submitBtn) {
@@ -6558,6 +6568,16 @@ const BugManager = {
     const closeBugDetailBtn = document.getElementById('closeBugDetailModal');
     if (closeBugDetailBtn) {
       closeBugDetailBtn.addEventListener('click', () => this.hideBugDetail());
+    }
+
+    // 点击弹框外部关闭
+    const bugDetailModal = document.getElementById('bugDetailModal');
+    if (bugDetailModal) {
+      bugDetailModal.addEventListener('click', (e) => {
+        if (e.target === bugDetailModal) {
+          this.hideBugDetail();
+        }
+      });
     }
 
     // Bug 修复弹窗关闭按钮
