@@ -137,6 +137,12 @@ const ZentaoSync = {
         // 重新加载任务列表
         await loadTasks();
 
+        // 重新加载 Bug 列表
+        if (typeof BugManager !== 'undefined' && BugManager.loadBugs) {
+          console.log('[ZentaoSync] 重新加载 Bug 列表...');
+          await BugManager.loadBugs();
+        }
+
         // 更新同步状态显示
         await this.updateSyncStatusDisplay();
       } else {
