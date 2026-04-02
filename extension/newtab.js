@@ -6767,9 +6767,9 @@ const BugManager = {
     // 根据状态显示不同的快捷按钮
     let quickActionButton = '';
     if (bug.status === 'unconfirmed') {
-      quickActionButton = `<button class="bug-quick-btn bug-activate-btn" title="激活 Bug">⚡ 激活</button>`;
+      quickActionButton = `<button class="bug-quick-btn bug-activate-btn" title="确认 Bug">⚡ 确认</button>`;
     } else if (bug.status === 'activated') {
-      quickActionButton = `<button class="bug-quick-btn bug-resolve-btn" title="修复 Bug">🔧 修复</button>`;
+      quickActionButton = `<button class="bug-quick-btn bug-resolve-btn" title="解决 Bug">🔧 解决</button>`;
     }
 
     card.innerHTML = `
@@ -8657,7 +8657,7 @@ const BugManager = {
       comment
     });
 
-    Toast.info('正在激活 Bug...');
+    Toast.info('正在确认 Bug...');
 
     try {
       const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
@@ -8695,11 +8695,11 @@ const BugManager = {
         this.hideBugDetail();
       } else {
         console.error('[BugManager] ✗ 激活失败:', response);
-        Toast.error('激活失败: ' + (response?.reason || '未知错误'));
+        Toast.error('确认失败: ' + (response?.reason || '未知错误'));
       }
     } catch (err) {
       console.error('[BugManager] 激活 Bug 异常:', err);
-      Toast.error('激活失败: ' + err.message);
+      Toast.error('确认失败: ' + err.message);
     }
   },
 
@@ -8734,7 +8734,7 @@ const BugManager = {
       loadingText: '修复中...'
     });
 
-    Toast.info('正在修复 Bug...');
+    Toast.info('正在解决 Bug...');
 
     try {
       const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
@@ -8772,11 +8772,11 @@ const BugManager = {
         this.hideResolveModal();
         this.hideBugDetail(); // 同时关闭详情弹窗
       } else {
-        Toast.error('修复失败: ' + (response?.reason || '未知错误'));
+        Toast.error('解决失败: ' + (response?.reason || '未知错误'));
       }
     } catch (err) {
       console.error('[BugManager] 修复 Bug 失败:', err);
-      Toast.error('修复失败: ' + err.message);
+      Toast.error('解决失败: ' + err.message);
     } finally {
       restoreButton();
     }
