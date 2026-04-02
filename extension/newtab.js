@@ -8725,7 +8725,7 @@ const BugManager = {
   },
 
   /**
-   * 修复 Bug
+   * 解决 Bug
    */
   async resolveBug(bugId) {
     const bug = this.bugs.find(b => b.id === bugId);
@@ -8736,10 +8736,7 @@ const BugManager = {
       return;
     }
 
-    if (!bug.executionId) {
-      Toast.warning('该 Bug 缺少执行 ID 信息，无法修复');
-      return;
-    }
+    // 移除 executionId 检查，解决 Bug 不需要执行信息
 
     const modal = document.getElementById('bugResolveModal');
     const resolution = document.getElementById('resolveResolution').value;
