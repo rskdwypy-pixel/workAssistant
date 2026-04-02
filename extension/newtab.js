@@ -7988,7 +7988,7 @@ const BugManager = {
     if (!modal || !headerInfo || !content || !actions) return;
 
     const severityText = ['', '致命', '严重', '一般', '提示'][bug.severity || 3];
-    const statusText = { unconfirmed: '未确认', activated: '激活', closed: '已关闭' }[bug.status] || bug.status;
+    const statusText = { unconfirmed: '未确认', activated: '已确认', closed: '已解决' }[bug.status] || bug.status;
 
     // 在标题栏显示优先级和状态
     headerInfo.innerHTML = `
