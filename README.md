@@ -79,8 +79,25 @@ chmod +x install.sh
 2. ✅ 安装项目依赖
 3. ✅ 创建配置文件
 4. ✅ 初始化数据目录
-5. ✅ 提供扩展安装指引
-6. ✅ 启动后端服务
+5. ✅ **创建全局命令**（wa、wastop、walog）
+6. ✅ 提供扩展安装指引
+7. ✅ 启动后端服务
+
+**安装后可用命令：**
+```bash
+wa              # 启动服务（任何位置）
+wastop          # 停止服务
+walog           # 查看日志
+```
+
+**首次使用需要加载 PATH：**
+```bash
+# Mac
+source ~/.zshrc
+
+# Linux
+source ~/.bashrc
+```
 
 ### 手动安装
 
@@ -263,6 +280,25 @@ pm2 startup  # 开机自启
 
 ## 🔧 常用命令
 
+### 全局命令（推荐）
+
+运行 `install.sh` 后，可在任何位置使用以下命令：
+
+| 命令 | 说明 | 等同于 |
+|------|------|--------|
+| `wa` | 启动服务 | `./start.sh` |
+| `wastop` | 停止服务 | `./stop.sh` |
+| `walog` | 查看实时日志 | `tail -f logs/service.log` |
+
+**首次使用需要加载 PATH：**
+```bash
+# Mac
+source ~/.zshrc
+
+# Linux
+source ~/.bashrc
+```
+
 ### 启动/停止服务
 
 **Windows:**
@@ -287,6 +323,11 @@ pm2 status                       # 查看状态
 ```
 
 ### 查看日志
+
+**使用全局命令：**
+```bash
+walog            # 实时日志（Ctrl+C 退出）
+```
 
 **Mac / Linux:**
 ```bash
@@ -385,11 +426,15 @@ workAssistant/
 │   ├── tasks.json         # 任务数据
 │   ├── history.json       # 历史报告
 │   └── backups/           # 备份文件
-├── install.sh             # Mac/Linux 安装脚本
+├── install.sh             # Mac/Linux 安装脚本（创建全局命令）
 ├── install.bat            # Windows 安装脚本
 ├── start.sh               # 启动脚本
 ├── stop.sh                # 停止脚本
-└── ecosystem.config.js    # PM2 配置
+├── ecosystem.config.js    # PM2 配置
+└── ~/bin/                 # 全局命令（安装后自动创建）
+    ├── wa                 # 启动服务
+    ├── wastop             # 停止服务
+    └── walog              # 查看日志
 ```
 
 ## 🐛 常见问题
@@ -442,6 +487,33 @@ workAssistant/
 - 点击"测试连接"验证配置
 - 重新生成应用密码
 - 检查坚果云账户状态
+
+### 5. 全局命令不可用
+
+**问题:**
+```bash
+wa: command not found
+```
+
+**原因:**
+- PATH 环境变量未生效
+- ~/bin 目录未创建
+
+**解决:**
+```bash
+# 1. 重新加载 PATH
+source ~/.zshrc    # Mac
+source ~/.bashrc   # Linux
+
+# 2. 如果还不行，手动添加到 PATH
+export PATH="$HOME/bin:$PATH"
+
+# 3. 验证命令是否可用
+which wa          # 应该显示 ~/bin/wa
+
+# 4. 如果 ~/bin 不存在，重新运行安装脚本
+./install.sh
+```
 
 ## 📝 更新日志
 
