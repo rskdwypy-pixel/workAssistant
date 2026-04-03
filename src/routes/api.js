@@ -315,6 +315,43 @@ router.get('/history/:date', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/history/restore - 恢复历史报告（用于备份恢复）
+ */
+router.post('/history/restore', async (req, res) => {
+  try {
+    const { history } = req.body;
+
+    if (!history || !Array.isArray(history)) {
+      return res.status(400).json({ error: '无效的历史报告数据' });
+    }
+
+    // 读取现有历史
+    const summaryData = await summaryService.getHistoryList(1000);
+    const existingIds = new Set(summaryData.map(h => h.id));
+
+    // 合并历史报告（只添加不存在的）
+    let added = 0;
+    for (const report of history) {
+      if (!existingIds.has(report.id)) {
+        summaryData.push(report);
+        added++;
+      }
+    }
+
+    // 按日期排序
+    summaryData.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    // 保存到文件
+    await summaryService.saveHistory(summaryData);
+
+    res.json({ success: true, added, total: summaryData.length });
+  } catch (err) {
+    console.error('[API] 恢复历史报告失败:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==================== 报告生成接口 ====================
 
 /**

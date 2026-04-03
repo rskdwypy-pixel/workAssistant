@@ -961,12 +961,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log('[ZentaoBrowser] 自动登录跳过:', err.message);
   });
 
-  // 初始化同步功能
-  if (typeof syncManager !== 'undefined' && typeof SyncUI !== 'undefined') {
-    await syncManager.init();
-    const syncUI = new SyncUI(syncManager);
-    syncUI.init();
-    window.syncUI = syncUI; // 保存到全局以便后续使用
+  // 初始化备份功能
+  if (typeof backupManager !== 'undefined' && typeof BackupUI !== 'undefined') {
+    await backupManager.init();
+    const backupUI = new BackupUI(backupManager);
+    backupUI.init();
+    window.backupUI = backupUI; // 保存到全局以便后续使用
   }
 
   // 初始化禅道同步状态显示
@@ -1471,9 +1471,9 @@ function bindEvents() {
     // 更新后端服务地址
     API_BASE_URL = config.backendUrl || 'http://localhost:3721';
 
-    // 保存同步配置
-    if (window.syncUI) {
-      window.syncUI.saveSyncSettingsFromSettings();
+    // 保存备份配置
+    if (window.backupUI) {
+      window.backupUI.saveBackupSettingsFromSettings();
     }
 
     document.getElementById('settingsModal').classList.remove('active');

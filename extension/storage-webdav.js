@@ -106,7 +106,8 @@ class WebDAVStorage {
     });
 
     if (response.status === 404 || response.status === 409) {
-      // 索引文件不存在，返回空索引
+      // 索引文件不存在，返回空索引（首次使用）
+      console.log('[WebDAV] 索引文件不存在，将创建新索引');
       return { dates: [], lastUpdated: null };
     }
 

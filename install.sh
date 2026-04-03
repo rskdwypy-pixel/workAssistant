@@ -1,6 +1,7 @@
 #!/bin/bash
 # 工作助手一键安装脚本（Mac/Linux）
 # 执行此脚本后，只需加载插件并启动后端服务即可使用
+# 创建全局命令：wa、wastop、walog
 
 set -e
 
@@ -145,9 +146,57 @@ else
     echo -e "${GREEN}✓ 数据目录已存在${NC}"
 fi
 
-# ==================== 步骤5: 安装扩展 ====================
+# ==================== 步骤5: 创建全局命令 ====================
 echo ""
-echo -e "${BOLD}[5/6]${NC} 安装 Chrome 扩展..."
+echo -e "${BOLD}[5/7]${NC} 创建全局命令..."
+
+BIN_DIR="$HOME/bin"
+mkdir -p "$BIN_DIR"
+
+# 创建 wa 命令
+cat > "$BIN_DIR/wa" << EOF
+#!/bin/bash
+cd "$SCRIPT_DIR" && exec ./start.sh "\$@"
+EOF
+
+# 创建 wastop 命令
+cat > "$BIN_DIR/wastop" << EOF
+#!/bin/bash
+cd "$SCRIPT_DIR" && exec ./stop.sh "\$@"
+EOF
+
+# 创建 walog 命令
+cat > "$BIN_DIR/walog" << EOF
+#!/bin/bash
+cd "$SCRIPT_DIR" && exec tail -f logs/service.log
+EOF
+
+# 设置执行权限
+chmod +x "$BIN_DIR/wa" "$BIN_DIR/wastop" "$BIN_DIR/walog"
+
+# 检查/添加 PATH
+if ! echo "$PATH" | grep -q "$BIN_DIR"; then
+    echo -e "${YELLOW}添加 $BIN_DIR 到 PATH...${NC}"
+
+    # 添加到 shell 配置文件
+    if [ -f "$SHELL_RC" ]; then
+        echo "" >> "$SHELL_RC"
+        echo "# 工作助手 bin 目录" >> "$SHELL_RC"
+        echo "export PATH=\"$BIN_DIR:\$PATH\"" >> "$SHELL_RC"
+        echo -e "${GREEN}✓ 已添加到 $SHELL_RC${NC}"
+        echo -e "${YELLOW}请执行: source $SHELL_RC${NC}"
+    else
+        echo -e "${YELLOW}⚠️  未找到 $SHELL_RC，请手动添加 PATH${NC}"
+    fi
+else
+    echo -e "${GREEN}✓ $BIN_DIR 已在 PATH 中${NC}"
+fi
+
+echo -e "${GREEN}✓ 全局命令已创建${NC}"
+
+# ==================== 步骤6: 安装扩展 ====================
+echo ""
+echo -e "${BOLD}[6/7]${NC} 安装 Chrome 扩展..."
 
 EXTENSION_PATH="$SCRIPT_DIR/extension"
 
@@ -170,9 +219,9 @@ echo -e "${GREEN}✓ 扩展文件准备就绪${NC}"
 echo -e "${YELLOW}💡 提示: 加载后可固定扩展图标到工具栏${NC}"
 echo ""
 
-# ==================== 步骤6: 启动后端服务 ====================
+# ==================== 步骤7: 启动后端服务 ====================
 echo ""
-echo -e "${BOLD}[6/6]${NC} 启动后端服务..."
+echo -e "${BOLD}[7/7]${NC} 启动后端服务..."
 
 # 检查端口是否被占用
 PORT=3721
@@ -222,10 +271,10 @@ echo -e "${GREEN}========================================${NC}"
 echo ""
 echo -e "${BLUE}📋 后续步骤：${NC}"
 echo ""
-echo "  1. 确认 Chrome 扩展已加载（参考上面的安装步骤）"
-echo "  2. 访问 chrome://extensions/ 固定扩展图标"
-echo "  3. 打开新标签页，开始使用工作助手"
-echo ""
+echo "  1. ${YELLOW}如需使用全局命令，请执行: source $SHELL_RC${NC}"
+echo "  2. 确认 Chrome 扩展已加载（参考上面的安装步骤）"
+echo "  3. 访问 chrome://extensions/ 固定扩展图标"
+echo "  4. 打开新标签页，开始使用工作助手"
 echo -e "${BLUE}🎯 常用命令：${NC}"
 echo ""
 echo "  ${GREEN}wa${NC}              - 启动服务"
@@ -236,6 +285,7 @@ echo -e "${BLUE}💡 提示：${NC}"
 echo "  - 后端服务已在后台运行，关闭终端不影响"
 echo "  - 数据存储在: $SCRIPT_DIR/data"
 echo "  - 配置文件: $SCRIPT_DIR/.env"
+echo "  - 全局命令已安装到 $BIN_DIR"
 echo ""
 echo -e "${YELLOW}⚠️  注意事项：${NC}"
 echo "  - 如需使用 AI 功能，请配置 .env 中的 API 密钥"
