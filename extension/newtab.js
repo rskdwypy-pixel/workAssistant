@@ -6912,8 +6912,9 @@ const BugManager = {
       console.log('[BugManager] API 响应 success:', result.success);
 
       if (result.success) {
-        this.bugs = result.data || [];
-        console.log('[BugManager] 获取到的 Bug 数量:', this.bugs.length);
+        // 过滤掉已关闭的 Bug，只显示未确认、已激活、已解决三种状态
+        this.bugs = (result.data || []).filter(bug => bug.status !== 'closed');
+        console.log('[BugManager] 获取到的 Bug 数量:', this.bugs.length, '(已过滤 closed 状态)');
 
         // 详细打印每个 Bug 的信息
         this.bugs.forEach((bug, index) => {
@@ -6979,6 +6980,12 @@ const BugManager = {
     // 使用 for...of 循环以便使用 await
     for (let index = 0; index < this.bugs.length; index++) {
       const bug = this.bugs[index];
+
+      // 跳过已关闭的 Bug（双保险）
+      if (bug.status === 'closed') {
+        console.warn(`[BugManager] ⚠ 跳过已关闭的 Bug: ${bug.title}`);
+        continue;
+      }
       console.log(`[BugManager] 处理 Bug ${index + 1}:`, {
         id: bug.id,
         title: bug.title,
@@ -9417,8 +9424,8 @@ const BugManager = {
 
           if (updateResult.success) {
             Toast.success('Bug 已关闭');
-            // 更新前端 Bug 状态并重新渲染
-            await this.updateBugStatus(bugId, 'closed');
+            // 从列表中移除已关闭的 Bug
+            await this.removeBug(bugId);
             this.hideCloseModal();
             this.hideBugDetail(); // 同时关闭详情弹窗
           } else {
