@@ -9389,6 +9389,8 @@ const BugManager = {
       }
 
       // 调用 background.js 关闭 Bug
+      console.log('[BugManager] 开始关闭禅道 Bug:', bug.zentaoId);
+
       const response = await chrome.runtime.sendMessage({
         action: 'closeBugInZentao',
         baseUrl,
@@ -9396,9 +9398,12 @@ const BugManager = {
         comment
       });
 
+      console.log('[BugManager] 禅道关闭响应:', response);
+
       ProgressToast.hide();
 
       if (response && response.success) {
+        console.log('[BugManager] 禅道关闭成功，开始更新本地状态...');
         // 更新后端 Bug 状态为 closed
         try {
           const updateResp = await fetch(`${API_BASE_URL}/api/bug/${bugId}`, {
@@ -9408,6 +9413,8 @@ const BugManager = {
           });
           const updateResult = await updateResp.json();
 
+          console.log('[BugManager] 本地状态更新响应:', updateResult);
+
           if (updateResult.success) {
             Toast.success('Bug 已关闭');
             // 从列表中移除该 Bug
@@ -9415,13 +9422,15 @@ const BugManager = {
             this.hideCloseModal();
             this.hideBugDetail(); // 同时关闭详情弹窗
           } else {
+            console.error('[BugManager] 本地状态更新失败:', updateResult.error);
             Toast.warning('禅道已关闭，但本地状态更新失败');
           }
         } catch (updateErr) {
-          console.error('[BugManager] 更新本地状态失败:', updateErr);
+          console.error('[BugManager] 更新本地状态异常:', updateErr);
           Toast.warning('禅道已关闭，但本地状态更新失败');
         }
       } else {
+        console.error('[BugManager] 禅道关闭失败:', response);
         Toast.error('关闭失败: ' + (response?.reason || '未知错误'));
       }
     } catch (err) {

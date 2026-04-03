@@ -2730,16 +2730,21 @@ async function closeBugInZentao(params) {
     return { success: false, reason: 'no_zentao_tab' };
   }
 
+  console.log('[Background] 开始注入脚本到禅道标签页...');
+
   const results = await chrome.scripting.executeScript({
     target: { tabId: targetTab.id },
     func: (bugId, comment) => {
       return new Promise((resolve) => {
+        console.log('[Bug Close] 开始关闭 Bug:', bugId);
         const formData = new FormData();
         formData.append('status', 'closed');
         formData.append('comment', comment || '');
         formData.append('uid', Math.random().toString(36).substring(2, 14));
 
         const endpoint = `${window.location.origin}/zentao/bug-close-${bugId}.html?onlybody=yes`;
+        console.log('[Bug Close] 请求端点:', endpoint);
+
         fetch(endpoint, {
           method: 'POST',
           headers: {
@@ -2758,12 +2763,16 @@ async function closeBugInZentao(params) {
             resolve({ success: false, reason: 'http_error', status: r.status });
           }
         })
-        .catch(err => resolve({ success: false, reason: err.message }));
+        .catch(err => {
+          console.error('[Bug Close] ✗ 请求失败:', err);
+          resolve({ success: false, reason: err.message });
+        });
       });
     },
     args: [bugId, comment]
   });
 
+  console.log('[Background] 脚本注入完成，结果:', results[0].result);
   return results[0].result;
 }
 
