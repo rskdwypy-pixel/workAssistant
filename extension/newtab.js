@@ -7001,11 +7001,12 @@ const BugManager = {
       } else if (bug.status === 'activated') {
         activatedList.appendChild(card);
         activatedCount++;
-        console.log(`[BugManager] → Bug "${bug.title}" 渲染到已激活列`);
-      } else if (bug.status === 'closed') {
+        console.log(`[BugManager] → Bug "${bug.title}" 渲染到已确认列`);
+      } else if (bug.status === 'resolved' || bug.status === 'closed') {
+        // resolved 和 closed 状态都渲染到已解决列
         closedList.appendChild(card);
         closedCount++;
-        console.log(`[BugManager] → Bug "${bug.title}" 渲染到已关闭列`);
+        console.log(`[BugManager] → Bug "${bug.title}" 渲染到已解决列 (状态: ${bug.status})`);
       } else {
         console.log(`[BugManager] → Bug "${bug.title}" 状态未知: ${bug.status}`);
       }
@@ -7018,8 +7019,6 @@ const BugManager = {
       total: unconfirmedCount + activatedCount + closedCount
     });
     console.log('[BugManager] ========== renderBugs 结束 ==========');
-
-    // 更新计数
 
     // 更新计数
     document.getElementById('bugUnconfirmedListCount').textContent = unconfirmedCount;
@@ -9301,8 +9300,8 @@ const BugManager = {
 
       if (response && response.success) {
         Toast.success('Bug 已修复');
-        // 更新本地 Bug 状态和数据
-        await this.updateBugStatus(bugId, 'closed', {
+        // 更新本地 Bug 状态和数据（修复后状态为 resolved）
+        await this.updateBugStatus(bugId, 'resolved', {
           assignedTo,
           cc: [],  // 修复时没有抄送人字段
           comment,
@@ -9400,11 +9399,28 @@ const BugManager = {
       ProgressToast.hide();
 
       if (response && response.success) {
-        Toast.success('Bug 已关闭');
-        // 从列表中移除该 Bug
-        await this.removeBug(bugId);
-        this.hideCloseModal();
-        this.hideBugDetail(); // 同时关闭详情弹窗
+        // 更新后端 Bug 状态为 closed
+        try {
+          const updateResp = await fetch(`${API_BASE_URL}/api/bug/${bugId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'closed' })
+          });
+          const updateResult = await updateResp.json();
+
+          if (updateResult.success) {
+            Toast.success('Bug 已关闭');
+            // 从列表中移除该 Bug
+            await this.removeBug(bugId);
+            this.hideCloseModal();
+            this.hideBugDetail(); // 同时关闭详情弹窗
+          } else {
+            Toast.warning('禅道已关闭，但本地状态更新失败');
+          }
+        } catch (updateErr) {
+          console.error('[BugManager] 更新本地状态失败:', updateErr);
+          Toast.warning('禅道已关闭，但本地状态更新失败');
+        }
       } else {
         Toast.error('关闭失败: ' + (response?.reason || '未知错误'));
       }
