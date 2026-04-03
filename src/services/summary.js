@@ -7,6 +7,7 @@ import { sendEveningSummary } from '../utils/webhook.js';
 import { sendSystemNotification } from './reminder.js';
 import { v4 as uuidv4 } from 'uuid';
 import { getAllTasks } from './taskManager.js';
+import { getBugs } from './bugManager.js';
 
 let summaryTask = null;
 let weeklyTask = null;
@@ -76,12 +77,44 @@ async function eveningSummary() {
     const inProgressTasks = tasks.filter(t => t.status === 'in_progress');
     const doneTasks = tasks.filter(t => t.status === 'done');
 
+    // 获取今日 Bug 数据
+    let bugData = null;
+    try {
+      const bugs = await getBugs();
+      if (bugs && bugs.length > 0) {
+        // 只统计今天的 Bug（通过 createdAt 或 updatedAt 判断）
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const todayBugs = bugs.filter(b => {
+          const bugDate = new Date(b.createdAt || b.updatedAt);
+          return bugDate >= todayStart;
+        });
+
+        if (todayBugs.length > 0) {
+          // 统计 Bug 状态
+          const stats = {
+            unconfirmed: todayBugs.filter(b => b.status === 'unconfirmed').length,
+            activated: todayBugs.filter(b => b.status === 'activated').length,
+            resolved: todayBugs.filter(b => b.status === 'resolved').length,
+            closed: todayBugs.filter(b => b.status === 'closed').length
+          };
+
+          bugData = {
+            bugs: todayBugs,
+            stats: stats
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('[Summary] 获取 Bug 数据失败:', err.message);
+    }
+
     // 获取今日工时
     const todayHours = await readTodayWorkHours();
     const workTimeInfo = todayHours > 0 ? { hours: todayHours } : null;
 
     // AI生成日报
-    const { data: summary } = await generateSummary(todoTasks, inProgressTasks, doneTasks, 'daily', workTimeInfo);
+    const { data: summary } = await generateSummary(todoTasks, inProgressTasks, doneTasks, 'daily', workTimeInfo, bugData);
 
     // 保存历史
     const history = await readHistory();
@@ -285,10 +318,56 @@ async function generateReport(type, autoPush = false, date = null, workHours = n
   const inProgressTasks = tasks.filter(t => t.status === 'in_progress');
   const doneTasks = tasks.filter(t => t.status === 'done');
 
+  // 获取 Bug 数据
+  let bugData = null;
+  try {
+    const allBugs = await getBugs();
+    if (allBugs && allBugs.length > 0) {
+      // 根据报告类型过滤 Bug
+      let filteredBugs;
+      if (type === 'daily') {
+        // 日报：只统计今天的 Bug
+        const targetDate = summaryDateLabel;
+        filteredBugs = allBugs.filter(b => {
+          const bugDateStr = new Date(b.createdAt || b.updatedAt).toISOString().split('T')[0];
+          return bugDateStr === targetDate;
+        });
+      } else {
+        // 周报/月报：统计时间段内的 Bug
+        filteredBugs = allBugs.filter(b => {
+          const bugTime = new Date(b.createdAt || b.updatedAt).getTime();
+          return bugTime >= startMs;
+        });
+      }
+
+      if (filteredBugs.length > 0) {
+        // 统计 Bug 状态
+        const stats = {
+          unconfirmed: filteredBugs.filter(b => b.status === 'unconfirmed').length,
+          activated: filteredBugs.filter(b => b.status === 'activated').length,
+          resolved: filteredBugs.filter(b => b.status === 'resolved').length,
+          closed: filteredBugs.filter(b => b.status === 'closed').length
+        };
+
+        bugData = {
+          bugs: filteredBugs,
+          stats: stats
+        };
+
+        console.log(`[generateReport] ${type} Bug 数据:`, {
+          total: filteredBugs.length,
+          stats: stats
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[generateReport] 获取 Bug 数据失败:', err.message);
+  }
+
   // 构建工时信息（仅日报）
   const workTimeInfo = (type === 'daily' && workHours !== null && workHours > 0) ? { hours: workHours } : null;
 
-  const { data: summary } = await generateSummary(todoTasks, inProgressTasks, doneTasks, type, workTimeInfo);
+  const { data: summary } = await generateSummary(todoTasks, inProgressTasks, doneTasks, type, workTimeInfo, bugData);
 
   const history = await readHistory();
   if (!history.reports) history.reports = history.dailySummaries || [];
