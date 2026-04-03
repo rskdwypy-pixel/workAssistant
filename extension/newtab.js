@@ -6949,6 +6949,25 @@ const BugManager = {
     console.log('[BugManager] ========== renderBugs 开始 ==========');
     console.log('[BugManager] 待渲染的 Bug 数量:', this.bugs.length);
 
+    // 检查是否有重复的 Bug（通过 id 去重）
+    const uniqueBugs = [];
+    const seenIds = new Set();
+    for (const bug of this.bugs) {
+      if (!seenIds.has(bug.id)) {
+        seenIds.add(bug.id);
+        uniqueBugs.push(bug);
+      } else {
+        console.warn('[BugManager] ⚠ 发现重复 Bug:', bug.id, bug.title);
+      }
+    }
+    if (uniqueBugs.length !== this.bugs.length) {
+      console.error('[BugManager] ✗ 发现重复 Bug，已去重:', {
+        原始数量: this.bugs.length,
+        去重后数量: uniqueBugs.length
+      });
+      this.bugs = uniqueBugs;
+    }
+
     // 渲染 Bug 到各个列
     const unconfirmedList = document.getElementById('bugUnconfirmedList');
     const activatedList = document.getElementById('bugActivatedList');
@@ -9812,15 +9831,23 @@ window.testGetKanbanParams = async function(executionId, laneType = 'task', colu
 };
 
 // 在页面加载时初始化 Bug 管理器
-document.addEventListener('DOMContentLoaded', () => {
+// 初始化函数（只执行一次）
+let initialized = false;
+function initManagers() {
+  if (initialized) return;
+  initialized = true;
+
   BugManager.init();
   ExecutionFavorites.init();
   TabSwitcher.init();
-});
+}
 
 // 如果 DOM 已经加载完成，立即初始化
 if (document.readyState === 'complete' || document.readyState === 'interactive') {
-  BugManager.init();
-  ExecutionFavorites.init();
-  TabSwitcher.init();
+  initManagers();
+} else {
+  // 否则等待 DOMContentLoaded 事件
+  document.addEventListener('DOMContentLoaded', () => {
+    initManagers();
+  });
 }
