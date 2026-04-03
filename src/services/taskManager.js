@@ -12,9 +12,9 @@ async function getAllTasks(filters = {}) {
   // 去重：基于 zentaoId 或 id
   const taskMap = new Map();
   tasks.forEach(task => {
-    // 确保 zentaoId 是数字类型（如果存在）
-    if (task.zentaoId && typeof task.zentaoId === 'string') {
-      task.zentaoId = parseInt(task.zentaoId, 10);
+    // 统一 zentaoId 为 string 类型（如果存在）
+    if (task.zentaoId && typeof task.zentaoId !== 'string') {
+      task.zentaoId = String(task.zentaoId);
     }
     // 优先使用 zentaoId 去重（对于已同步到禅道的任务）
     // 如果没有 zentaoId，使用本地 id 去重
@@ -568,7 +568,9 @@ async function importZentaoTasks(zentaoTasks) {
     // 只对 type === 'task' 且有 zentaoId 的任务建立索引
     // 避免与 Bug 或其他类型的项冲突
     if (t.type === 'task' && t.zentaoId) {
-      existingTasksMap.set(t.zentaoId, t);
+      // 统一使用 string 类型的 zentaoId 作为 key，避免类型不一致导致去重失败
+      const key = String(t.zentaoId);
+      existingTasksMap.set(key, t);
     }
   });
 
@@ -579,7 +581,9 @@ async function importZentaoTasks(zentaoTasks) {
   for (const zentaoTask of zentaoTasks) {
     try {
       // O(1) lookup instead of O(n) find()
-      const existingTask = existingTasksMap.get(zentaoTask.zentaoId);
+      // 统一使用 string 类型的 zentaoId 作为 key
+      const key = String(zentaoTask.zentaoId);
+      const existingTask = existingTasksMap.get(key);
 
       if (existingTask) {
         // 更新现有任务
@@ -591,7 +595,7 @@ async function importZentaoTasks(zentaoTasks) {
           content: zentaoTask.title, // 禅道任务没有详细描述，使用标题
           status: zentaoTask.status,
           priority: zentaoTask.priority,
-          zentaoId: parseInt(zentaoTask.zentaoId, 10), // 确保是数字类型
+          zentaoId: String(zentaoTask.zentaoId), // 统一为 string 类型
           executionId: zentaoTask.executionId ? String(zentaoTask.executionId) : existingTask.executionId,
           executionName: zentaoTask.executionName || existingTask.executionName,
           projectName: zentaoTask.projectName || existingTask.projectName,
@@ -614,7 +618,7 @@ async function importZentaoTasks(zentaoTasks) {
           status: zentaoTask.status,
           priority: zentaoTask.priority,
           progress: zentaoTask.progress,
-          zentaoId: parseInt(zentaoTask.zentaoId, 10), // 确保是数字类型
+          zentaoId: String(zentaoTask.zentaoId), // 统一为 string 类型
           executionId: zentaoTask.executionId ? String(zentaoTask.executionId) : '',
           executionName: zentaoTask.executionName || '',
           projectName: zentaoTask.projectName || '',

@@ -1770,6 +1770,63 @@ router.get('/zentao/kanban/params', async (req, res) => {
 
 export default router;
 
+/**
+ * POST /api/tasks/cleanup-duplicates - 清理重复任务（zentaoId 类型不一致导致的重复）
+ */
+router.post('/tasks/cleanup-duplicates', async (req, res) => {
+  try {
+    const { readTasks, writeTasks } = await import('../utils/storage.js');
+    const data = await readTasks();
+    const tasks = data.tasks || [];
+
+    console.log('[Cleanup] ========== 清理重复任务 ==========');
+    console.log('[Cleanup] 原始任务数量:', tasks.length);
+
+    // 统一 zentaoId 为 string 类型
+    tasks.forEach(task => {
+      if (task.zentaoId && typeof task.zentaoId !== 'string') {
+        task.zentaoId = String(task.zentaoId);
+      }
+    });
+
+    // 按 zentaoId 去重（保留最新的）
+    const taskMap = new Map();
+    tasks.forEach(task => {
+      if (!task.zentaoId) {
+        // 没有 zentaoId 的任务，使用 id 作为 key
+        const key = task.id;
+        const existing = taskMap.get(key);
+        if (!existing || new Date(task.updatedAt || task.createdAt) > new Date(existing.updatedAt || existing.createdAt)) {
+          taskMap.set(key, task);
+        }
+      } else {
+        // 有 zentaoId 的任务，使用 zentaoId 作为 key
+        const key = task.zentaoId;
+        const existing = taskMap.get(key);
+        if (!existing || new Date(task.updatedAt || task.createdAt) > new Date(existing.updatedAt || existing.createdAt)) {
+          taskMap.set(key, task);
+        }
+      }
+    });
+
+    const cleanedTasks = Array.from(taskMap.values());
+    console.log('[Cleanup] 清理后任务数量:', cleanedTasks.length);
+    console.log('[Cleanup] 移除了', tasks.length - cleanedTasks.length, '个重复任务');
+
+    await writeTasks({ tasks: cleanedTasks });
+
+    res.json({
+      success: true,
+      message: `已清理 ${tasks.length - cleanedTasks.length} 个重复任务`,
+      before: tasks.length,
+      after: cleanedTasks.length
+    });
+  } catch (err) {
+    console.error('[Cleanup] 清理失败:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 /**
  * POST /api/test/weekly - 测试周报生成（手动触发）
