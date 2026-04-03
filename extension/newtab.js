@@ -9417,8 +9417,8 @@ const BugManager = {
 
           if (updateResult.success) {
             Toast.success('Bug 已关闭');
-            // 从列表中移除该 Bug
-            await this.removeBug(bugId);
+            // 更新前端 Bug 状态并重新渲染
+            await this.updateBugStatus(bugId, 'closed');
             this.hideCloseModal();
             this.hideBugDetail(); // 同时关闭详情弹窗
           } else {
