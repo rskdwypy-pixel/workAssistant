@@ -3187,7 +3187,7 @@ async function syncFromZentaoInBackground(config) {
               const progress = totalHours > 0 ? Math.round((consumedNum / totalHours) * 100) : 0;
 
               tasks.push({
-                zentaoId: parseInt(taskId),
+                zentaoId: String(taskId),  // 统一为 string 类型
                 title,
                 status: status === 'wait' ? 'todo' : 'in_progress',
                 priority,
@@ -3298,7 +3298,7 @@ async function syncFromZentaoInBackground(config) {
               const idInput = row.querySelector('input[name="bugIDList[]"]');
               if (!idInput) return;
 
-              const zentaoId = parseInt(idInput.value);
+              const zentaoId = String(idInput.value);  // 统一为 string 类型
 
               const titleLink = row.querySelector('.c-id + td.text-left a, td.text-left.nobr a');
               const title = titleLink?.getAttribute('title') || titleLink?.textContent?.trim() || '';
