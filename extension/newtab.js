@@ -4443,40 +4443,64 @@ const ZentaoBrowserClient = {
 
     try {
       // 通过 background.js 发起真正的浏览器原生登陆流程，因为只有 background 具备跨站操作和保存 Session 原生安全 Cookie 的特权
+      // 添加重试机制，处理 background service worker 启动延迟问题
       return new Promise((resolve) => {
-        chrome.runtime.sendMessage({
-          action: 'performZenTaoLogin',
-          url: this.getBaseUrl(),
-          username: this.config.username,
-          password: this.config.password
-        }, (response) => {
-          if (chrome.runtime.lastError) {
-            console.warn('[ZentaoBrowser] 后台通信失败:', chrome.runtime.lastError);
-            Toast.error('内部通信异常');
-            resolve(false);
-            return;
-          }
+        const maxRetries = 3;
+        let retryCount = 0;
 
-          if (response && response.success) {
-            this.sessionToken = response.token;
-            localStorage.setItem('zentao_sessionToken', this.sessionToken);
-            this.isLoggedIn = true;
-            if (this.config._isManualTest) Toast.success('禅道登录成功');
-            console.log('[ZentaoBrowser] 隐形标签页自动登录已同步完成');
-            resolve(true);
-          } else {
-            console.warn('[ZentaoBrowser] 后台注入登录失败:', response?.error);
-            if (this.config._isManualTest) Toast.error('禅道登录失败: ' + (response?.error || ''));
-            resolve(false);
-          }
-        });
+        const attemptLogin = () => {
+          console.log(`[ZentaoBrowser] 尝试登录 (${retryCount + 1}/${maxRetries})...`);
+
+          chrome.runtime.sendMessage({
+            action: 'performZenTaoLogin',
+            url: this.getBaseUrl(),
+            username: this.config.username,
+            password: this.config.password
+          }, (response) => {
+            if (chrome.runtime.lastError) {
+              console.warn(`[ZentaoBrowser] 后台通信失败 (尝试 ${retryCount + 1}):`, chrome.runtime.lastError);
+
+              // 如果还有重试次数，等待后重试
+              if (retryCount < maxRetries - 1) {
+                retryCount++;
+                console.log(`[ZentaoBrowser] 等待 500ms 后重试...`);
+                setTimeout(attemptLogin, 500);
+                return;
+              }
+
+              // 重试次数用完
+              console.error('[ZentaoBrowser] 后台通信失败，已达到最大重试次数');
+              Toast.error('内部通信异常，请重新加载扩展');
+              this._isLoggingIn = false;
+              resolve(false);
+              return;
+            }
+
+            if (response && response.success) {
+              this.sessionToken = response.token;
+              localStorage.setItem('zentao_sessionToken', this.sessionToken);
+              this.isLoggedIn = true;
+              if (this.config._isManualTest) Toast.success('禅道登录成功');
+              console.log('[ZentaoBrowser] 隐形标签页自动登录已同步完成');
+              this._isLoggingIn = false;
+              resolve(true);
+            } else {
+              console.warn('[ZentaoBrowser] 后台注入登录失败:', response?.error);
+              if (this.config._isManualTest) Toast.error('禅道登录失败: ' + (response?.error || ''));
+              this._isLoggingIn = false;
+              resolve(false);
+            }
+          });
+        };
+
+        // 开始首次尝试
+        attemptLogin();
       });
     } catch (err) {
       console.warn('[ZentaoBrowser] 登录异常:', err.message);
       if (this.config._isManualTest) Toast.error('禅道登录异常');
-      return false;
-    } finally {
       this._isLoggingIn = false;
+      return false;
     }
   },
 
@@ -9424,14 +9448,10 @@ const BugManager = {
         const baseUrl = configResult.data?.url?.replace(/\/$/, '');
 
         if (baseUrl) {
-          // 获取 regionId（如果有）
-          const regionId = bug.regionId || '0';
-
           const response = await chrome.runtime.sendMessage({
             action: 'deleteBugInZentao',
             baseUrl,
-            bugId: bug.zentaoId,
-            regionId
+            bugId: bug.zentaoId
           });
 
           if (!response || !response.success) {

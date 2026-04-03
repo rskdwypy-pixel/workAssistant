@@ -2684,8 +2684,8 @@ async function resolveBugInZentao(params) {
  * 删除 Bug
  */
 async function deleteBugInZentao(params) {
-  const { baseUrl, bugId, regionId } = params;
-  console.log('[Background] 删除 Bug:', { bugId, regionId });
+  const { baseUrl, bugId } = params;
+  console.log('[Background] 删除 Bug:', { bugId });
 
   const targetTab = await ensureZentaoTab(baseUrl);
   if (!targetTab) {
@@ -2694,9 +2694,9 @@ async function deleteBugInZentao(params) {
 
   const results = await chrome.scripting.executeScript({
     target: { tabId: targetTab.id },
-    func: (bugId, regionId) => {
+    func: (bugId) => {
       return new Promise((resolve) => {
-        const endpoint = `${window.location.origin}/zentao/kanban-deleteObjectCard-bug-${bugId}-${regionId}.html`;
+        const endpoint = `${window.location.origin}/zentao/bug-delete-${bugId}.html`;
         fetch(endpoint, {
           method: 'POST',
           headers: {
@@ -2712,7 +2712,7 @@ async function deleteBugInZentao(params) {
         .catch(err => resolve({ success: false, reason: err.message }));
       });
     },
-    args: [bugId, regionId || '0']
+    args: [bugId]
   });
 
   return results[0].result;
