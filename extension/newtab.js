@@ -570,10 +570,40 @@ function showConfirm(title, message, okText = '确定', cancelText = '取消') {
 
 // ==================== 今日工时追踪 ====================
 
+// 缓存当前日期，用于检测跨天
+let currentDateStr = null;
+
+/**
+ * 获取当前日期字符串（YYYY-MM-DD 格式）
+ */
+function getCurrentDateStr() {
+  const today = new Date();
+  return `${today.getFullYear()}_${today.getMonth() + 1}_${today.getDate()}`;
+}
+
+/**
+ * 检查日期是否变化，如果变化则重置工时
+ */
+function checkDateChange() {
+  const newDateStr = getCurrentDateStr();
+  if (currentDateStr && currentDateStr !== newDateStr) {
+    console.log('[WorkTime] 检测到日期变化，重置工时:', currentDateStr, '->', newDateStr);
+    // 日期已变化，重置工时
+    todayWorkHours = 0;
+    currentDateStr = newDateStr;
+    updateTodayWorkTimeDisplay();
+  } else if (!currentDateStr) {
+    // 首次初始化
+    currentDateStr = newDateStr;
+  }
+}
+
 /**
  * 获取今日工时存储键
  */
 function getTodayWorkTimeKey() {
+  // 先检查日期变化
+  checkDateChange();
   const today = new Date();
   return `workTime_${today.getFullYear()}_${today.getMonth() + 1}_${today.getDate()}`;
 }
@@ -635,6 +665,9 @@ function removeTaskWorkTime(taskId) {
  * 初始化今日工时（从本地存储加载）
  */
 function initTodayWorkTime() {
+  // 初始化当前日期
+  currentDateStr = getCurrentDateStr();
+
   const key = getTodayWorkTimeKey();
   const saved = localStorage.getItem(key);
   if (saved !== null) {
@@ -981,6 +1014,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 绑定事件
   bindEvents();
+
+  // 页面获得焦点时检查日期变化（防止跨天累积）
+  window.addEventListener('focus', () => {
+    checkDateChange();
+    updateTodayWorkTimeDisplay();
+  });
+
+  // 定时检查日期变化（每分钟检查一次）
+  setInterval(() => {
+    checkDateChange();
+    updateTodayWorkTimeDisplay();
+  }, 60 * 1000); // 每分钟检查一次
 });
 
 // 绑定事件
