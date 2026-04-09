@@ -1002,6 +1002,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.backupUI = backupUI; // 保存到全局以便后续使用
   }
 
+  // 初始化任务弹框
+  initTaskModal();
+
   // 初始化禅道同步状态显示
   ZentaoSync.init().catch(err => {
     console.error('[ZentaoSync] 初始化失败:', err);
@@ -2526,270 +2529,347 @@ function showEmptyState() {
 
 let isAddingTask = false;
 
-// 添加任务
-async function addTask() {
-  const input = document.getElementById('taskInput');
-  const btn = document.getElementById('addTaskBtn');
-  const content = input.value.trim();
+// ==================== 任务弹框管理 ====================
 
-  if (!content) {
-    Toast.warning('请输入任务内容');
+/**
+ * 初始化任务弹框事件监听器
+ */
+function initTaskModal() {
+  // 关闭按钮
+  const closeBtn = document.getElementById('closeTaskModal');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', hideTaskModal);
+  }
+
+  // 取消按钮
+  const cancelBtn = document.getElementById('cancelTaskBtn');
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', hideTaskModal);
+  }
+
+  // 点击弹框外部关闭
+  const taskModal = document.getElementById('taskModal');
+  if (taskModal) {
+    taskModal.addEventListener('click', (e) => {
+      if (e.target === taskModal) {
+        hideTaskModal();
+      }
+    });
+  }
+
+  // 提交按钮
+  const submitBtn = document.getElementById('submitTaskBtn');
+  if (submitBtn) {
+    submitBtn.addEventListener('click', submitTaskFromModal);
+  }
+
+  // ESC 键关闭
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const modal = document.getElementById('taskModal');
+      if (modal && modal.style.display === 'flex') {
+        hideTaskModal();
+      }
+    }
+  });
+
+  // 加载执行列表
+  loadExecutionOptions();
+
+  // 草稿自动保存
+  const taskInputs = ['taskTitle', 'taskDescription', 'taskExecution', 'taskPriority', 'taskStatus', 'taskProgress', 'taskDueDate'];
+  taskInputs.forEach(id => {
+    const input = document.getElementById(id);
+    if (input) {
+      input.addEventListener('input', saveTaskDraft);
+      input.addEventListener('change', saveTaskDraft);
+    }
+  });
+
+  // 加载草稿
+  loadTaskDraft();
+}
+
+/**
+ * 显示任务弹框
+ * @param {Object} initialData - 初始数据（可选）
+ */
+function showTaskModal(initialData = {}) {
+  const modal = document.getElementById('taskModal');
+  if (!modal) return;
+
+  // 加载执行列表
+  loadExecutionOptions();
+
+  // 如果有初始数据，填充表单
+  if (initialData.title) {
+    document.getElementById('taskTitle').value = initialData.title;
+  }
+  if (initialData.description) {
+    document.getElementById('taskDescription').value = initialData.description;
+  }
+  if (initialData.executionId) {
+    document.getElementById('taskExecution').value = initialData.executionId;
+  }
+  if (initialData.priority) {
+    document.getElementById('taskPriority').value = initialData.priority;
+  }
+  if (initialData.status) {
+    document.getElementById('taskStatus').value = initialData.status;
+  }
+  if (initialData.progress) {
+    document.getElementById('taskProgress').value = initialData.progress;
+  }
+  if (initialData.dueDate) {
+    document.getElementById('taskDueDate').value = initialData.dueDate;
+  }
+
+  modal.style.display = 'flex';
+
+  // 聚焦到标题输入框
+  setTimeout(() => {
+    const titleInput = document.getElementById('taskTitle');
+    if (titleInput && !initialData.title) {
+      titleInput.focus();
+    }
+  }, 100);
+}
+
+/**
+ * 隐藏任务弹框
+ */
+function hideTaskModal() {
+  const modal = document.getElementById('taskModal');
+  if (modal) {
+    modal.style.display = 'none';
+  }
+}
+
+/**
+ * 加载执行选项列表
+ */
+async function loadExecutionOptions() {
+  const select = document.getElementById('taskExecution');
+  if (!select) return;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/executions/favorites`);
+    const result = await response.json();
+
+    if (result.success && result.data) {
+      // 保留第一个选项（自动选择）
+      select.innerHTML = '<option value="">自动选择 (AI分析)</option>';
+
+      result.data.forEach(exec => {
+        const option = document.createElement('option');
+        option.value = exec.id;
+        option.textContent = `${exec.name}${exec.projectName ? ' (' + exec.projectName + ')' : ''}`;
+        select.appendChild(option);
+      });
+    }
+  } catch (err) {
+    console.error('[TaskModal] 加载执行列表失败:', err);
+  }
+}
+
+/**
+ * 从弹框提交任务
+ */
+async function submitTaskFromModal() {
+  const title = document.getElementById('taskTitle').value.trim();
+  const description = document.getElementById('taskDescription').value.trim();
+  const executionId = document.getElementById('taskExecution').value;
+  const priority = parseInt(document.getElementById('taskPriority').value) || 3;
+  const status = document.getElementById('taskStatus').value || 'todo';
+  const progress = parseInt(document.getElementById('taskProgress').value) || 0;
+  const dueDate = document.getElementById('taskDueDate').value;
+
+  // 表单验证
+  if (!title) {
+    Toast.warning('请输入任务标题');
     return;
   }
 
-  const originalVal = content;
-
   // 使用 ButtonStateManager 管理按钮状态
-  const restoreButton = ButtonStateManager.setLoading('addTaskBtn', {
-    loadingText: '添加中...',
-    disableInput: true,
-    inputId: 'taskInput'
+  const restoreButton = ButtonStateManager.setLoading('submitTaskBtn', {
+    loadingText: '提交中...'
   });
 
-  // 立即清空输入框，防止用户觉得自己没触发，并显示提示
-  input.value = '';
-  const originalPlaceholder = input.placeholder;
-  input.placeholder = '✨ AI 正在努力分析并提取任务属性，请稍候...';
-
-  // 浏览器端禅道任务 ID（如果成功创建）
-  let browserZentaoId = null;
-
   try {
-    // 获取选择的执行ID
-    const selectedExecutionId = ExecutionSelector.getSelectedExecution();
-    console.log('[AddTask] ========== 开始添加任务 ==========');
-    console.log('[AddTask] 任务内容:', content);
-    console.log('[AddTask] 用户选择的执行ID:', selectedExecutionId, selectedExecutionId ? '(手动选择)' : '(AI自动选择)');
+    // 构建任务内容（标题 + 描述）
+    const content = description ? `${title}\n\n${description}` : title;
 
-    // 如果是 AI 自动选择，显示可用的收藏执行列表
-    if (!selectedExecutionId) {
-      console.log('[AddTask] --- AI 推断项目过程 ---');
-      console.log('[AddTask] 可用的收藏执行列表:');
-      ExecutionSelector.favoriteExecutions.forEach((exec, index) => {
-        console.log(`[AddTask]   ${index + 1}. ID: ${exec.id} | ${exec.name} | 项目: ${exec.projectName || '未设置'}`);
-      });
-      console.log('[AddTask] --------------------------');
-    }
+    console.log('[TaskModal] ========== 开始创建任务 ==========');
+    console.log('[TaskModal] 任务标题:', title);
+    console.log('[TaskModal] 执行ID:', executionId || '(AI自动选择)');
+    console.log('[TaskModal] 优先级:', priority);
+    console.log('[TaskModal] 状态:', status);
+    console.log('[TaskModal] 进度:', progress);
 
-    // 第一步：调用服务端 API 获取 AI 提取的任务数据
+    // 调用 API 创建任务
     const response = await fetch(`${API_BASE_URL}/api/task`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         content,
-        executionId: selectedExecutionId
+        executionId: executionId || undefined,
+        priority,
+        status,
+        progress,
+        dueDate: dueDate || undefined
       })
     });
 
     const result = await response.json();
 
     if (result.success) {
-      // AI 提取的任务标题
-      const aiTitle = result.data?.title || result.data?.content || content;
-      console.log('[AddTask] ✓ AI 提取的标题:', aiTitle);
+      const task = result.data;
 
-      // 打印 AI 推断结果
-      const aiExecutionId = result.data?.executionId;
-      const aiExecutionName = result.data?.executionName;
-
-      // 获取执行类型（判断是否为看板）
-      let executionType = null;
-      if (aiExecutionId) {
-        executionType = ExecutionFavorites.getExecutionType(aiExecutionId);
-        console.log('[AddTask] 执行类型:', aiExecutionId, '=>', executionType);
-      }
-
-      if (!selectedExecutionId) {
-        // AI 自动选择模式
-        if (aiExecutionId) {
-          console.log('[AddTask] ✓✓✓ AI 推断成功 ✓✓✓');
-          console.log('[AddTask] 推断的执行ID:', aiExecutionId);
-          console.log('[AddTask] 推断的执行名称:', aiExecutionName || '未知');
-        } else {
-          console.log('[AddTask] ✗✗✗ AI 推断失败 ✗✗✗');
-          console.log('[AddTask] 原因: 无法从任务内容推断出所属项目');
-          console.log('[AddTask] 解决: 将使用默认执行');
-        }
-      }
-
-      // 详细打印后端返回的数据，便于调试
-      console.log('[AddTask] 后端返回的完整数据:', {
-        id: result.data?.id,
-        title: result.data?.title,
-        executionId: result.data?.executionId,
-        executionName: result.data?.executionName,
-        zentaoExecution: result.data?.zentaoExecution
-      });
-
-      // 第二步：尝试在浏览器端创建禅道任务（使用 AI 提取的标题和执行 ID）
+      // 如果需要，创建禅道任务
+      let browserZentaoId = null;
       try {
         await ZentaoBrowserClient.initConfig();
         if (ZentaoBrowserClient.isConfigured()) {
-          console.log('[AddTask] 尝试使用浏览器端创建禅道任务...');
-          console.log('[AddTask] AI 分析的执行 ID:', aiExecutionId, '类型:', typeof aiExecutionId);
+          console.log('[TaskModal] 尝试使用浏览器端创建禅道任务...');
 
-          ProgressToast.show('正在创建禅道任务...');
-
-          const zentaoResult = await ZentaoBrowserClient.createTask({
-            title: aiTitle,
-            content: content,
-            dueDate: null,
-            executionId: aiExecutionId,  // 传入 AI 分析的执行 ID
-            executionType: executionType  // 传入执行类型
+          const zentaoTaskId = await ZentaoBrowserClient.createTask({
+            execution: task.executionId,
+            title: task.title,
+            desc: task.content,
+            priority: priority
           });
 
-          console.log('[AddTask] 禅道创建结果:', zentaoResult);
+          if (zentaoTaskId) {
+            browserZentaoId = zentaoTaskId;
+            console.log('[TaskModal] ✓ 浏览器端创建禅道任务成功:', zentaoTaskId);
 
-          // 看板返回 cardId，普通任务返回 taskId
-          const zentaoObjectId = zentaoResult.taskId || zentaoResult.cardId;
-          if (zentaoResult.success && zentaoObjectId) {
-            browserZentaoId = zentaoObjectId;
-            console.log('[AddTask] 浏览器端创建成功:', executionType === 'kanban' ? '看板卡片' : '禅道任务', 'ID:', browserZentaoId);
-          } else if (zentaoResult.success && !zentaoObjectId) {
-            console.log('[AddTask] 创建成功但没有返回ID， responseData:', zentaoResult.responseData);
-            // 对于看板，可能创建成功但没有返回ID，可以跳过关联
-            console.log('[AddTask] 跳过禅道ID关联（看板卡片可能不返回ID）');
-          } else {
-            console.log('[AddTask] 浏览器端创建失败:', zentaoResult.reason);
+            // 更新本地任务的 zentaoId
+            const updateResponse = await fetch(`${API_BASE_URL}/api/task/${task.id}/zentao-id`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ zentaoId: browserZentaoId })
+            });
           }
-          ProgressToast.hide();
         }
       } catch (err) {
-        ProgressToast.hide();
-        console.log('[AddTask] 浏览器端创建禅道任务出错:', err.message);
+        console.warn('[TaskModal] 浏览器端创建禅道任务失败:', err.message);
       }
 
-      // 更新任务的 zentaoId（如果禅道端创建成功）
-      if (browserZentaoId) {
-        // 使用 AI 分析后的执行 ID，如果没有则使用全局配置
-        const executionId = aiExecutionId || ZentaoBrowserClient.config.createTaskUrl || '';
-        console.log('[AddTask] 使用的执行 ID:', executionId);
+      Toast.success('任务已创建');
+      clearTaskDraft();
+      hideTaskModal();
 
-        // 使用通用更新接口更新 zentaoId、zentaoExecution 和 executionType
-        const updateResp = await fetch(`${API_BASE_URL}/api/task/${result.data.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            zentaoId: browserZentaoId,
-            zentaoExecution: executionId,
-            executionType: executionType  // 存储执行类型，避免后续更新时需要再次查找
-          })
-        });
-        if (updateResp.ok) {
-          console.log('[AddTask] zentaoId、zentaoExecution 和 executionType 已保存到任务:', browserZentaoId, executionId, executionType);
-        } else {
-          console.warn('[AddTask] 保存 zentaoId 失败:', updateResp.status);
-        }
-      }
-
-      // 检查 AI 分析出的任务进度，如果有进度则同步到禅道
-      const taskProgress = result.data?.progress || 0;
-      if (browserZentaoId && taskProgress > 0) {
-        console.log('[AddTask] 任务有初始进度，准备同步到禅道:', taskProgress + '%');
-
-        // 获取执行ID和看板ID
-        const executionId = result.data?.executionId || ZentaoBrowserClient.config.createTaskUrl || '';
-        let kanbanId = null;
-        let executionType = null;
-        if (executionId) {
-          const execution = ExecutionSelector.executions.find(e => e.id === executionId) ||
-                            ExecutionSelector.favoriteExecutions.find(e => e.id === executionId);
-          if (execution) {
-            kanbanId = execution.kanbanId || execution.id;
-            executionType = execution.type;
-          }
-        }
-
-        // 准备默认值（当用户两个都没填时使用）
-        const defaultWork = taskProgress === 100 ? '任务完成' : `初始进度 ${taskProgress}%`;
-        const defaultConsumed = 1;  // 默认1小时
-
-        // 弹出填写工时对话框
-        const progressResult = await ProgressInputDialog.show(
-          taskProgress === 100 ? '完成任务' : '更新进度',
-          taskProgress === 100 ? '任务已完成，请填写消耗工时' : `任务初始进度为 ${taskProgress}%，请填写工时`,
-          '',           // placeholder 工作
-          '',           // placeholder 消耗工时
-          defaultWork,  // 默认工作（用户两个都没填时使用）
-          defaultConsumed  // 默认消耗工时
-        );
-
-        // 如果用户填写了工时，同步到禅道
-        if (progressResult !== null) {
-          const progressComment = progressResult.work;
-          const consumedTime = progressResult.consumed;
-
-          // 计算剩余工时
-          let leftTime = 0;
-          if (taskProgress > 0 && taskProgress < 100 && consumedTime > 0) {
-            leftTime = Math.round((consumedTime / (taskProgress / 100) - consumedTime) * 10) / 10;
-            if (leftTime < 0) leftTime = 0;
-          } else if (taskProgress === 100) {
-            leftTime = 0;
-          } else if (consumedTime > 0) {
-            leftTime = consumedTime * 2;
-          }
-
-          // 更新禅道任务状态
-          let status = 'todo';
-          if (taskProgress > 0 && taskProgress < 100) status = 'in_progress';
-          else if (taskProgress === 100) status = 'done';
-
-          try {
-            await ZentaoBrowserClient.updateTaskStatus(browserZentaoId, status, taskProgress, {
-              executionType,
-              kanbanId
-            });
-            console.log('[AddTask] 禅道任务状态已更新为:', status);
-
-            // 记录工时到禅道
-            if (consumedTime > 0 || progressComment) {
-              const effortResult = await ZentaoBrowserClient.recordEffort(browserZentaoId, progressComment, consumedTime, leftTime, kanbanId, taskProgress);
-              if (effortResult.success) {
-                console.log('[AddTask] 禅道工时已记录');
-
-                // 更新本地任务的累计消耗工时
-                await fetch(`${API_BASE_URL}/api/task/${result.data.id}`, {
-                  method: 'PUT',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ totalConsumedTime: consumedTime })
-                });
-              }
-            }
-          } catch (err) {
-            console.log('[AddTask] 同步进度到禅道失败:', err.message);
-          }
-        }
-      }
-
+      // 重新加载任务列表
       await loadTasks();
       await loadCalendar();
-
-      // 显示操作结果
-      if (result.isNew === false) {
-        Toast.info(result.message || '已更新现有任务');
-      } else {
-        Toast.success('任务已添加' + (browserZentaoId ? ' (已同步至禅道)' : ''));
-      }
-
-      // 触发同步
-      triggerSync();
     } else {
-      input.value = originalVal; // 失败时恢复原来的输入
-      const errorMsg = typeof result.error === 'object'
-        ? JSON.stringify(result.error)
-        : result.error || '未知错误';
-      Toast.error('添加失败: ' + errorMsg);
+      Toast.error(result.error || '创建任务失败');
     }
   } catch (err) {
-    input.value = originalVal; // 失败时恢复原来的输入
-    Toast.error('添加失败，请确保后端服务正在运行');
-    console.warn('添加任务错误:', err);
+    console.error('[TaskModal] 创建任务失败:', err);
+    Toast.error('创建任务失败: ' + err.message);
   } finally {
     restoreButton();
-    input.placeholder = originalPlaceholder;
-    input.focus();
   }
+}
+
+/**
+ * 保存任务草稿
+ */
+function saveTaskDraft() {
+  const draft = {
+    title: document.getElementById('taskTitle').value,
+    description: document.getElementById('taskDescription').value,
+    executionId: document.getElementById('taskExecution').value,
+    priority: document.getElementById('taskPriority').value,
+    status: document.getElementById('taskStatus').value,
+    progress: document.getElementById('taskProgress').value,
+    dueDate: document.getElementById('taskDueDate').value,
+    savedAt: new Date().toISOString()
+  };
+
+  localStorage.setItem('taskDraft', JSON.stringify(draft));
+
+  const savedEl = document.getElementById('taskDraftSaved');
+  if (savedEl) {
+    savedEl.style.display = 'inline';
+    setTimeout(() => {
+      savedEl.style.display = 'none';
+    }, 2000);
+  }
+}
+
+/**
+ * 加载任务草稿
+ */
+function loadTaskDraft() {
+  const draftStr = localStorage.getItem('taskDraft');
+  if (!draftStr) return;
+
+  try {
+    const draft = JSON.parse(draftStr);
+
+    // 检查草稿是否过期（24小时）
+    const savedAt = new Date(draft.savedAt);
+    const now = new Date();
+    const hoursDiff = (now - savedAt) / (1000 * 60 * 60);
+
+    if (hoursDiff > 24) {
+      clearTaskDraft();
+      return;
+    }
+
+    // 填充表单
+    if (draft.title) document.getElementById('taskTitle').value = draft.title;
+    if (draft.description) document.getElementById('taskDescription').value = draft.description;
+    if (draft.executionId) document.getElementById('taskExecution').value = draft.executionId;
+    if (draft.priority) document.getElementById('taskPriority').value = draft.priority;
+    if (draft.status) document.getElementById('taskStatus').value = draft.status;
+    if (draft.progress) document.getElementById('taskProgress').value = draft.progress;
+    if (draft.dueDate) document.getElementById('taskDueDate').value = draft.dueDate;
+  } catch (err) {
+    console.error('[TaskModal] 加载草稿失败:', err);
+    clearTaskDraft();
+  }
+}
+
+/**
+ * 清除任务草稿
+ */
+function clearTaskDraft() {
+  localStorage.removeItem('taskDraft');
+}
+
+// ==================== 原有任务添加逻辑 ====================
+
+// 添加任务
+async function addTask() {
+  const input = document.getElementById('taskInput');
+  const content = input.value.trim();
+
+  if (!content) {
+    // 如果输入框为空，直接打开空白弹框
+    showTaskModal();
+    return;
+  }
+
+  // 获取选择的执行ID
+  const selectedExecutionId = ExecutionSelector.getSelectedExecution();
+  console.log('[AddTask] ========== 打开任务弹框 ==========');
+  console.log('[AddTask] 任务内容:', content);
+  console.log('[AddTask] 用户选择的执行ID:', selectedExecutionId || '(AI自动选择)');
+
+  // 清空输入框
+  input.value = '';
+
+  // 打开任务弹框并预填数据
+  const initialData = {
+    title: content.split('\n')[0], // 第一行作为标题
+    description: content.includes('\n') ? content.substring(content.indexOf('\n') + 1) : '',
+    executionId: selectedExecutionId || ''
+  };
+
+  showTaskModal(initialData);
 }
 
 // 更新任务进度

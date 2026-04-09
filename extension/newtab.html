@@ -380,6 +380,67 @@
     </main>
   </div>
 
+  <!-- 任务创建弹窗 -->
+  <div id="taskModal" class="modal">
+    <div class="modal-content" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3>📝 添加任务</h3>
+        <button class="close-btn" id="closeTaskModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">所属执行</label>
+          <select id="taskExecution" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+            <option value="">自动选择 (AI分析)</option>
+            <!-- 动态填充执行列表 -->
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">任务标题 *</label>
+          <input type="text" id="taskTitle" class="form-control" placeholder="简要描述任务" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">任务描述</label>
+          <textarea id="taskDescription" rows="4" class="form-control" placeholder="详细描述任务内容..." style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical;"></textarea>
+        </div>
+        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="flex: 1;">
+            <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">优先级</label>
+            <select id="taskPriority" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+              <option value="1">1 - 高</option>
+              <option value="2">2 - 中高</option>
+              <option value="3" selected>3 - 中</option>
+              <option value="4">4 - 低</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">状态</label>
+            <select id="taskStatus" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+              <option value="todo" selected>待办</option>
+              <option value="in_progress">进行中</option>
+              <option value="done">已完成</option>
+            </select>
+          </div>
+        </div>
+        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="flex: 1;">
+            <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">进度 (%)</label>
+            <input type="number" id="taskProgress" class="form-control" min="0" max="100" value="0" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">截止时间</label>
+            <input type="datetime-local" id="taskDueDate" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+          </div>
+        </div>
+        <div style="display: flex; justify-content: flex-end; align-items: center; gap: 12px;">
+          <span id="taskDraftSaved" style="font-size: 12px; color: var(--text-muted); display: none; white-space: nowrap;">草稿已自动保存</span>
+          <button id="cancelTaskBtn" class="btn-secondary">取消</button>
+          <button id="submitTaskBtn" class="btn-primary">提交任务</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Bug 创建弹窗 -->
   <div id="bugModal" class="modal">
     <div class="modal-content" style="max-width: 600px;">
