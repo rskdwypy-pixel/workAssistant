@@ -2925,10 +2925,13 @@ async function submitTaskFromModal() {
           console.log('[TaskModal] 用户选择的执行ID:', executionId);
 
           const zentaoTaskId = await ZentaoBrowserClient.createTask({
-            execution: executionId || task.executionId,  // 优先使用用户选择的执行ID
+            executionId: executionId || task.executionId,  // 优先使用用户选择的执行ID
             title: task.title,
             desc: task.content,
-            priority: priority
+            priority: priority,
+            assignedTo: assignees.length > 0 ? assignees[0] : undefined,  // 主指派人（禅道只支持单个）
+            cc: ccUsers.length > 0 ? ccUsers : undefined,  // 抄送人列表
+            dueDate: dueDate || undefined  // 截止日期
           });
 
           if (zentaoTaskId) {

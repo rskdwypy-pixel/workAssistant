@@ -1298,7 +1298,14 @@ async function executeInZentaoPage(params) {
         formData.append('execution', executionId);
         formData.append('type', 'test');
         formData.append('module', '0');
-        formData.append('assignedTo[]', username);
+
+        // Use assignedTo from taskData if provided, otherwise fallback to username
+        if (taskData.assignedTo) {
+          formData.append('assignedTo[]', taskData.assignedTo);
+        } else {
+          formData.append('assignedTo[]', username);
+        }
+
         formData.append('teamMember', '');
         formData.append('mode', 'linear');
         formData.append('status', 'wait');
@@ -1308,13 +1315,20 @@ async function executeInZentaoPage(params) {
         formData.append('storyEstimate', '');
         formData.append('storyDesc', '');
         formData.append('storyPri', '');
-        formData.append('pri', '3');
+        formData.append('pri', String(taskData.priority || 3));
         formData.append('estimate', '');
         formData.append('desc', taskData.content || taskData.title);
         formData.append('estStarted', '');
         formData.append('deadline', taskData.dueDate || '');
         formData.append('after', 'toTaskList');
         formData.append('uid', uid);
+
+        // Add CC users if provided
+        if (taskData.cc && Array.isArray(taskData.cc) && taskData.cc.length > 0) {
+          taskData.cc.forEach((ccAccount) => {
+            formData.append('cc[]', ccAccount);
+          });
+        }
 
         for (let i = 0; i < 5; i++) {
           formData.append('team[]', '');
