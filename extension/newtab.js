@@ -2594,12 +2594,12 @@ function initTaskModal() {
  * 显示任务弹框
  * @param {Object} initialData - 初始数据（可选）
  */
-function showTaskModal(initialData = {}) {
+async function showTaskModal(initialData = {}) {
   const modal = document.getElementById('taskModal');
   if (!modal) return;
 
-  // 加载执行列表
-  loadExecutionOptions();
+  // 先加载执行列表（等待完成）
+  await loadExecutionOptions();
 
   // 如果有初始数据，填充表单
   if (initialData.title) {
@@ -2610,6 +2610,7 @@ function showTaskModal(initialData = {}) {
   }
   if (initialData.executionId) {
     document.getElementById('taskExecution').value = initialData.executionId;
+    console.log('[TaskModal] 预选执行ID:', initialData.executionId);
   }
   if (initialData.priority) {
     document.getElementById('taskPriority').value = initialData.priority;
@@ -2849,7 +2850,7 @@ async function addTask() {
 
   if (!content) {
     // 如果输入框为空，直接打开空白弹框
-    showTaskModal();
+    await showTaskModal();
     return;
   }
 
@@ -2903,8 +2904,8 @@ async function addTask() {
 
       console.log('[AddTask] 预填数据:', initialData);
 
-      // 打开任务弹框并预填 AI 分析的数据
-      showTaskModal(initialData);
+      // 打开任务弹框并预填 AI 分析的数据（等待执行列表加载完成）
+      await showTaskModal(initialData);
     } else {
       // AI 分析失败，打开弹框但只预填原始内容
       console.warn('[AddTask] AI 分析失败，使用原始内容');
@@ -2916,7 +2917,7 @@ async function addTask() {
         executionId: selectedExecutionId || ''
       };
 
-      showTaskModal(initialData);
+      await showTaskModal(initialData);
     }
   } catch (err) {
     console.error('[AddTask] AI 分析出错:', err);
@@ -2929,7 +2930,7 @@ async function addTask() {
       executionId: selectedExecutionId || ''
     };
 
-    showTaskModal(initialData);
+    await showTaskModal(initialData);
   } finally {
     // 恢复按钮和输入框状态
     restoreButton();
