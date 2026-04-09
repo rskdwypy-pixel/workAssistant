@@ -1003,7 +1003,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // 初始化任务弹框
-  initTaskModal();
+  await initTaskModal();
 
   // 初始化禅道同步状态显示
   ZentaoSync.init().catch(err => {
@@ -2534,7 +2534,7 @@ let isAddingTask = false;
 /**
  * 初始化任务弹框事件监听器
  */
-function initTaskModal() {
+async function initTaskModal() {
   // 关闭按钮
   const closeBtn = document.getElementById('closeTaskModal');
   if (closeBtn) {
@@ -2574,10 +2574,13 @@ function initTaskModal() {
   });
 
   // 加载执行列表
-  loadExecutionOptions();
+  await loadExecutionOptions();
+
+  // 初始化指派人和抄送人的 multi-select
+  await initTaskUserSelects();
 
   // 草稿自动保存
-  const taskInputs = ['taskTitle', 'taskDescription', 'taskExecution', 'taskPriority', 'taskStatus', 'taskProgress', 'taskDueDate'];
+  const taskInputs = ['taskTitle', 'taskDescription', 'taskExecution', 'taskPriority', 'taskProgress', 'taskDueDate'];
   taskInputs.forEach(id => {
     const input = document.getElementById(id);
     if (input) {
@@ -2615,9 +2618,7 @@ async function showTaskModal(initialData = {}) {
   if (initialData.priority) {
     document.getElementById('taskPriority').value = initialData.priority;
   }
-  if (initialData.status) {
-    document.getElementById('taskStatus').value = initialData.status;
-  }
+  // 移除状态的预填，状态将由进度自动计算
   if (initialData.progress) {
     document.getElementById('taskProgress').value = initialData.progress;
   }
@@ -2674,6 +2675,180 @@ async function loadExecutionOptions() {
 }
 
 /**
+ * 初始化任务弹框的指派人和抄送人多选组件
+ */
+async function initTaskUserSelects() {
+  // 获取用户列表
+  let users = await ZentaoBrowserClient.getUsers();
+  console.log('[TaskModal] 缓存的用户数量:', users ? Object.keys(users).length : 0);
+
+  if (!users || Object.keys(users).length === 0) {
+    console.warn('[TaskModal] 用户列表未加载，尝试从禅道加载...');
+    try {
+      await ZentaoBrowserClient.loadUsersFromTeamPage();
+      users = await ZentaoBrowserClient.getUsers();
+      console.log('[TaskModal] 从禅道加载后的用户数量:', users ? Object.keys(users).length : 0);
+    } catch (err) {
+      console.warn('[TaskModal] 无法加载用户列表:', err);
+    }
+  }
+
+  if (!users || Object.keys(users).length === 0) {
+    console.warn('[TaskModal] 无法获取用户列表，跳过用户选择器初始化');
+    return;
+  }
+
+  // 初始化指派人多选组件
+  initTaskMultiSelect('taskAssignee', users);
+
+  // 初始化抄送人多选组件
+  initTaskMultiSelect('taskCc', users);
+
+  console.log('[TaskModal] 用户选择器初始化完成');
+}
+
+/**
+ * 初始化任务弹框的多选组件（指派人/抄送人）
+ * @param {string} fieldId - 字段 ID（taskAssignee 或 taskCc）
+ * @param {Object} users - 用户列表 {account: name}
+ */
+function initTaskMultiSelect(fieldId, users) {
+  const container = document.getElementById(`${fieldId}Container`);
+  const display = document.getElementById(`${fieldId}Display`);
+  const dropdown = document.getElementById(`${fieldId}Dropdown`);
+  const optionsContainer = document.getElementById(`${fieldId}Options`);
+
+  if (!container || !display || !dropdown || !optionsContainer) {
+    console.error(`[TaskModal] 多选组件元素不存在: ${fieldId}`);
+    return;
+  }
+
+  // 存储选中的用户
+  const selectedUsers = new Set();
+
+  // 生成用户选项
+  const renderOptions = () => {
+    optionsContainer.innerHTML = '';
+
+    if (Object.keys(users).length === 0) {
+      optionsContainer.innerHTML = '<div class="multi-select-no-data">暂无用户数据</div>';
+      return;
+    }
+
+    Object.entries(users).forEach(([account, name]) => {
+      const option = document.createElement('div');
+      option.className = 'multi-select-option';
+      if (selectedUsers.has(account)) {
+        option.classList.add('selected');
+      }
+
+      option.innerHTML = `
+        <div class="multi-select-option-text">
+          ${name}
+          <span class="multi-select-option-account">(${account})</span>
+        </div>
+        <div class="multi-select-option-check"></div>
+      `;
+
+      option.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (selectedUsers.has(account)) {
+          selectedUsers.delete(account);
+          option.classList.remove('selected');
+        } else {
+          selectedUsers.add(account);
+          option.classList.add('selected');
+        }
+        updateTaskMultiSelectDisplay(fieldId, selectedUsers, users);
+      });
+
+      optionsContainer.appendChild(option);
+    });
+  };
+
+  // 更新显示区域
+  updateTaskMultiSelectDisplay(fieldId, selectedUsers, users);
+
+  // 点击显示/隐藏下拉列表
+  display.addEventListener('click', (e) => {
+    if (!e.target.closest('.multi-select-tag-remove')) {
+      const isVisible = dropdown.style.display !== 'none';
+      dropdown.style.display = isVisible ? 'none' : 'block';
+      display.classList.toggle('active', !isVisible);
+    }
+  });
+
+  // 点击其他地方关闭下拉
+  document.addEventListener('click', (e) => {
+    if (!container.contains(e.target)) {
+      dropdown.style.display = 'none';
+      display.classList.remove('active');
+    }
+  });
+
+  // 初始化渲染选项
+  renderOptions();
+
+  // 保存引用以便后续访问
+  container._selectedUsers = selectedUsers;
+  container._users = users;
+}
+
+/**
+ * 更新任务弹框多选组件的显示区域
+ * @param {string} fieldId - 字段 ID
+ * @param {Set} selectedUsers - 选中的用户集合
+ * @param {Object} users - 用户列表
+ */
+function updateTaskMultiSelectDisplay(fieldId, selectedUsers, users) {
+  const display = document.getElementById(`${fieldId}Display`);
+  if (!display) return;
+
+  if (selectedUsers.size === 0) {
+    display.innerHTML = '<span class="multi-select-placeholder">请选择用户</span>';
+  } else {
+    display.innerHTML = '';
+    selectedUsers.forEach(account => {
+      const name = users[account] || account;
+      const tag = document.createElement('span');
+      tag.className = 'multi-select-tag';
+      tag.innerHTML = `
+        ${name}
+        <span class="multi-select-tag-remove" data-account="${account}">×</span>
+      `;
+
+      // 点击移除标签
+      tag.querySelector('.multi-select-tag-remove').addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectedUsers.delete(account);
+        updateTaskMultiSelectDisplay(fieldId, selectedUsers, users);
+
+        // 更新选项的选中状态
+        const container = document.getElementById(`${fieldId}Container`);
+        if (container && container._selectedUsers) {
+          container._selectedUsers = selectedUsers;
+        }
+      });
+
+      display.appendChild(tag);
+    });
+  }
+}
+
+/**
+ * 获取任务弹框中选中的用户
+ * @param {string} fieldId - 字段 ID（taskAssignee 或 taskCc）
+ * @returns {Array} 选中的用户账号列表
+ */
+function getTaskSelectedUsers(fieldId) {
+  const container = document.getElementById(`${fieldId}Container`);
+  if (!container || !container._selectedUsers) {
+    return [];
+  }
+  return Array.from(container._selectedUsers);
+}
+
+/**
  * 从弹框提交任务
  */
 async function submitTaskFromModal() {
@@ -2681,9 +2856,20 @@ async function submitTaskFromModal() {
   const description = document.getElementById('taskDescription').value.trim();
   const executionId = document.getElementById('taskExecution').value;
   const priority = parseInt(document.getElementById('taskPriority').value) || 3;
-  const status = document.getElementById('taskStatus').value || 'todo';
   const progress = parseInt(document.getElementById('taskProgress').value) || 0;
   const dueDate = document.getElementById('taskDueDate').value;
+
+  // 根据进度自动计算状态
+  let status = 'todo';
+  if (progress > 0 && progress < 100) {
+    status = 'in_progress';
+  } else if (progress === 100) {
+    status = 'done';
+  }
+
+  // 获取指派人和抄送人
+  const assignees = getTaskSelectedUsers('taskAssignee');
+  const ccUsers = getTaskSelectedUsers('taskCc');
 
   // 表单验证
   if (!title) {
@@ -2704,8 +2890,10 @@ async function submitTaskFromModal() {
     console.log('[TaskModal] 任务标题:', title);
     console.log('[TaskModal] 执行ID:', executionId || '(AI自动选择)');
     console.log('[TaskModal] 优先级:', priority);
-    console.log('[TaskModal] 状态:', status);
     console.log('[TaskModal] 进度:', progress);
+    console.log('[TaskModal] 状态（自动计算）:', status);
+    console.log('[TaskModal] 指派人:', assignees);
+    console.log('[TaskModal] 抄送人:', ccUsers);
 
     // 调用 API 创建任务
     const response = await fetch(`${API_BASE_URL}/api/task`, {
@@ -2717,7 +2905,9 @@ async function submitTaskFromModal() {
         priority,
         status,
         progress,
-        dueDate: dueDate || undefined
+        dueDate: dueDate || undefined,
+        assignees: assignees.length > 0 ? assignees : undefined,
+        cc: ccUsers.length > 0 ? ccUsers : undefined
       })
     });
 
