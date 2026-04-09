@@ -16,6 +16,10 @@ async function getAllTasks(filters = {}) {
     if (task.zentaoId && typeof task.zentaoId !== 'string') {
       task.zentaoId = String(task.zentaoId);
     }
+    // 修复缺失或无效的 type 字段
+    if (task.type !== 'task' && task.type !== 'bug') {
+      task.type = 'task';
+    }
     // 优先使用 zentaoId 去重（对于已同步到禅道的任务）
     // 如果没有 zentaoId，使用本地 id 去重
     const key = task.zentaoId || task.id;
@@ -265,6 +269,7 @@ async function addOrUpdateTask(content, options = {}) {
   // 创建新任务
   const task = {
     id: uuidv4(),
+    type: 'task',  // 明确设置类型为 'task'
     content: content,
     ...newTask,
     zentaoId: options.zentaoId || null,        // 支持传入浏览器端已创建的 zentaoId
@@ -565,12 +570,23 @@ async function importZentaoTasks(zentaoTasks) {
   // Build a Map for O(1) lookups instead of O(n²) find() in loop
   const existingTasksMap = new Map();
   tasks.forEach(t => {
-    // 只对 type === 'task' 且有 zentaoId 的任务建立索引
-    // 避免与 Bug 或其他类型的项冲突
-    if (t.type === 'task' && t.zentaoId) {
-      // 统一使用 string 类型的 zentaoId 作为 key，避免类型不一致导致去重失败
+    // 对有 zentaoId 的任务建立索引（包括 type 为空或无效的任务）
+    // 优先匹配 type === 'task' 的任务，但也兼容历史数据中 type 缺失的情况
+    if (t.zentaoId) {
       const key = String(t.zentaoId);
-      existingTasksMap.set(key, t);
+      // 如果已存在相同 key 的任务，优先保留 type === 'task' 的
+      const existing = existingTasksMap.get(key);
+      if (!existing || (existing.type !== 'task' && t.type === 'task')) {
+        existingTasksMap.set(key, t);
+        // 如果任务的 type 无效，修复为 'task'
+        if (t.type !== 'task') {
+          console.log('[TaskManager] 🔧 修复任务类型:', t.id, t.zentaoId, t.title);
+          t.type = 'task';
+        }
+      } else if (existing && t.type === 'task' && existing.type !== 'task') {
+        // 用新的 type === 'task' 的任务替换旧的无效任务
+        existingTasksMap.set(key, t);
+      }
     }
   });
 
