@@ -2922,17 +2922,26 @@ async function submitTaskFromModal() {
         await ZentaoBrowserClient.initConfig();
         if (ZentaoBrowserClient.isConfigured()) {
           console.log('[TaskModal] 尝试使用浏览器端创建禅道任务...');
+          console.log('[TaskModal] 用户选择的执行ID:', executionId);
 
           const zentaoTaskId = await ZentaoBrowserClient.createTask({
-            execution: task.executionId,
+            execution: executionId || task.executionId,  // 优先使用用户选择的执行ID
             title: task.title,
             desc: task.content,
             priority: priority
           });
 
           if (zentaoTaskId) {
-            browserZentaoId = zentaoTaskId;
-            console.log('[TaskModal] ✓ 浏览器端创建禅道任务成功:', zentaoTaskId);
+            // zentaoTaskId 可能是对象 {success: true, taskId: xxx} 或直接的数字
+            if (typeof zentaoTaskId === 'object' && zentaoTaskId.taskId) {
+              browserZentaoId = zentaoTaskId.taskId;
+            } else if (typeof zentaoTaskId === 'number') {
+              browserZentaoId = zentaoTaskId;
+            } else {
+              browserZentaoId = zentaoTaskId;
+            }
+
+            console.log('[TaskModal] ✓ 浏览器端创建禅道任务成功，提取到的ID:', browserZentaoId);
 
             // 更新本地任务的 zentaoId
             const updateResponse = await fetch(`${API_BASE_URL}/api/task/${task.id}`, {
