@@ -2855,21 +2855,86 @@ async function addTask() {
 
   // 获取选择的执行ID
   const selectedExecutionId = ExecutionSelector.getSelectedExecution();
-  console.log('[AddTask] ========== 打开任务弹框 ==========');
+  console.log('[AddTask] ========== 开始 AI 分析 ==========');
   console.log('[AddTask] 任务内容:', content);
   console.log('[AddTask] 用户选择的执行ID:', selectedExecutionId || '(AI自动选择)');
 
-  // 清空输入框
+  // 立即清空输入框
   input.value = '';
 
-  // 打开任务弹框并预填数据
-  const initialData = {
-    title: content.split('\n')[0], // 第一行作为标题
-    description: content.includes('\n') ? content.substring(content.indexOf('\n') + 1) : '',
-    executionId: selectedExecutionId || ''
-  };
+  // 显示加载提示
+  const originalPlaceholder = input.placeholder;
+  input.placeholder = '✨ AI 正在分析任务，请稍候...';
 
-  showTaskModal(initialData);
+  // 使用 ButtonStateManager 管理输入框状态
+  const restoreButton = ButtonStateManager.setLoading('addTaskBtn', {
+    loadingText: '分析中...',
+    disableInput: true,
+    inputId: 'taskInput'
+  });
+
+  try {
+    // 调用 AI 分析 API
+    const response = await fetch(`${API_BASE_URL}/api/task`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content,
+        executionId: selectedExecutionId || undefined
+      })
+    });
+
+    const result = await response.json();
+
+    if (result.success && result.data) {
+      console.log('[AddTask] ✓ AI 分析成功');
+      console.log('[AddTask] AI 分析结果:', result.data);
+
+      // 构建 initialData，包含 AI 分析的所有数据
+      const initialData = {
+        title: result.data.title || content.split('\n')[0],
+        description: result.data.content || (content.includes('\n') ? content.substring(content.indexOf('\n') + 1) : ''),
+        executionId: result.data.executionId || selectedExecutionId || '',
+        priority: result.data.priority || 3,
+        status: result.data.status || 'todo',
+        progress: result.data.progress || 0,
+        dueDate: result.data.dueDate || ''
+      };
+
+      console.log('[AddTask] 预填数据:', initialData);
+
+      // 打开任务弹框并预填 AI 分析的数据
+      showTaskModal(initialData);
+    } else {
+      // AI 分析失败，打开弹框但只预填原始内容
+      console.warn('[AddTask] AI 分析失败，使用原始内容');
+      Toast.warning('AI 分析失败，请手动填写');
+
+      const initialData = {
+        title: content.split('\n')[0],
+        description: content.includes('\n') ? content.substring(content.indexOf('\n') + 1) : '',
+        executionId: selectedExecutionId || ''
+      };
+
+      showTaskModal(initialData);
+    }
+  } catch (err) {
+    console.error('[AddTask] AI 分析出错:', err);
+    Toast.error('AI 分析失败，请手动填写');
+
+    // 出错时也打开弹框，但只预填原始内容
+    const initialData = {
+      title: content.split('\n')[0],
+      description: content.includes('\n') ? content.substring(content.indexOf('\n') + 1) : '',
+      executionId: selectedExecutionId || ''
+    };
+
+    showTaskModal(initialData);
+  } finally {
+    // 恢复按钮和输入框状态
+    restoreButton();
+    input.placeholder = originalPlaceholder;
+  }
 }
 
 // 更新任务进度
