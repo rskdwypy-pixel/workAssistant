@@ -573,16 +573,23 @@ async function importZentaoTasks(zentaoTasks) {
     // 对有 zentaoId 的任务建立索引（包括 type 为空或无效的任务）
     // 优先匹配 type === 'task' 的任务，但也兼容历史数据中 type 缺失的情况
     if (t.zentaoId) {
-      const key = String(t.zentaoId);
+      // 立即修复 zentaoId 类型为字符串
+      if (typeof t.zentaoId !== 'string') {
+        console.log('[TaskManager] 🔧 修复 zentaoId 类型:', t.id, t.zentaoId, '=>', String(t.zentaoId));
+        t.zentaoId = String(t.zentaoId);
+      }
+
+      // 立即修复 type 为 'task'（如果缺失或无效）
+      if (t.type !== 'task') {
+        console.log('[TaskManager] 🔧 修复任务类型:', t.id, t.zentaoId, t.title);
+        t.type = 'task';
+      }
+
+      const key = t.zentaoId; // 已确保是字符串
       // 如果已存在相同 key 的任务，优先保留 type === 'task' 的
       const existing = existingTasksMap.get(key);
       if (!existing || (existing.type !== 'task' && t.type === 'task')) {
         existingTasksMap.set(key, t);
-        // 如果任务的 type 无效，修复为 'task'
-        if (t.type !== 'task') {
-          console.log('[TaskManager] 🔧 修复任务类型:', t.id, t.zentaoId, t.title);
-          t.type = 'task';
-        }
       } else if (existing && t.type === 'task' && existing.type !== 'task') {
         // 用新的 type === 'task' 的任务替换旧的无效任务
         existingTasksMap.set(key, t);
@@ -653,6 +660,40 @@ async function importZentaoTasks(zentaoTasks) {
     }
   }
 
+  // 清理重复的 zentaoId 任务（保留最新的）
+  // 使用两步法：先标记要删除的任务ID，再统一删除
+  const zentaoIdMap = new Map();
+  const tasksToDelete = new Set();
+
+  tasks.forEach(t => {
+    if (t.zentaoId) {
+      const key = String(t.zentaoId);
+      const existing = zentaoIdMap.get(key);
+      if (!existing) {
+        zentaoIdMap.set(key, t);
+      } else {
+        // 保留 updatedAt 更新的任务，如果相同则保留 createdAt 更新的
+        const existingTime = new Date(existing.updatedAt || existing.createdAt).getTime();
+        const currentTime = new Date(t.updatedAt || t.createdAt).getTime();
+        if (currentTime > existingTime) {
+          console.log('[TaskManager] 🗑️  删除重复任务（旧）:', existing.id, existing.zentaoId, existing.title);
+          tasksToDelete.add(existing.id);
+          zentaoIdMap.set(key, t);
+        } else {
+          console.log('[TaskManager] 🗑️  删除重复任务（旧）:', t.id, t.zentaoId, t.title);
+          tasksToDelete.add(t.id);
+        }
+      }
+    }
+  });
+
+  // 统一删除标记的任务
+  if (tasksToDelete.size > 0) {
+    const beforeCount = tasks.length;
+    tasks = tasks.filter(t => !tasksToDelete.has(t.id));
+    console.log('[TaskManager] ✅ 清理了', beforeCount - tasks.length, '个重复任务');
+  }
+
   // 保存到文件
   await writeTasks({ tasks });
 
@@ -660,6 +701,78 @@ async function importZentaoTasks(zentaoTasks) {
   console.log('[TaskManager] 新增:', added, '更新:', updated, '跳过:', skipped);
 
   return { added, updated, skipped };
+}
+
+/**
+ * 清理重复的禅道任务和Bug
+ * - 删除 zentaoId 相同的任务（保留最新的）
+ * - 删除 zentaoId 相同的 Bug（保留最新的）
+ * - 修复所有任务的 zentaoId 类型为字符串
+ * - 修复所有任务的 type 字段
+ */
+async function cleanupZentaoDuplicates() {
+  console.log('[TaskManager] ========== 开始清理重复任务 ==========');
+
+  const data = await readTasks();
+  const tasks = data.tasks || [];
+
+  let tasksRemoved = 0;
+  let bugsRemoved = 0;
+
+  // 清理重复的任务（type === 'task' 或 type === null/undefined 且有 zentaoId）
+  const taskMap = new Map();
+  const tasksToDelete = new Set();
+
+  tasks.forEach(t => {
+    // 修复 zentaoId 类型
+    if (t.zentaoId && typeof t.zentaoId !== 'string') {
+      console.log('[TaskManager] 🔧 修复 zentaoId 类型:', t.id, t.zentaoId, '=>', String(t.zentaoId));
+      t.zentaoId = String(t.zentaoId);
+    }
+
+    // 只处理有 zentaoId 的任务
+    if (t.zentaoId) {
+      const key = String(t.zentaoId);
+      const existing = taskMap.get(key);
+
+      if (!existing) {
+        taskMap.set(key, t);
+      } else {
+        // 比较更新时间，保留最新的
+        const existingTime = new Date(existing.updatedAt || existing.createdAt).getTime();
+        const currentTime = new Date(t.updatedAt || t.createdAt).getTime();
+
+        if (currentTime > existingTime) {
+          console.log('[TaskManager] 🗑️  标记删除旧任务:', existing.id, existing.zentaoId, existing.title);
+          tasksToDelete.add(existing.id);
+          taskMap.set(key, t);
+        } else {
+          console.log('[TaskManager] 🗑️  标记删除旧任务:', t.id, t.zentaoId, t.title);
+          tasksToDelete.add(t.id);
+        }
+      }
+    }
+  });
+
+  // 删除标记的任务
+  if (tasksToDelete.size > 0) {
+    const beforeCount = tasks.length;
+    const filteredTasks = tasks.filter(t => !tasksToDelete.has(t.id));
+    tasksRemoved = beforeCount - filteredTasks.length;
+
+    // 更新数组
+    tasks.length = 0;
+    tasks.push(...filteredTasks);
+
+    console.log('[TaskManager] ✅ 清理了', tasksRemoved, '个重复任务');
+  }
+
+  // 保存到文件
+  await writeTasks({ tasks });
+
+  console.log('[TaskManager] ========== 清理完成 ==========');
+
+  return { tasksRemoved, bugsRemoved };
 }
 
 export {
@@ -676,5 +789,6 @@ export {
   getTaskStats,
   getCalendarData,
   batchUpdateTasks,
-  importZentaoTasks
+  importZentaoTasks,
+  cleanupZentaoDuplicates
 };

@@ -1694,6 +1694,27 @@ router.post('/zentao/sync-tasks', async (req, res) => {
 });
 
 /**
+ * POST /api/zentao/cleanup-duplicates - 清理重复的禅道任务和Bug
+ */
+router.post('/zentao/cleanup-duplicates', async (req, res) => {
+  try {
+    const { cleanupZentaoDuplicates } = await import('../services/taskManager.js');
+    const result = await cleanupZentaoDuplicates();
+
+    res.json({
+      success: true,
+      data: result,
+      message: `清理完成: 删除了 ${result.tasksRemoved} 个重复任务和 ${result.bugsRemoved} 个重复Bug`
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+});
+
+/**
  * POST /api/zentao/sync-bugs - 从禅道同步Bug到本地
  */
 router.post('/zentao/sync-bugs', async (req, res) => {
