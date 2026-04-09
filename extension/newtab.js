@@ -2536,19 +2536,19 @@ let isAddingTask = false;
  */
 async function initTaskModal() {
   // 关闭按钮
-  const closeBtn = document.getElementById('closeTaskModal');
+  const closeBtn = document.getElementById('closeTaskCreateModal');
   if (closeBtn) {
     closeBtn.addEventListener('click', hideTaskModal);
   }
 
   // 取消按钮
-  const cancelBtn = document.getElementById('cancelTaskBtn');
+  const cancelBtn = document.getElementById('cancelTaskCreateBtn');
   if (cancelBtn) {
     cancelBtn.addEventListener('click', hideTaskModal);
   }
 
   // 点击弹框外部关闭
-  const taskModal = document.getElementById('taskModal');
+  const taskModal = document.getElementById('taskCreateModal');
   if (taskModal) {
     taskModal.addEventListener('click', (e) => {
       if (e.target === taskModal) {
@@ -2558,7 +2558,7 @@ async function initTaskModal() {
   }
 
   // 提交按钮
-  const submitBtn = document.getElementById('submitTaskBtn');
+  const submitBtn = document.getElementById('submitTaskCreateBtn');
   if (submitBtn) {
     submitBtn.addEventListener('click', submitTaskFromModal);
   }
@@ -2566,7 +2566,7 @@ async function initTaskModal() {
   // ESC 键关闭
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      const modal = document.getElementById('taskModal');
+      const modal = document.getElementById('taskCreateModal');
       if (modal && modal.style.display === 'flex') {
         hideTaskModal();
       }
@@ -2598,7 +2598,7 @@ async function initTaskModal() {
  * @param {Object} initialData - 初始数据（可选）
  */
 async function showTaskModal(initialData = {}) {
-  const modal = document.getElementById('taskModal');
+  const modal = document.getElementById('taskCreateModal');
   if (!modal) return;
 
   // 先加载执行列表（等待完成）
@@ -2641,7 +2641,7 @@ async function showTaskModal(initialData = {}) {
  * 隐藏任务弹框
  */
 function hideTaskModal() {
-  const modal = document.getElementById('taskModal');
+  const modal = document.getElementById('taskCreateModal');
   if (modal) {
     modal.style.display = 'none';
   }
@@ -2878,7 +2878,7 @@ async function submitTaskFromModal() {
   }
 
   // 使用 ButtonStateManager 管理按钮状态
-  const restoreButton = ButtonStateManager.setLoading('submitTaskBtn', {
+  const restoreButton = ButtonStateManager.setLoading('submitTaskCreateBtn', {
     loadingText: '提交中...'
   });
 
@@ -3037,6 +3037,15 @@ function clearTaskDraft() {
 async function addTask() {
   const input = document.getElementById('taskInput');
   const content = input.value.trim();
+
+  // 检查任务弹框是否已经打开
+  const taskModal = document.getElementById('taskCreateModal');
+  if (taskModal && taskModal.style.display === 'flex') {
+    // 如果弹框已打开，关闭它并取消添加
+    console.log('[AddTask] 任务弹框已打开，取消添加');
+    hideTaskModal();
+    return;
+  }
 
   if (!content) {
     // 如果输入框为空，直接打开空白弹框
