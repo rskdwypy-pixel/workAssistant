@@ -2935,7 +2935,7 @@ async function submitTaskFromModal() {
             console.log('[TaskModal] ✓ 浏览器端创建禅道任务成功:', zentaoTaskId);
 
             // 更新本地任务的 zentaoId
-            const updateResponse = await fetch(`${API_BASE_URL}/api/task/${task.id}/zentao-id`, {
+            const updateResponse = await fetch(`${API_BASE_URL}/api/task/${task.id}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ zentaoId: browserZentaoId })
