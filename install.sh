@@ -563,6 +563,9 @@ if [[ $config_zentao =~ ^[Yy]$ ]]; then
 
     echo ""
     echo -e "${GREEN}✓ 禅道配置已保存${NC}"
+    echo ""
+    echo -e "${YELLOW}⚠️  注意：配置已写入 .env 文件${NC}"
+    echo -e "${YELLOW}   如果服务正在运行，需要在步骤8中重启服务才能生效${NC}"
 else
     echo -e "${YELLOW}⊘ 跳过禅道配置${NC}"
     echo -e "${YELLOW}  提示: 稍后可在扩展设置中配置${NC}"
@@ -703,11 +706,15 @@ echo -e "${BOLD}[8/9]${NC} 启动后端服务..."
 
 # 检查端口是否被占用
 PORT=3721
+SERVICE_NEEDS_RESTART=false
+
 if lsof -ti :$PORT > /dev/null 2>&1; then
-    echo -e "${YELLOW}⚠️  端口 $PORT 已被占用${NC}"
-    read -p "是否停止现有服务并启动? (y/N): " -n 1 -r
+    echo -e "${YELLOW}⚠️  检测到服务正在运行${NC}"
+    echo -e "${YELLOW}   配置文件已更新，需要重启服务以加载新配置${NC}"
+    echo ""
+    read -p "是否重启服务？[Y/n]: " -n 1 -r
     echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
         echo "正在停止现有服务..."
         if [ -f "stop.sh" ]; then
             bash stop.sh
@@ -715,11 +722,13 @@ if lsof -ti :$PORT > /dev/null 2>&1; then
             pkill -f "node.*src/index.js" 2>/dev/null || true
         fi
         sleep 2
+        SERVICE_NEEDS_RESTART=true
     else
-        echo -e "${YELLOW}操作已取消${NC}"
+        echo -e "${YELLOW}⚠️  跳过重启，新配置将在下次手动启动服务时生效${NC}"
         echo ""
-        echo -e "${BLUE}💡 如需手动启动服务，请运行: ./start.sh${NC}"
-        exit 0
+        echo -e "${BLUE}💡 手动重启服务: ./stop.sh && ./start.sh${NC}"
+        echo ""
+        read -p "按 Enter 继续..."
     fi
 fi
 
