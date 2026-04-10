@@ -33,7 +33,10 @@ const config = {
   ai: {
     apiKey: process.env.OPENAI_API_KEY || '',
     baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
-    model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo'
+    // 推荐使用 gpt-4o-mini 以获得最佳性能和成本平衡
+    // gpt-4o-mini 支持 Structured Outputs，输出更稳定，速度更快，成本更低
+    // 如果使用旧模型（如 gpt-3.5-turbo），将自动降级到 JSON mode
+    model: process.env.OPENAI_MODEL || 'gpt-4o-mini'
   },
 
   // 服务配置

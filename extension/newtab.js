@@ -713,15 +713,19 @@ async function updateTodayWorkTime(hours) {
 
 /**
  * 初始化时同步工时到后端
+ * 优先使用后端数据（后端是真实数据源）
  */
 async function syncWorkHoursToBackend() {
   try {
     const res = await fetch(`${API_BASE_URL}/api/workHours`);
     if (res.ok) {
       const data = await res.json();
-      if (data.success && data.data.hours > 0 && todayWorkHours === 0) {
-        // 后端有工时数据但本地没有，使用后端数据
-        todayWorkHours = data.data.hours;
+      if (data.success) {
+        // 后端有工时数据，始终使用后端数据作为真实数据源
+        const backendHours = data.data.hours || 0;
+        console.log(`[WorkTime] 从后端加载工时: ${backendHours} 小时`);
+
+        todayWorkHours = backendHours;
         const key = getTodayWorkTimeKey();
         localStorage.setItem(key, todayWorkHours.toString());
         updateTodayWorkTimeDisplay();
@@ -729,6 +733,7 @@ async function syncWorkHoursToBackend() {
     }
   } catch (err) {
     console.log('[WorkTime] 获取后端工时失败:', err.message);
+    // 失败时使用本地缓存数据
   }
 }
 

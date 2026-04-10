@@ -134,6 +134,7 @@ async function readTodayWorkHours() {
 
 /**
  * 保存今日工时
+ * 注意：前端已经处理了累加逻辑，这里直接覆盖即可
  */
 async function saveTodayWorkHours(hours) {
   const history = await readHistory();
@@ -141,10 +142,10 @@ async function saveTodayWorkHours(hours) {
     history.dailyWorkHours = {};
   }
   const today = new Date().toISOString().split('T')[0];
-  // 累加工时而不是覆盖
-  const currentHours = history.dailyWorkHours[today] || 0;
-  history.dailyWorkHours[today] = currentHours + hours;
+  // 直接覆盖工时（前端已经处理了累加逻辑）
+  history.dailyWorkHours[today] = hours;
   await writeHistory(history);
+  console.log(`[Storage] 今日工时已保存: ${hours} 小时`);
   return true;
 }
 
