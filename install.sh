@@ -224,10 +224,60 @@ echo -e "${BOLD}[2/9]${NC} 安装项目依赖..."
 if [ ! -d "node_modules" ]; then
     echo "正在安装 npm 依赖..."
     npm install
+
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}❌ 依赖安装失败${NC}"
+        echo ""
+        echo "可能的原因："
+        echo "  1. 网络连接问题"
+        echo "  2. npm registry 访问受限"
+        echo "  3. Node.js 版本过低"
+        echo ""
+        echo "解决方案："
+        echo "  1. 检查网络连接"
+        echo "  2. 使用淘宝镜像: npm config set registry https://registry.npmmirror.com"
+        echo "  3. 清理缓存重试: npm cache clean --force && npm install"
+        exit 1
+    fi
     echo -e "${GREEN}✓ 依赖安装完成${NC}"
 else
-    echo -e "${GREEN}✓ 依赖已安装${NC}"
+    echo -e "${GREEN}✓ 依赖目录已存在${NC}"
 fi
+
+# 验证关键依赖是否正确安装
+echo ""
+echo "验证关键依赖..."
+CRITICAL_DEPS=("express" "cors" "dotenv" "uuid")
+MISSING_DEPS=()
+
+for dep in "${CRITICAL_DEPS[@]}"; do
+    if [ ! -d "node_modules/$dep" ]; then
+        MISSING_DEPS+=("$dep")
+    fi
+done
+
+if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
+    echo -e "${YELLOW}⚠️  检测到关键依赖缺失: ${MISSING_DEPS[*]}${NC}"
+    echo "正在重新安装依赖..."
+    rm -rf node_modules package-lock.json
+    npm install
+
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}❌ 依赖重新安装失败${NC}"
+        echo ""
+        echo "手动安装步骤："
+        echo "  1. 清理缓存: npm cache clean --force"
+        echo "  2. 删除依赖: rm -rf node_modules package-lock.json"
+        echo "  3. 重新安装: npm install"
+        echo ""
+        echo "如果仍然失败，请尝试："
+        echo "  - 使用淘宝镜像: npm config set registry https://registry.npmmirror.com"
+        echo "  - 检查 Node.js 版本: node -v (需要 >= 14.0.0)"
+        exit 1
+    fi
+fi
+
+echo -e "${GREEN}✓ 关键依赖验证通过${NC}"
 
 # ==================== 步骤3: 配置文件 ====================
 echo ""
