@@ -24,6 +24,11 @@ mkdir -p "$(dirname "$LOG_FILE")"
 if [ ! -d "node_modules" ]; then
     echo -e "${YELLOW}📦 安装依赖...${NC}"
     npm install --cache /tmp/npm-cache
+elif [ ! -d "node_modules/express" ]; then
+    echo -e "${YELLOW}⚠️  检测到依赖不完整，重新安装...${NC}"
+    echo -e "${RED}💡 提示: 如果是首次安装，请先运行 ./install.sh${NC}"
+    rm -rf node_modules package-lock.json
+    npm install --cache /tmp/npm-cache
 fi
 
 # 检查.env配置

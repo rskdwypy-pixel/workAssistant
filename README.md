@@ -61,6 +61,9 @@
 
 ## 🚀 快速开始
 
+### ⚠️ 重要提示
+**首次使用必须先运行安装脚本！** 直接运行 `start.sh` 会因依赖未安装而报错。
+
 ### 一键安装（推荐）
 
 #### Windows
@@ -97,6 +100,24 @@ source ~/.zshrc
 
 # Linux
 source ~/.bashrc
+```
+
+### 🔧 手动安装（如果一键安装失败）
+
+#### 1. 安装依赖
+```bash
+npm install
+```
+
+#### 2. 创建配置文件
+```bash
+cp .env.example .env
+# 编辑 .env 文件，配置你的 API Key
+```
+
+#### 3. 启动服务
+```bash
+./start.sh
 ```
 
 ### 手动安装
@@ -513,6 +534,122 @@ which wa          # 应该显示 ~/bin/wa
 
 # 4. 如果 ~/bin 不存在，重新运行安装脚本
 ./install.sh
+```
+
+## 🔧 故障排除
+
+### 问题 1: 服务启动失败，报错 "Cannot find package express"
+
+**错误信息:**
+```
+Error: Cannot find package '/path/to/node_modules/express/index.js'
+```
+
+**原因:**
+- 依赖未安装或安装不完整
+- 直接运行了 `start.sh` 而没有先运行 `install.sh`
+
+**解决:**
+```bash
+# 方案 1: 重新安装依赖（推荐）
+rm -rf node_modules package-lock.json
+npm install
+
+# 方案 2: 运行安装脚本
+./install.sh
+
+# 然后再启动服务
+./start.sh
+```
+
+### 问题 2: wa 命令不存在
+
+**错误信息:**
+```bash
+wa: command not found
+```
+
+**原因:**
+- PATH 环境变量未生效
+- ~/bin 目录未创建
+
+**解决:**
+```bash
+# 1. 重新加载 PATH
+source ~/.zshrc    # Mac
+source ~/.bashrc   # Linux
+
+# 2. 如果还不行，手动添加到 PATH
+export PATH="$HOME/bin:$PATH"
+
+# 3. 验证命令是否可用
+which wa          # 应该显示 ~/bin/wa
+
+# 4. 如果 ~/bin 不存在，重新运行安装脚本
+./install.sh
+```
+
+### 问题 3: 端口被占用
+
+**错误信息:**
+```
+Error: listen EADDRINUSE: address already in use :::3721
+```
+
+**解决:**
+```bash
+# 方案 1: 使用停止脚本
+./stop.sh
+
+# 方案 2: 手动杀死进程
+lsof -ti :3721 | xargs kill -9
+
+# 方案 3: 使用 walog 查看是否有其他服务在运行
+walog
+```
+
+### 问题 4: npm install 失败
+
+**常见原因:**
+- Node.js 版本过低（需要 >= 18.0.0）
+- 网络问题导致下载失败
+- npm 缓存损坏
+
+**解决:**
+```bash
+# 1. 检查 Node.js 版本
+node -v  # 应该 >= v18.0.0
+
+# 2. 清理 npm 缓存
+npm cache clean --force
+
+# 3. 使用淘宝镜像（如果网络有问题）
+npm config set registry https://registry.npmmirror.com
+
+# 4. 重新安装
+npm install
+```
+
+### 问题 5: AI 分析失败
+
+**可能原因:**
+- API Key 未配置或配置错误
+- 网络连接问题
+- API 服务异常
+
+**解决:**
+```bash
+# 1. 检查 .env 配置
+cat .env | grep API_KEY
+
+# 2. 确保已配置有效的 API Key
+# 编辑 .env 文件，配置 OPENAI_API_KEY
+
+# 3. 检查网络连接
+curl https://open.bigmodel.cn/api/paas/v4/
+
+# 4. 查看服务日志了解详细错误
+walog
 ```
 
 ## 📝 更新日志
