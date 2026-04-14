@@ -10318,6 +10318,14 @@ const BugManager = {
         const baseUrl = configResult.data?.url?.replace(/\/$/, '');
 
         if (baseUrl) {
+          console.log('[BugManager] 准备删除Bug，Bug数据:', {
+            id: bug.id,
+            title: bug.title,
+            zentaoId: bug.zentaoId,
+            executionId: bug.executionId,
+            projectId: bug.projectId
+          });
+
           const response = await chrome.runtime.sendMessage({
             action: 'deleteBugInZentao',
             baseUrl,

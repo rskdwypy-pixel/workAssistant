@@ -2712,7 +2712,8 @@ async function resolveBugInZentao(params) {
  */
 async function deleteBugInZentao(params) {
   const { baseUrl, bugId, executionId } = params;
-  console.log('[Background] 删除 Bug:', { bugId, executionId });
+  console.log('[Background] 删除 Bug - 接收到的参数:', { baseUrl, bugId, executionId });
+  console.log('[Background] 删除 Bug - 完整params对象:', JSON.stringify(params));
 
   // 判断是否是看板类型的执行
   let kanbanId = undefined;
@@ -2733,6 +2734,30 @@ async function deleteBugInZentao(params) {
   if (!targetTab) {
     return { success: false, reason: 'no_zentao_tab' };
   }
+
+  // 先导航到Bug详情页
+  const bugDetailUrl = `${baseUrl}/zentao/bug-view-${bugId}.html`;
+  console.log('[Background] 导航到Bug详情页:', bugDetailUrl);
+  await chrome.tabs.update(targetTab.id, { url: bugDetailUrl });
+
+  // 等待页面加载完成
+  await new Promise(resolve => {
+    const listener = (tabId, changeInfo) => {
+      if (tabId === targetTab.id && changeInfo.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(listener);
+        setTimeout(resolve, 500); // 额外等待确保页面稳定
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+
+    // 超时保护
+    setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, 10000);
+  });
+
+  console.log('[Background] Bug详情页已加载，执行删除操作');
 
   const results = await chrome.scripting.executeScript({
     target: { tabId: targetTab.id },
