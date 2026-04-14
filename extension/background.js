@@ -2766,14 +2766,13 @@ async function deleteBugInZentao(params) {
         console.log('[Bug Delete] 开始删除 Bug:', bugId);
         console.log('[Bug Delete] 当前页面 URL:', window.location.href);
 
-        const endpoint = `${window.location.origin}/zentao/bug-delete-${bugId}.html`;
+        // 禅道的删除确认页面 URL 格式：bug-delete-{id}-yes-.html
+        const endpoint = `${window.location.origin}/zentao/bug-delete-${bugId}-yes-.html`;
         console.log('[Bug Delete] 删除端点:', endpoint);
 
+        // 使用 GET 请求访问删除确认页面
         fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'X-Requested-With': 'XMLHttpRequest'
-          }
+          method: 'GET'
         })
         .then(async r => {
           console.log('[Bug Delete] HTTP 状态:', r.status);
