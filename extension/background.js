@@ -3573,13 +3573,24 @@ async function syncFromZentaoInBackground(config) {
           bug.assignedTo = bugDetail.assignedTo;
           bug.assignedDate = bugDetail.assignedDate;
           bug.cc = bugDetail.cc;
+          // 合并执行和项目信息（重要：用于删除Bug时判断kanbanId）
+          if (bugDetail.executionId) {
+            bug.executionId = bugDetail.executionId;
+            bug.executionName = bugDetail.executionName || '';
+          }
+          if (bugDetail.projectId) {
+            bug.projectId = bugDetail.projectId;
+            bug.projectName = bugDetail.projectName || '';
+          }
 
           console.log(`[Background] ✓ Bug ${bug.zentaoId} 详情获取完成，包含:`, {
             steps: bug.steps.substring(0, 50),
             historyCount: bug.history.length,
             assignedTo: bug.assignedTo,
             assignedDate: bug.assignedDate,
-            cc: bug.cc
+            cc: bug.cc,
+            executionId: bug.executionId,
+            projectId: bug.projectId
           });
         } catch (err) {
           console.error(`[Background] ✗ Bug ${bug.zentaoId} 详情获取失败:`, err);
@@ -3589,6 +3600,11 @@ async function syncFromZentaoInBackground(config) {
           bug.assignedTo = '';
           bug.assignedDate = '';
           bug.cc = '';
+          // 确保 executionId 和 projectId 字段存在（即使为 null）
+          if (!bug.executionId) bug.executionId = null;
+          if (!bug.projectId) bug.projectId = null;
+          if (!bug.executionName) bug.executionName = '';
+          if (!bug.projectName) bug.projectName = '';
         }
 
         // 添加延迟避免请求过快（从500ms减少到100ms）
@@ -3976,7 +3992,11 @@ async function fetchBugDetail(baseUrl, bugId) {
         history: [],
         assignedTo: '',
         assignedDate: '',
-        cc: ''
+        cc: '',
+        executionId: null,
+        executionName: '',
+        projectId: null,
+        projectName: ''
       };
 
       try {
@@ -4045,6 +4065,32 @@ async function fetchBugDetail(baseUrl, bugId) {
             } else if (thText === '抄送给') {
               result.cc = tdText;
               console.log('[Bug Detail] 抄送人:', result.cc);
+            } else if (thText === '所属执行' || thText === '执行') {
+              // 提取执行ID和名称
+              const executionLink = td.querySelector('a');
+              if (executionLink) {
+                const href = executionLink.getAttribute('href') || '';
+                const text = executionLink.textContent?.trim() || '';
+                const match = href.match(/execution-(?:view|task|kanban)-(\d+)\.html/);
+                if (match) {
+                  result.executionId = parseInt(match[1]);
+                  result.executionName = text;
+                  console.log('[Bug Detail] 执行:', result.executionId, result.executionName);
+                }
+              }
+            } else if (thText === '所属项目' || thText === '项目') {
+              // 提取项目ID和名称
+              const projectLink = td.querySelector('a');
+              if (projectLink) {
+                const href = projectLink.getAttribute('href') || '';
+                const text = projectLink.textContent?.trim() || '';
+                const match = href.match(/project-(?:index|view|task)-(\d+)\.html/);
+                if (match) {
+                  result.projectId = parseInt(match[1]);
+                  result.projectName = text;
+                  console.log('[Bug Detail] 项目:', result.projectId, result.projectName);
+                }
+              }
             }
           });
         }
