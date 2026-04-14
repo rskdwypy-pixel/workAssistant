@@ -2297,6 +2297,60 @@ body {
   transform: scale(1);
 }
 
+/* 同步到禅道按钮样式 */
+.bug-sync-to-zentao-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: white;
+  background: #10b981;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s;
+  line-height: 1.2;
+}
+
+.bug-sync-to-zentao-btn:hover {
+  background: #059669;
+  transform: scale(1.05);
+}
+
+.bug-sync-to-zentao-btn:active {
+  transform: scale(1);
+}
+
+.bug-sync-to-zentao-btn:disabled {
+  background: #6b7280;
+  cursor: wait;
+  opacity: 0.7;
+}
+
+/* 任务同步到禅道按钮样式 */
+.sync-to-zentao-btn {
+  background: #10b981;
+  color: white;
+  border: none;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.sync-to-zentao-btn:hover {
+  background: #059669;
+}
+
+.sync-to-zentao-btn:disabled {
+  background: #6b7280;
+  cursor: wait;
+  opacity: 0.7;
+}
+
 .bug-detail-zentao-id {
   font-weight: 600;
   color: #4CAF50;
