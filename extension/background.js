@@ -3384,6 +3384,36 @@ async function syncFromZentaoInBackground(config) {
 
               const openedBy = row.querySelector('.c-user')?.textContent?.trim() || '';
 
+              // 获取项目和执行信息
+              let executionId = null;
+              let executionName = '';
+              let projectId = null;
+              let projectName = '';
+
+              // 查找项目/执行列 - Bug列表通常有 .c-project 列
+              const projectCell = row.querySelector('.c-project');
+              if (projectCell) {
+                const projectLinkInCell = projectCell.querySelector('a');
+                if (projectLinkInCell) {
+                  const href = projectLinkInCell.getAttribute('href') || '';
+                  const text = projectLinkInCell.textContent?.trim() || projectLinkInCell.getAttribute('title') || '';
+
+                  // 判断是执行还是项目链接
+                  const executionMatch = href.match(/execution-task-(\d+)\.html/);
+                  const projectMatch = href.match(/project-index-(\d+)\.html/);
+
+                  if (executionMatch) {
+                    executionId = parseInt(executionMatch[1]);
+                    executionName = text;
+                  } else if (projectMatch) {
+                    projectId = parseInt(projectMatch[1]);
+                    projectName = text;
+                  }
+
+                  console.log('[Content] Bug', zentaoId, `项目/执行列: href="${href}", text="${text}", executionId=${executionId}, projectId=${projectId}`);
+                }
+              }
+
               // 根据实际的 HTML 结构解析 bug 状态
               // 从示例可以看到：
               // - 第 7 个 td（索引 6）：确认状态 <td class="text-center"><span class="confirmed">已确认</span></td>
@@ -3483,7 +3513,11 @@ async function syncFromZentaoInBackground(config) {
                 openedBy,
                 resolvedBy,
                 resolution,
-                confirmed: isConfirmed
+                confirmed: isConfirmed,
+                executionId,    // 新增：执行ID
+                executionName,  // 新增：执行名称
+                projectId,      // 新增：项目ID
+                projectName     // 新增：项目名称
               });
             } catch (err) {
               console.error('[Content] 解析Bug失败:', err);
