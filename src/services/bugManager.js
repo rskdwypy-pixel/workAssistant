@@ -395,13 +395,12 @@ async function importZentaoBugs(zentaoBugs) {
   // Build a Map for O(1) lookups instead of O(n²) find() in loop
   const existingBugsMap = new Map();
   tasks.forEach(t => {
-    // 确保 zentaoId 是数字类型（如果存在）
-    if (t.type === 'bug' && t.zentaoId && typeof t.zentaoId === 'string') {
-      t.zentaoId = parseInt(t.zentaoId, 10);
-    }
     // 只对 type === 'bug' 且有 zentaoId 的任务建立索引
     if (t.type === 'bug' && t.zentaoId) {
-      existingBugsMap.set(t.zentaoId, t);
+      // 确保 zentaoId 是数字类型，用于 Map 的 key
+      const numZentaoId = typeof t.zentaoId === 'string' ? parseInt(t.zentaoId, 10) : t.zentaoId;
+      t.zentaoId = numZentaoId; // 统一转换为数字类型
+      existingBugsMap.set(numZentaoId, t);
     }
   });
 
@@ -411,8 +410,13 @@ async function importZentaoBugs(zentaoBugs) {
 
   for (const zentaoBug of zentaoBugs) {
     try {
+      // 确保 zentaoId 是数字类型（从 background.js 收到的可能是字符串）
+      const numZentaoId = typeof zentaoBug.zentaoId === 'string'
+        ? parseInt(zentaoBug.zentaoId, 10)
+        : zentaoBug.zentaoId;
+
       // O(1) lookup instead of O(n) find()
-      const existingBug = existingBugsMap.get(zentaoBug.zentaoId);
+      const existingBug = existingBugsMap.get(numZentaoId);
 
       if (existingBug) {
         // 更新现有Bug
@@ -441,7 +445,7 @@ async function importZentaoBugs(zentaoBugs) {
           executionName: zentaoBug.executionName || existingBug.executionName || '',
           projectId: zentaoBug.projectId || existingBug.projectId || null,
           projectName: zentaoBug.projectName || existingBug.projectName || '',
-          zentaoId: parseInt(zentaoBug.zentaoId, 10), // 确保是数字类型
+          zentaoId: numZentaoId, // 使用已转换的数字类型
           updatedAt: new Date().toISOString()
         });
 
@@ -477,7 +481,7 @@ async function importZentaoBugs(zentaoBugs) {
           executionName: zentaoBug.executionName || '',
           projectId: zentaoBug.projectId || null,
           projectName: zentaoBug.projectName || '',
-          zentaoId: parseInt(zentaoBug.zentaoId, 10), // 确保是数字类型
+          zentaoId: numZentaoId, // 使用已转换的数字类型
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           progress: 0,
