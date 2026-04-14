@@ -662,9 +662,10 @@ async function executeBugInZentaoPage(params) {
   const executionId = bugData.executionId || '';
   const projectId = bugData.projectId || '';
 
-  console.log('[Background] 尝试在禅道页面中执行创建 Bug');
+  console.log('[Background] 尝试在禅道页面中执行创建 Bug（看板类型）');
 
-  const targetTab = await ensureZentaoTab(baseUrl);
+  // 看板类型的 Bug，使用 executionId 作为 kanbanId 导航到看板页面
+  const targetTab = await ensureZentaoTab(baseUrl, executionId);
   if (!targetTab) {
     return { success: false, reason: 'no_zentao_tab' };
   }
@@ -931,6 +932,7 @@ async function executeNormalExecutionBugInZentaoPage(params) {
 
   console.log('[Background] 尝试在禅道页面中执行普通执行 Bug 创建');
 
+  // 普通执行不需要导航到看板页面，使用默认的禅道标签页即可
   const targetTab = await ensureZentaoTab(baseUrl);
   if (!targetTab) {
     return { success: false, reason: 'no_zentao_tab' };
