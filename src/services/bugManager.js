@@ -436,6 +436,11 @@ async function importZentaoBugs(zentaoBugs) {
           assignedTo: zentaoBug.assignedTo || existingBug.assignedTo || '',
           assignedDate: zentaoBug.assignedDate || existingBug.assignedDate || '',
           cc: zentaoBug.cc || existingBug.cc || [],
+          // 执行和项目信息（重要：用于删除Bug时判断kanbanId）
+          executionId: zentaoBug.executionId || existingBug.executionId || null,
+          executionName: zentaoBug.executionName || existingBug.executionName || '',
+          projectId: zentaoBug.projectId || existingBug.projectId || null,
+          projectName: zentaoBug.projectName || existingBug.projectName || '',
           zentaoId: parseInt(zentaoBug.zentaoId, 10), // 确保是数字类型
           updatedAt: new Date().toISOString()
         });
@@ -467,6 +472,11 @@ async function importZentaoBugs(zentaoBugs) {
           cc: zentaoBug.cc || [],
           assignedToList: [],
           comments: [],
+          // 执行和项目信息（重要：用于删除Bug时判断kanbanId）
+          executionId: zentaoBug.executionId || null,
+          executionName: zentaoBug.executionName || '',
+          projectId: zentaoBug.projectId || null,
+          projectName: zentaoBug.projectName || '',
           zentaoId: parseInt(zentaoBug.zentaoId, 10), // 确保是数字类型
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
