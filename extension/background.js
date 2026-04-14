@@ -2715,22 +2715,8 @@ async function deleteBugInZentao(params) {
   console.log('[Background] 删除 Bug - 接收到的参数:', { baseUrl, bugId, executionId });
   console.log('[Background] 删除 Bug - 完整params对象:', JSON.stringify(params));
 
-  // 判断是否是看板类型的执行
-  let kanbanId = undefined;
-  if (executionId) {
-    try {
-      const executionType = ExecutionFavorites.getExecutionType(executionId);
-      console.log('[Background] Bug 所属执行类型:', executionId, '=>', executionType);
-      if (executionType === 'kanban') {
-        kanbanId = executionId;
-        console.log('[Background] Bug 属于看板执行，使用 kanbanId:', kanbanId);
-      }
-    } catch (e) {
-      console.warn('[Background] 获取执行类型失败:', e);
-    }
-  }
-
-  const targetTab = await ensureZentaoTab(baseUrl, kanbanId);
+  // 删除 Bug 不需要看板信息，直接使用默认禅道标签页即可
+  const targetTab = await ensureZentaoTab(baseUrl);
   if (!targetTab) {
     return { success: false, reason: 'no_zentao_tab' };
   }

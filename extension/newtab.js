@@ -7914,7 +7914,7 @@ const BugManager = {
 
         result = await new Promise(resolve => {
           const timeout = setTimeout(() => {
-            console.error('[SyncToZentao] 看 Bug 创建请求超时');
+            console.log('[SyncToZentao] 看 Bug 创建请求超时');
             resolve({ success: false, reason: 'timeout' });
           }, 30000);
 
@@ -7935,7 +7935,7 @@ const BugManager = {
         // 首先需要获取 productId
         const productIdResponse = await new Promise(resolve => {
           const timeout = setTimeout(() => {
-            console.error('[SyncToZentao] 获取 productID 请求超时');
+            console.log('[SyncToZentao] 获取 productID 请求超时');
             resolve({ success: false, reason: 'timeout' });
           }, 15000);
 
@@ -7970,7 +7970,7 @@ const BugManager = {
 
         result = await new Promise(resolve => {
           const timeout = setTimeout(() => {
-            console.error('[SyncToZentao] 普通 Bug 创建请求超时');
+            console.log('[SyncToZentao] 普通 Bug 创建请求超时');
             resolve({ success: false, reason: 'timeout' });
           }, 60000);
 
@@ -8765,7 +8765,7 @@ const BugManager = {
           });
 
           if (!productIdResponse || !productIdResponse.success) {
-            console.error('[BugManager] ✗ 获取 productID 失败:', productIdResponse?.reason);
+            console.log('[BugManager] 获取 productID 失败:', productIdResponse?.reason, '- 保存到本地');
             console.warn('[BugManager] 禅道连通失败，将 Bug 保存到本地，稍后可手动同步');
             ProgressToast.hide();
             Toast.warning('禅道无法连通，Bug 已保存到本地，稍后可点击同步按钮重新同步');
