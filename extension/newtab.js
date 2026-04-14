@@ -10321,7 +10321,8 @@ const BugManager = {
           const response = await chrome.runtime.sendMessage({
             action: 'deleteBugInZentao',
             baseUrl,
-            bugId: bug.zentaoId
+            bugId: bug.zentaoId,
+            executionId: bug.executionId
           });
 
           if (!response || !response.success) {

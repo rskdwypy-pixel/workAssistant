@@ -2709,10 +2709,25 @@ async function resolveBugInZentao(params) {
  * 删除 Bug
  */
 async function deleteBugInZentao(params) {
-  const { baseUrl, bugId } = params;
-  console.log('[Background] 删除 Bug:', { bugId });
+  const { baseUrl, bugId, executionId } = params;
+  console.log('[Background] 删除 Bug:', { bugId, executionId });
 
-  const targetTab = await ensureZentaoTab(baseUrl);
+  // 判断是否是看板类型的执行
+  let kanbanId = undefined;
+  if (executionId) {
+    try {
+      const executionType = ExecutionFavorites.getExecutionType(executionId);
+      console.log('[Background] Bug 所属执行类型:', executionId, '=>', executionType);
+      if (executionType === 'kanban') {
+        kanbanId = executionId;
+        console.log('[Background] Bug 属于看板执行，使用 kanbanId:', kanbanId);
+      }
+    } catch (e) {
+      console.warn('[Background] 获取执行类型失败:', e);
+    }
+  }
+
+  const targetTab = await ensureZentaoTab(baseUrl, kanbanId);
   if (!targetTab) {
     return { success: false, reason: 'no_zentao_tab' };
   }
