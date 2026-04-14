@@ -2763,20 +2763,43 @@ async function deleteBugInZentao(params) {
     target: { tabId: targetTab.id },
     func: (bugId) => {
       return new Promise((resolve) => {
+        console.log('[Bug Delete] 开始删除 Bug:', bugId);
+        console.log('[Bug Delete] 当前页面 URL:', window.location.href);
+
         const endpoint = `${window.location.origin}/zentao/bug-delete-${bugId}.html`;
+        console.log('[Bug Delete] 删除端点:', endpoint);
+
         fetch(endpoint, {
           method: 'POST',
           headers: {
             'X-Requested-With': 'XMLHttpRequest'
           }
         })
-        .then(r => r.json())
-        .then(data => {
-          console.log('[Bug Delete] 响应:', data);
-          // 检查返回的数据中 items 是否为空或删除成功
-          resolve({ success: true, data });
+        .then(async r => {
+          console.log('[Bug Delete] HTTP 状态:', r.status);
+
+          // 尝试解析为 JSON
+          const text = await r.text();
+          console.log('[Bug Delete] 响应文本:', text.substring(0, 500));
+
+          try {
+            const data = JSON.parse(text);
+            console.log('[Bug Delete] JSON 数据:', data);
+            resolve({ success: true, data, status: r.status });
+          } catch (e) {
+            console.log('[Bug Delete] 不是 JSON，返回原始文本');
+            // 检查是否成功（禅道可能返回 HTML）
+            if (r.status === 200) {
+              resolve({ success: true, raw: text, status: r.status });
+            } else {
+              resolve({ success: false, reason: `HTTP ${r.status}`, responseText: text.substring(0, 200) });
+            }
+          }
         })
-        .catch(err => resolve({ success: false, reason: err.message }));
+        .catch(err => {
+          console.error('[Bug Delete] 请求失败:', err);
+          resolve({ success: false, reason: err.message });
+        });
       });
     },
     args: [bugId]

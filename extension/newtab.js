@@ -10330,26 +10330,37 @@ const BugManager = {
             action: 'deleteBugInZentao',
             baseUrl,
             bugId: bug.zentaoId,
-            executionId: bug.executionId
+            executionId: bug.executionId,
+            projectId: bug.projectId
           });
 
+          console.log('[BugManager] 禅道删除响应:', response);
+
           if (!response || !response.success) {
-            Toast.warning('禅道 Bug 删除失败，但将删除本地记录');
+            const reason = response?.reason || '未知错误';
+            console.warn('[BugManager] 禅道 Bug 删除失败:', reason);
+            Toast.warning(`禅道 Bug 删除失败: ${reason}，但将删除本地记录`);
+          } else {
+            console.log('[BugManager] ✓ 禅道 Bug 删除成功');
           }
         }
       }
 
       // 删除本地 Bug
+      console.log('[BugManager] 开始删除本地 Bug...');
       const deleteResp = await fetch(`${API_BASE_URL}/api/bug/${bugId}`, {
         method: 'DELETE'
       });
       const deleteResult = await deleteResp.json();
+
+      console.log('[BugManager] 本地删除响应:', deleteResult);
 
       if (deleteResult.success) {
         Toast.success('Bug 已删除');
         this.hideBugDetail();
         await this.loadBugs();
       } else {
+        console.error('[BugManager] 本地删除失败:', deleteResult);
         Toast.error('删除失败: ' + (deleteResult.error || '未知错误'));
       }
     } catch (err) {
