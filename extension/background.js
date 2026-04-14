@@ -1869,15 +1869,26 @@ async function createKanbanTask(params) {
   console.log('[Background] 创建看板任务 (task-create):', { executionId, regionId, laneId, columnId, taskData });
 
   try {
-    // 确保禅道页面存在
-    const targetTab = await ensureZentaoTab(baseUrl, executionId);
+    // 构建看板任务创建页面的 URL
+    // 格式: /zentao/task-create-{executionId}-0-0-0-0-regionID={regionId},laneID={laneId},columnID={columnId}.html?onlybody=yes
+    const targetUrl = `${baseUrl}/zentao/task-create-${executionId}-0-0-0-0-regionID=${regionId},laneID=${laneId},columnID=${columnId}.html?onlybody=yes`;
+
+    console.log('[Background] 看板任务创建页面 URL:', targetUrl);
+
+    // 导航到看板任务创建页面（而不是看板页面）
+    const targetTab = await ZentaoTabManager.getOrCreateTab({
+      baseUrl,
+      targetUrl,
+      active: false,
+      reload: false
+    });
 
     if (!targetTab) {
       console.error('[Background] 无法获取禅道页面');
       return { success: false, reason: 'no_zentao_tab' };
     }
 
-    console.log('[Background] 准备执行脚本，tab ID:', targetTab.id);
+    console.log('[Background] 准备执行脚本，tab ID:', targetTab.id, 'URL:', targetTab.url);
 
     const results = await chrome.scripting.executeScript({
       target: { tabId: targetTab.id },

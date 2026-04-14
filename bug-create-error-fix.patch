@@ -1,0 +1,353 @@
+/**
+ * Bug创建错误修复补丁
+ * 问题：Frame with ID 0 is showing error page
+ * 解决方案：增强页面状态检测和错误处理
+ */
+
+// ============================================
+// 文件: extension/background.js
+// ============================================
+
+// 在 getExecutionProductId 函数中添加页面状态检测
+async function getExecutionProductId(params) {
+  const { baseUrl, executionId } = params;
+
+  console.log('[Background] 获取普通执行的 productID, executionId:', executionId);
+
+  const targetTab = await ensureZentaoTab(baseUrl);
+  if (!targetTab) {
+    return { success: false, reason: 'no_zentao_tab' };
+  }
+
+  // 导航到执行页面
+  const executionUrl = `${baseUrl}/zentao/execution-bug-${executionId}.html`;
+  console.log('[Background] 导航到执行页面:', executionUrl);
+
+  await chrome.tabs.update(targetTab.id, { url: executionUrl });
+
+  // 等待页面加载完成
+  await new Promise(resolve => {
+    const listener = (tabId, changeInfo) => {
+      if (tabId === targetTab.id && changeInfo.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(listener);
+        setTimeout(resolve, 500);
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+
+    setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, 15000);
+  });
+
+  console.log('[Background] 执行页面已加载，检查页面状态');
+
+  // ⭐ 新增：检查页面状态
+  try {
+    const pageStatus = await checkPageStatus(targetTab.id);
+    console.log('[Background] 页面状态:', pageStatus);
+
+    if (pageStatus.isErrorPage) {
+      console.error('[Background] ❌ 页面显示错误页面:', pageStatus);
+      return {
+        success: false,
+        reason: 'error_page',
+        pageTitle: pageStatus.title,
+        pageUrl: pageStatus.url,
+        bodyPreview: pageStatus.bodyText,
+        suggestion: getPageErrorSuggestion(pageStatus)
+      };
+    }
+  } catch (error) {
+    console.error('[Background] 页面状态检测失败:', error);
+    // 继续尝试，可能是暂时的检测失败
+  }
+
+  console.log('[Background] ✓ 页面正常，从 DOM 中提取 productID');
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: targetTab.id },
+    func: (executionId) => {
+      return new Promise((resolve) => {
+        console.log('[Get ProductID] 从页面 DOM 中查找提Bug链接');
+
+        // 查找 iframe
+        const iframe = document.getElementById('appIframe-execution');
+        if (!iframe) {
+          console.error('[Get ProductID] 未找到 appIframe-execution iframe');
+          resolve({ success: false, reason: 'iframe_not_found' });
+          return;
+        }
+
+        console.log('[Get ProductID] 找到 iframe');
+
+        // 等待 iframe 加载完成
+        if (!iframe.contentDocument || !iframe.contentDocument.body) {
+          console.log('[Get ProductID] iframe 还未加载完成，等待...');
+          iframe.addEventListener('load', () => {
+            console.log('[Get ProductID] iframe 加载完成');
+            extractProductId();
+          });
+
+          setTimeout(() => {
+            console.error('[Get ProductID] iframe 加载超时');
+            resolve({ success: false, reason: 'iframe_load_timeout' });
+          }, 5000);
+        } else {
+          console.log('[Get ProductID] iframe 已加载完成');
+          extractProductId();
+        }
+
+        function extractProductId() {
+          try {
+            const iframeDoc = iframe.contentDocument;
+            if (!iframeDoc) {
+              console.error('[Get ProductID] 无法访问 iframe contentDocument');
+              resolve({ success: false, reason: 'iframe_access_denied' });
+              return;
+            }
+
+            // 从 iframe DOM 中查找提Bug链接
+            const allLinks = iframeDoc.querySelectorAll('a[href*="bug-create"]');
+            console.log('[Get ProductID] 在 iframe 中找到', allLinks.length, '个 bug-create 链接');
+
+            const regexPattern = new RegExp(`/zentao/bug-create-(\\d+)-0-executionID=${executionId}\\.html`, 'i');
+
+            let productId = null;
+            for (const link of allLinks) {
+              const href = link.getAttribute('href');
+              const match = href.match(regexPattern);
+              if (match) {
+                productId = match[1];
+                console.log('[Get ProductID] ✓ 找到匹配的链接, productID:', productId);
+                break;
+              }
+            }
+
+            if (!productId) {
+              console.error('[Get ProductID] ✗ 未找到匹配的提Bug链接');
+              resolve({ success: false, reason: 'bug_create_link_not_found' });
+              return;
+            }
+
+            console.log('[Get ProductID] ✓✓✓ 成功提取 productID:', productId);
+            resolve({ success: true, productId });
+          } catch (err) {
+            console.error('[Get ProductID] 提取 productID 异常:', err);
+            resolve({ success: false, reason: err.message });
+          }
+        }
+      });
+    },
+    args: [executionId]
+  });
+
+  return results[0].result;
+}
+
+// ⭐ 新增：页面状态检测函数
+async function checkPageStatus(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      func: () => {
+        const bodyText = document.body ? document.body.innerText : '';
+        const title = document.title;
+        const url = window.location.href;
+
+        // 检测各种错误状态
+        const isErrorPage =
+          bodyText.includes('404') ||
+          bodyText.includes('403') ||
+          bodyText.includes('500') ||
+          bodyText.includes('无法访问') ||
+          bodyText.includes('Access denied') ||
+          bodyText.includes('Not Found') ||
+          bodyText.includes('登录') ||
+          title.includes('登录') ||
+          title.includes('Error') ||
+          title.includes('错误');
+
+        return {
+          title,
+          url,
+          bodyText: bodyText.substring(0, 200),
+          isErrorPage
+        };
+      }
+    });
+
+    return results[0].result;
+  } catch (error) {
+    console.error('[Background] 页面状态检测失败:', error);
+    return {
+      isErrorPage: true,
+      error: error.message,
+      title: 'Unknown',
+      url: 'Unknown',
+      bodyText: '无法访问页面'
+    };
+  }
+}
+
+// ⭐ 新增：根据页面错误提供解决建议
+function getPageErrorSuggestion(pageStatus) {
+  const bodyText = pageStatus.bodyText || '';
+  const title = pageStatus.title || '';
+
+  if (bodyText.includes('404') || title.includes('404') || bodyText.includes('Not Found')) {
+    return '执行不存在或已删除，请检查执行ID是否正确';
+  }
+
+  if (bodyText.includes('403') || bodyText.includes('Access denied')) {
+    return '没有访问该执行的权限，请联系管理员';
+  }
+
+  if (bodyText.includes('登录') || title.includes('登录')) {
+    return '禅道登录已过期，请先在禅道标签页登录';
+  }
+
+  if (bodyText.includes('500') || title.includes('Error')) {
+    return '禅道服务器错误，请稍后重试或联系管理员';
+  }
+
+  return '页面无法正常访问，请检查网络连接或联系管理员';
+}
+
+// ============================================
+// 文件: extension/newtab.js
+// ============================================
+
+// 在 submitBug 函数中改进错误提示
+async submitBug() {
+  // ... 前面的代码保持不变 ...
+
+  try {
+    // 获取 productID 的逻辑（在 line 8565-8587 附近）
+    const productIdResponse = await new Promise(resolve => {
+      const timeout = setTimeout(() => {
+        console.error('[BugManager] 获取 productID 请求超时');
+        resolve({ success: false, reason: 'timeout' });
+      }, 30000); // 30秒超时
+
+      chrome.runtime.sendMessage({
+        action: 'getExecutionProductId',
+        baseUrl,
+        executionId
+      }, (response) => {
+        clearTimeout(timeout);
+        resolve(response);
+      });
+    });
+
+    if (!productIdResponse || !productIdResponse.success) {
+      console.error('[BugManager] ✗ 获取 productID 失败:', productIdResponse?.reason);
+      ProgressToast.hide();
+
+      // ⭐ 改进错误提示
+      const errorInfo = parseProductIDError(productIdResponse);
+      Toast.error(`${errorInfo.message}\n\n${errorInfo.suggestion}`);
+
+      return;
+    }
+
+    // ... 后续代码保持不变 ...
+
+  } catch (err) {
+    // ... 错误处理 ...
+  }
+}
+
+// ⭐ 新增：解析 productID 获取错误
+function parseProductIDError(response) {
+  const reason = response?.reason || '未知错误';
+
+  // 错误消息映射
+  const errorMap = {
+    'error_page': {
+      message: '禅道页面显示错误',
+      getSuggestion: () => {
+        if (response.pageTitle?.includes('登录')) {
+          return '禅道登录已过期，请先在禅道标签页登录，然后重试';
+        }
+        if (response.bodyPreview?.includes('404')) {
+          return `执行ID不存在或已删除\n页面: ${response.pageTitle}\n请检查执行ID是否正确`;
+        }
+        if (response.bodyPreview?.includes('403') || response.bodyPreview?.includes('Access denied')) {
+          return '没有访问该执行的权限，请联系管理员';
+        }
+        return `页面无法访问\n页面: ${response.pageTitle}\n请检查:\n1. 执行ID是否正确\n2. 是否有访问权限\n3. 网络连接是否正常`;
+      }
+    },
+    'iframe_not_found': {
+      message: '页面结构异常',
+      suggestion: '禅道页面可能正在加载或版本不兼容\n建议:\n1. 刷新禅道页面\n2. 等待页面完全加载后重试\n3. 检查禅道版本是否兼容'
+    },
+    'bug_create_link_not_found': {
+      message: '无法创建Bug',
+      suggestion: '当前执行可能没有创建Bug的权限\n建议:\n1. 检查执行配置\n2. 联系管理员获取权限\n3. 尝试在其他执行中创建Bug'
+    },
+    'no_zentao_tab': {
+      message: '未找到禅道标签页',
+      suggestion: '请确保已打开禅道页面\n建议:\n1. 打开禅道任意页面\n2. 确保已登录\n3. 刷新扩展后重试'
+    },
+    'timeout': {
+      message: '请求超时',
+      suggestion: '获取产品ID超时\n建议:\n1. 检查网络连接\n2. 刷新禅道页面\n3. 稍后重试'
+    },
+    'iframe_load_timeout': {
+      message: '页面加载超时',
+      suggestion: '禅道页面加载超时\n建议:\n1. 刷新禅道页面\n2. 等待页面完全加载\n3. 检查网络连接'
+    },
+    'iframe_access_denied': {
+      message: '无法访问页面内容',
+      suggestion: '无法访问禅道页面iframe\n建议:\n1. 检查扩展权限\n2. 刷新禅道页面\n3. 重新加载扩展'
+    }
+  };
+
+  const errorInfo = errorMap[reason] || {
+    message: '获取 productID 失败',
+    suggestion: `未知错误: ${reason}\n建议:\n1. 刷新禅道页面\n2. 检查网络连接\n3. 重新登录禅道`
+  };
+
+  // 如果错误信息有动态获取建议的方法，调用它
+  if (typeof errorInfo.getSuggestion === 'function') {
+    return {
+      message: errorInfo.message,
+      suggestion: errorInfo.getSuggestion()
+    };
+  }
+
+  return {
+    message: errorInfo.message,
+    suggestion: errorInfo.suggestion
+  };
+}
+
+// ============================================
+// 使用说明
+// ============================================
+
+/**
+ * 安装步骤：
+ *
+ * 1. 备份原始文件
+ *    - cp extension/background.js extension/background.js.backup
+ *    - cp extension/newtab.js extension/newtab.js.backup
+ *
+ * 2. 应用补丁
+ *    - 将 getExecutionProductId 函数替换为新版本
+ *    - 添加 checkPageStatus 和 getPageErrorSuggestion 函数
+ *    - 将 submitBug 函数中的错误处理替换为新版本
+ *    - 添加 parseProductIDError 函数
+ *
+ * 3. 重新加载扩展
+ *    - 打开 chrome://extensions/
+ *    - 点击"重新加载"按钮
+ *
+ * 4. 测试修复
+ *    - 打开禅道并登录
+ *    - 创建测试Bug
+ *    - 检查是否正常工作
+ */

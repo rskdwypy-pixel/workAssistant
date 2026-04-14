@@ -2265,7 +2265,10 @@ function createTaskCard(task) {
             style="cursor: pointer; padding: 2px 4px; border-radius: 4px; transition: background 0.2s;">
             ${escapeHtml(task.title)}
           </span>
-          ${task.zentaoId ? `<span class="zentao-task-link" data-task-id="${task.zentaoId}" style="color: #3b82f6; text-decoration: none; font-size: 12px; cursor: pointer;">#${task.zentaoId}</span>` : ''}
+          ${task.zentaoId
+            ? `<span class="zentao-task-link" data-task-id="${task.zentaoId}" style="color: #3b82f6; text-decoration: none; font-size: 12px; cursor: pointer;">#${task.zentaoId}</span>`
+            : `<button class="sync-to-zentao-btn" data-task-id="${task.id}" style="background: #10b981; color: white; border: none; padding: 2px 6px; border-radius: 3px; font-size: 11px; cursor: pointer; transition: background 0.2s;" title="同步到禅道">同步</button>`
+          }
         </div>
         ${task.executionName ? `<span class="execution-tag" style="margin-top: 4px;">${escapeHtml(task.executionName)}</span>` : ''}
       </div>
@@ -2494,7 +2497,111 @@ function createTaskCard(task) {
     });
   }
 
+  // 同步到禅道按钮点击事件
+  const syncBtn = card.querySelector('.sync-to-zentao-btn');
+  if (syncBtn) {
+    syncBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const taskId = syncBtn.dataset.taskId;
+      await syncTaskToZentao(taskId, syncBtn);
+    });
+
+    // 鼠标悬停效果
+    syncBtn.addEventListener('mouseenter', () => {
+      syncBtn.style.background = '#059669';
+    });
+    syncBtn.addEventListener('mouseleave', () => {
+      syncBtn.style.background = '#10b981';
+    });
+  }
+
   return card;
+}
+
+/**
+ * 同步任务到禅道
+ * @param {string} taskId - 任务 ID
+ * @param {HTMLElement} syncBtn - 同步按钮元素
+ */
+async function syncTaskToZentao(taskId, syncBtn) {
+  try {
+    // 查找任务
+    const task = allTasks.find(t => t.id === taskId);
+    if (!task) {
+      Toast.error('任务不存在');
+      return;
+    }
+
+    // 禁用按钮，显示加载状态
+    syncBtn.disabled = true;
+    syncBtn.textContent = '同步中...';
+    syncBtn.style.background = '#6b7280';
+    syncBtn.style.cursor = 'wait';
+
+    console.log('[SyncToZentao] 开始同步任务到禅道:', task);
+
+    // 调用 ZentaoBrowserClient 创建任务
+    const result = await ZentaoBrowserClient.createTask({
+      title: task.title,
+      executionId: task.executionId,
+      executionType: task.executionType,
+      desc: task.content || task.title
+    });
+
+    // 判断是否成功（支持 taskId 和 zentaoId 两种字段）
+    const zentaoId = result.zentaoId || result.taskId;
+    if (result.success && zentaoId) {
+      console.log('[SyncToZentao] 任务创建成功，zentaoId:', zentaoId);
+
+      // 更新本地任务的 zentaoId
+      task.zentaoId = zentaoId;
+      task.zentaoExecution = task.executionId;
+
+      // 保存到后端
+      await fetch(`${API_BASE_URL}/api/task/${taskId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zentaoId: zentaoId })
+      });
+
+      Toast.success('已同步到禅道，任务ID: #' + zentaoId);
+
+      // 刷新任务卡片显示
+      await loadTasks();
+    } else {
+      console.error('[SyncToZentao] 任务创建失败:', result);
+
+      // 恢复按钮状态
+      syncBtn.disabled = false;
+      syncBtn.textContent = '同步';
+      syncBtn.style.background = '#10b981';
+      syncBtn.style.cursor = 'pointer';
+
+      // 根据失败原因显示错误提示
+      let errorMsg = '同步失败';
+      if (result.reason === 'not_configured') {
+        errorMsg = '禅道未配置，请先在设置中配置禅道';
+      } else if (result.reason === 'invalid_execution_id') {
+        errorMsg = '未配置执行ID，请先选择执行';
+      } else if (result.message) {
+        errorMsg = '同步失败: ' + result.message;
+      }
+
+      Toast.error(errorMsg);
+    }
+  } catch (err) {
+    console.error('[SyncToZentao] 同步任务异常:', err);
+
+    // 恢复按钮状态
+    syncBtn.disabled = false;
+    syncBtn.textContent = '同步';
+    syncBtn.style.background = '#10b981';
+    syncBtn.style.cursor = 'pointer';
+
+    Toast.error('同步失败: ' + err.message);
+  }
 }
 
 // 更新计数
@@ -2941,22 +3048,37 @@ async function submitTaskFromModal() {
 
           if (zentaoTaskId) {
             // zentaoTaskId 可能是对象 {success: true, taskId: xxx} 或直接的数字
-            if (typeof zentaoTaskId === 'object' && zentaoTaskId.taskId) {
-              browserZentaoId = zentaoTaskId.taskId;
+            // 只有在成功的情况下才提取 ID
+            if (typeof zentaoTaskId === 'object') {
+              if (zentaoTaskId.success && zentaoTaskId.taskId) {
+                // 成功创建任务
+                browserZentaoId = zentaoTaskId.taskId;
+                console.log('[TaskModal] ✓ 浏览器端创建禅道任务成功，提取到的ID:', browserZentaoId);
+
+                // 更新本地任务的 zentaoId
+                const updateResponse = await fetch(`${API_BASE_URL}/api/task/${task.id}`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ zentaoId: browserZentaoId })
+                });
+              } else {
+                // 创建失败
+                console.warn('[TaskModal] ⚠ 浏览器端创建禅道任务失败:', zentaoTaskId.reason || zentaoTaskId.message || '未知错误');
+                // 不更新 zentaoId，保持为 null
+              }
             } else if (typeof zentaoTaskId === 'number') {
               browserZentaoId = zentaoTaskId;
+              console.log('[TaskModal] ✓ 浏览器端创建禅道任务成功，提取到的ID:', browserZentaoId);
+
+              // 更新本地任务的 zentaoId
+              const updateResponse = await fetch(`${API_BASE_URL}/api/task/${task.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ zentaoId: browserZentaoId })
+              });
             } else {
-              browserZentaoId = zentaoTaskId;
+              console.warn('[TaskModal] ⚠ 未知的 zentaoTaskId 类型:', typeof zentaoTaskId, zentaoTaskId);
             }
-
-            console.log('[TaskModal] ✓ 浏览器端创建禅道任务成功，提取到的ID:', browserZentaoId);
-
-            // 更新本地任务的 zentaoId
-            const updateResponse = await fetch(`${API_BASE_URL}/api/task/${task.id}`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ zentaoId: browserZentaoId })
-            });
           }
         }
       } catch (err) {
@@ -5419,16 +5541,19 @@ const ZentaoBrowserClient = {
 
       console.log('[ZentaoBrowser] 看板任务创建结果:', kanbanResult);
 
-      // 看板创建失败，直接返回错误，不降级到普通任务
+      // 看板任务创建失败，直接返回错误（不降级）
       if (!kanbanResult.success) {
+        console.error('[ZentaoBrowser] ✗ 看板任务创建失败:', kanbanResult.reason);
         return { success: false, reason: kanbanResult.reason || '看板任务创建失败' };
       }
 
-      // 返回看板任务结果
+      // 看板任务创建成功，返回结果
+      console.log('[ZentaoBrowser] ✓ 看板任务创建成功:', kanbanResult);
       return kanbanResult;
     }
 
     // 普通任务（阶段/迭代）使用原有API
+    // 包括：看板任务失败后的降级情况
     const username = this.config.username || 'admin';
     const baseUrl = this.getBaseUrl();
 
@@ -7518,8 +7643,8 @@ const BugManager = {
     if (bug.zentaoId) {
       bugIdSuffix = ` <a class="bug-id-link-inline" href="javascript:void(0)" data-bug-id="${bug.zentaoId}" title="点击查看禅道详情">#${bug.zentaoId}</a>`;
     } else {
-      // 没有BugID时显示加号按钮
-      addBugIdBtn = `<button class="bug-add-id-btn" title="添加禅道BugID" data-bug-id="${bug.id}">➕</button>`;
+      // 没有BugID时显示同步按钮
+      addBugIdBtn = `<button class="bug-sync-to-zentao-btn" title="同步到禅道创建Bug" data-bug-id="${bug.id}">同步</button>`;
     }
 
     // 根据状态显示不同的快捷按钮
@@ -7557,13 +7682,21 @@ const BugManager = {
       });
     }
 
-    // 添加 BugID 按钮事件
-    const addIdBtn = card.querySelector('.bug-add-id-btn');
-    if (addIdBtn) {
-      addIdBtn.addEventListener('click', (e) => {
+    // 同步到禅道按钮事件
+    const syncBtn = card.querySelector('.bug-sync-to-zentao-btn');
+    if (syncBtn) {
+      syncBtn.addEventListener('click', async (e) => {
         e.preventDefault();
         e.stopPropagation();
-        this.showEditBugIdModal(bug.id, bug.zentaoId);
+        await this.syncBugToZentao(bug.id, syncBtn);
+      });
+
+      // 鼠标悬停效果
+      syncBtn.addEventListener('mouseenter', () => {
+        syncBtn.style.background = '#059669';
+      });
+      syncBtn.addEventListener('mouseleave', () => {
+        syncBtn.style.background = '#10b981';
       });
     }
 
@@ -7698,6 +7831,271 @@ const BugManager = {
       input.focus();
       input.select();
     }, 100);
+  },
+
+  /**
+   * 同步 Bug 到禅道
+   * @param {string} bugId - Bug ID
+   * @param {HTMLElement} syncBtn - 同步按钮元素
+   */
+  async syncBugToZentao(bugId, syncBtn) {
+    try {
+      // 查找 Bug
+      const bug = this.bugs.find(b => b.id === bugId);
+      if (!bug) {
+        Toast.error('Bug不存在');
+        return;
+      }
+
+      // 禁用按钮，显示加载状态
+      syncBtn.disabled = true;
+      syncBtn.textContent = '同步中...';
+      syncBtn.style.background = '#6b7280';
+      syncBtn.style.cursor = 'wait';
+
+      console.log('[SyncToZentao] 开始同步Bug到禅道:', bug);
+
+      // 获取禅道配置
+      const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
+      const configResult = await configResp.json();
+      const baseUrl = configResult.data?.url?.replace(/\/$/, '') || null;
+
+      if (!baseUrl) {
+        Toast.error('禅道未配置，请先在设置中配置禅道');
+        // 恢复按钮状态
+        syncBtn.disabled = false;
+        syncBtn.textContent = '同步';
+        syncBtn.style.background = '#10b981';
+        syncBtn.style.cursor = 'pointer';
+        return;
+      }
+
+      // 检查执行类型，决定使用哪种同步方式
+      let executionType = null;
+      try {
+        executionType = ExecutionFavorites.getExecutionType(bug.executionId);
+        console.log('[SyncToZentao] 执行类型:', bug.executionId, '=>', executionType);
+      } catch (e) {
+        console.warn('[SyncToZentao] 获取执行类型失败:', e);
+      }
+
+      let result;
+      if (executionType === 'kanban') {
+        // 看板执行 Bug 同步
+        console.log('[SyncToZentao] 使用看板逻辑同步 Bug');
+
+        // 获取看板参数
+        const kanbanParams = await ZentaoBrowserClient.getKanbanParamsFromHtml(bug.executionId, 'bug', 'unconfirmed');
+        if (!kanbanParams) {
+          throw new Error('无法获取看板参数');
+        }
+
+        const requiredParams = ['productId', 'regionId', 'laneId', 'columnId'];
+        const missingParams = requiredParams.filter(param => !kanbanParams[param]);
+        if (missingParams.length > 0) {
+          throw new Error('看板参数不完整: ' + missingParams.join(', '));
+        }
+
+        // 准备 Bug 数据
+        const syncBugData = {
+          title: bug.title,
+          severity: bug.severity,
+          type: bug.bugType,
+          openedBuild: bug.openedBuild || 'trunk',
+          steps: bug.content || bug.steps || '',
+          executionId: bug.executionId,
+          projectId: bug.projectId || '',
+          assignedTo: Array.isArray(bug.assignedTo) ? bug.assignedTo[0] : bug.assignedTo,
+          // 看板参数
+          regionId: kanbanParams.regionId,
+          laneId: kanbanParams.laneId,
+          columnId: kanbanParams.columnId
+        };
+
+        result = await new Promise(resolve => {
+          const timeout = setTimeout(() => {
+            console.error('[SyncToZentao] 看 Bug 创建请求超时');
+            resolve({ success: false, reason: 'timeout' });
+          }, 30000);
+
+          chrome.runtime.sendMessage({
+            action: 'executeBugInZentaoPage',
+            baseUrl,
+            productId: kanbanParams.productId,
+            bugData: syncBugData
+          }, (response) => {
+            clearTimeout(timeout);
+            resolve(response);
+          });
+        });
+      } else {
+        // 普通执行 Bug 同步
+        console.log('[SyncToZentao] 使用普通执行逻辑同步 Bug');
+
+        // 首先需要获取 productId
+        const productIdResponse = await new Promise(resolve => {
+          const timeout = setTimeout(() => {
+            console.error('[SyncToZentao] 获取 productID 请求超时');
+            resolve({ success: false, reason: 'timeout' });
+          }, 15000);
+
+          chrome.runtime.sendMessage({
+            action: 'getExecutionProductId',
+            baseUrl,
+            executionId: bug.executionId
+          }, (response) => {
+            clearTimeout(timeout);
+            resolve(response);
+          });
+        });
+
+        if (!productIdResponse || !productIdResponse.success) {
+          throw new Error(productIdResponse?.reason || '获取 productID 失败');
+        }
+
+        const productId = productIdResponse.productId;
+        console.log('[SyncToZentao] 获取到 productID:', productId);
+
+        // 准备 Bug 数据
+        const syncBugData = {
+          title: bug.title,
+          severity: bug.severity,
+          type: bug.bugType,
+          openedBuild: bug.openedBuild || 'trunk',
+          steps: bug.content || bug.steps || '',
+          executionId: bug.executionId,
+          projectId: bug.projectId || '',
+          assignedTo: Array.isArray(bug.assignedTo) ? bug.assignedTo[0] : bug.assignedTo
+        };
+
+        result = await new Promise(resolve => {
+          const timeout = setTimeout(() => {
+            console.error('[SyncToZentao] 普通 Bug 创建请求超时');
+            resolve({ success: false, reason: 'timeout' });
+          }, 60000);
+
+          chrome.runtime.sendMessage({
+            action: 'executeNormalExecutionBugInZentaoPage',
+            baseUrl,
+            productId,
+            bugData: syncBugData
+          }, (response) => {
+            clearTimeout(timeout);
+            resolve(response);
+          });
+        });
+      }
+
+      // 判断是否成功并提取 Bug ID
+      if (result.success) {
+        // 适配返回结构，提取 bugId
+        const data = result.data;
+
+        console.log('[SyncToZentao] Bug 创建响应数据:', JSON.stringify(data).substring(0, 500));
+
+        let bugId = data?.id || data?.bug?.id || data?.data?.id;
+
+        // 如果响应中包含看板回调数据，尝试从中提取 Bug ID
+        if (!bugId && data?.callback) {
+          console.log('[SyncToZentao] 尝试从 callback 中提取 Bug ID');
+
+          try {
+            // 提取 parent.updateKanban(...) 中的 JSON
+            const kanbanMatch = data.callback.match(/parent\.updateKanban\((.+)\)\)/);
+            if (kanbanMatch) {
+              const kanbanJson = kanbanMatch[1];
+              const kanbanData = JSON.parse(kanbanJson);
+
+              // 遍历所有 region
+              for (const regionKey in kanbanData) {
+                const region = kanbanData[regionKey];
+                if (region.groups) {
+                  for (const group of region.groups) {
+                    if (group.columns) {
+                      for (const column of group.columns) {
+                        if (column.type === 'unconfirmed' && column.items && column.items.length > 0) {
+                          // 根据标题匹配查找 Bug ID
+                          for (const item of column.items) {
+                            if (item.title === bug.title) {
+                              bugId = item.id;
+                              console.log('[SyncToZentao] ✓ 从 callback 找到 Bug ID:', bugId);
+                              break;
+                            }
+                          }
+                          if (bugId) break;
+                        }
+                      }
+                      if (bugId) break;
+                    }
+                  }
+                  if (bugId) break;
+                }
+              }
+            }
+          } catch (parseErr) {
+            console.error('[SyncToZentao] 解析 callback 失败:', parseErr);
+          }
+        }
+
+        if (!bugId && data?.locate) {
+          const match = data.locate.match(/bug-view-(\d+)/);
+          if (match) {
+            bugId = parseInt(match[1]);
+            console.log('[SyncToZentao] ✓ 从 locate 找到 Bug ID:', bugId);
+          }
+        }
+
+        console.log('[SyncToZentao] 最终提取的 Bug ID:', bugId);
+
+        if (bugId) {
+          console.log('[SyncToZentao] Bug创建成功，zentaoId:', bugId);
+
+          // 更新本地 Bug 的 zentaoId
+          bug.zentaoId = bugId;
+          bug.updatedAt = new Date().toISOString();
+
+          // 保存到后端
+          await fetch(`${API_BASE_URL}/api/bug/${bug.id}/zentaoId`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ zentaoId: bugId })
+          });
+
+          Toast.success('已同步到禅道，BugID: #' + bugId);
+
+          // 刷新 Bug 卡片显示
+          await this.loadBugs();
+        } else {
+        console.error('[SyncToZentao] Bug创建失败:', result);
+
+        // 恢复按钮状态
+        syncBtn.disabled = false;
+        syncBtn.textContent = '同步';
+        syncBtn.style.background = '#10b981';
+        syncBtn.style.cursor = 'pointer';
+
+        // 根据失败原因显示错误提示
+        let errorMsg = '同步失败';
+        if (result.reason === 'not_configured') {
+          errorMsg = '禅道未配置，请先在设置中配置禅道';
+        } else if (result.message) {
+          errorMsg = '同步失败: ' + result.message;
+        }
+
+        Toast.error(errorMsg);
+        }
+      }
+    } catch (err) {
+      console.error('[SyncToZentao] 同步Bug异常:', err);
+
+      // 恢复按钮状态
+      syncBtn.disabled = false;
+      syncBtn.textContent = '同步';
+      syncBtn.style.background = '#10b981';
+      syncBtn.style.cursor = 'pointer';
+
+      Toast.error('同步失败: ' + err.message);
+    }
   },
 
   /**
@@ -8250,24 +8648,25 @@ const BugManager = {
       let needRelogin = false;
 
       if (baseUrl) {
+        // 初始化 syncResponse，默认为失败（未同步到禅道）
+        let syncResponse = { success: false, reason: 'not_attempted' };
+
         // 检查是否有执行ID
         if (!executionId) {
-          console.error('[BugManager] ✗ 缺少 executionId，无法创建Bug');
+          console.warn('[BugManager] ⚠ 未选择执行，将 Bug 保存到本地，稍后可手动同步');
           ProgressToast.hide();
-          Toast.error('缺少执行ID，无法创建Bug');
-          return;
-        }
-
-        // 获取执行类型（判断是否为看板）
-        let executionType = null;
-        try {
-          executionType = ExecutionFavorites.getExecutionType(executionId);
-          console.log('[BugManager] 执行类型:', executionId, '=>', executionType);
-        } catch (e) {
-          console.warn('[BugManager] 获取执行类型失败:', e);
-        }
-
-        let syncResponse;
+          Toast.info('未选择执行，Bug 已保存到本地。请在选择执行后点击同步按钮同步到禅道。');
+          // 不 return，继续保存到本地（zentaoId 保持为 null）
+          // syncResponse 已经初始化为失败状态，直接跳到保存逻辑
+        } else {
+          // 获取执行类型（判断是否为看板）
+          let executionType = null;
+          try {
+            executionType = ExecutionFavorites.getExecutionType(executionId);
+            console.log('[BugManager] 执行类型:', executionId, '=>', executionType);
+          } catch (e) {
+            console.warn('[BugManager] 获取执行类型失败:', e);
+          }
 
         if (executionType === 'kanban') {
           // ========== 看板执行 Bug 创建 ==========
@@ -8281,64 +8680,67 @@ const BugManager = {
 
             if (!kanbanParams) {
               console.error('[BugManager] ✗ 无法获取看板参数');
+              console.warn('[BugManager] 禅道连通失败，将 Bug 保存到本地，稍后可手动同步');
               ProgressToast.hide();
-              Toast.error('无法获取看板参数，请确保已打开禅道Bug看板页面');
-              return;
+              Toast.warning('禅道无法连通，Bug 已保存到本地，稍后可点击同步按钮重新同步');
+              // syncResponse 已经是失败状态，直接跳到保存逻辑
+            } else {
+              console.log('[BugManager] 获取到看板参数:', kanbanParams);
+
+              // ========== 严格参数验证：所有必需参数必须存在 ==========
+              const requiredParams = ['productId', 'regionId', 'laneId', 'columnId'];
+              const missingParams = requiredParams.filter(param => !kanbanParams[param]);
+
+              if (missingParams.length > 0) {
+                console.error('[BugManager] ✗ 看板参数不完整，缺少必需参数:', missingParams);
+                console.error('[BugManager] 获取到的参数:', kanbanParams);
+                console.warn('[BugManager] 禅道连通失败，将 Bug 保存到本地，稍后可手动同步');
+                ProgressToast.hide();
+                Toast.warning('禅道无法连通，Bug 已保存到本地，稍后可点击同步按钮重新同步');
+                // syncResponse 已经是失败状态，直接跳到保存逻辑
+              } else {
+                // 所有必需参数都存在，继续处理
+                bugData.productId = kanbanParams.productId;
+                bugData.projectId = kanbanParams.projectId || bugData.projectId; // projectId 可选，优先使用看板解析的
+                bugData.regionId = kanbanParams.regionId;
+                bugData.laneId = kanbanParams.laneId;
+                bugData.columnId = kanbanParams.columnId;
+
+                console.log('[BugManager] ✓ 所有看板参数验证通过:', {
+                  productId: bugData.productId,
+                  projectId: bugData.projectId,
+                  regionId: bugData.regionId,
+                  laneId: bugData.laneId,
+                  columnId: bugData.columnId
+                });
+
+                // 使用看板 Bug 创建接口
+                syncResponse = await new Promise(resolve => {
+                  const timeout = setTimeout(() => {
+                    console.error('[BugManager] 看板 Bug 创建请求超时');
+                    resolve({ success: false, reason: 'timeout', data: null });
+                  }, 30000); // 30秒超时
+
+                  chrome.runtime.sendMessage({
+                    action: 'executeBugInZentaoPage',
+                    baseUrl,
+                    // productId 是必需的，不允许使用默认值
+                    productId: bugData.productId,
+                    bugData
+                  }, (response) => {
+                    clearTimeout(timeout);
+                    resolve(response);
+                  });
+                });
+              }
             }
-
-            console.log('[BugManager] 获取到看板参数:', kanbanParams);
-
-            // ========== 严格参数验证：所有必需参数必须存在 ==========
-            const requiredParams = ['productId', 'regionId', 'laneId', 'columnId'];
-            const missingParams = requiredParams.filter(param => !kanbanParams[param]);
-
-            if (missingParams.length > 0) {
-              console.error('[BugManager] ✗ 看板参数不完整，缺少必需参数:', missingParams);
-              console.error('[BugManager] 获取到的参数:', kanbanParams);
-              ProgressToast.hide();
-              Toast.error('看板参数获取失败，缺少: ' + missingParams.join(', ') + '。请刷新禅道页面后重试。');
-              return;
-            }
-
-            // 所有必需参数都存在，继续处理
-            bugData.productId = kanbanParams.productId;
-            bugData.projectId = kanbanParams.projectId || bugData.projectId; // projectId 可选，优先使用看板解析的
-            bugData.regionId = kanbanParams.regionId;
-            bugData.laneId = kanbanParams.laneId;
-            bugData.columnId = kanbanParams.columnId;
-
-            console.log('[BugManager] ✓ 所有看板参数验证通过:', {
-              productId: bugData.productId,
-              projectId: bugData.projectId,
-              regionId: bugData.regionId,
-              laneId: bugData.laneId,
-              columnId: bugData.columnId
-            });
           } catch (e) {
             console.error('[BugManager] 获取看板参数异常:', e);
+            console.warn('[BugManager] 禅道连通失败，将 Bug 保存到本地，稍后可手动同步');
             ProgressToast.hide();
-            Toast.error('获取看板参数失败: ' + e.message);
-            return;
+            Toast.warning('禅道无法连通，Bug 已保存到本地，稍后可点击同步按钮重新同步');
+            // syncResponse 已经是失败状态，直接跳到保存逻辑
           }
-
-          // 使用看板 Bug 创建接口
-          syncResponse = await new Promise(resolve => {
-            const timeout = setTimeout(() => {
-              console.error('[BugManager] 看板 Bug 创建请求超时');
-              resolve({ success: false, reason: 'timeout', data: null });
-            }, 30000); // 30秒超时
-
-            chrome.runtime.sendMessage({
-              action: 'executeBugInZentaoPage',
-              baseUrl,
-              // productId 是必需的，不允许使用默认值
-              productId: bugData.productId,
-              bugData
-            }, (response) => {
-              clearTimeout(timeout);
-              resolve(response);
-            });
-          });
         } else {
           // ========== 普通执行 Bug 创建 ==========
           console.log('[BugManager] 使用普通执行逻辑创建 Bug');
@@ -8364,35 +8766,39 @@ const BugManager = {
 
           if (!productIdResponse || !productIdResponse.success) {
             console.error('[BugManager] ✗ 获取 productID 失败:', productIdResponse?.reason);
+            console.warn('[BugManager] 禅道连通失败，将 Bug 保存到本地，稍后可手动同步');
             ProgressToast.hide();
-            Toast.error('获取 productID 失败: ' + (productIdResponse?.reason || '未知错误'));
-            return;
-          }
+            Toast.warning('禅道无法连通，Bug 已保存到本地，稍后可点击同步按钮重新同步');
+            // syncResponse 已经是失败状态，跳到保存逻辑
+          } else {
+            // 成功获取 productID，继续创建 Bug
+            const productId = productIdResponse.productId;
+            console.log('[BugManager] ✓ 获取到 productID:', productId);
 
-          const productId = productIdResponse.productId;
-          console.log('[BugManager] ✓ 获取到 productID:', productId);
+            bugData.productId = productId;
 
-          bugData.productId = productId;
+            // 使用普通执行 Bug 创建接口
+            syncResponse = await new Promise(resolve => {
+              const timeout = setTimeout(() => {
+                console.error('[BugManager] 普通 Bug 创建请求超时');
+                resolve({ success: false, reason: 'timeout', data: null });
+              }, 60000); // 60秒超时（包括轮询等待时间）
 
-          // 使用普通执行 Bug 创建接口
-          syncResponse = await new Promise(resolve => {
-            const timeout = setTimeout(() => {
-              console.error('[BugManager] 普通 Bug 创建请求超时');
-              resolve({ success: false, reason: 'timeout', data: null });
-            }, 60000); // 60秒超时（包括轮询等待时间）
-
-            chrome.runtime.sendMessage({
-              action: 'executeNormalExecutionBugInZentaoPage',
-              baseUrl,
-              productId,
-              bugData
-            }, (response) => {
-              clearTimeout(timeout);
-              resolve(response);
+              chrome.runtime.sendMessage({
+                action: 'executeNormalExecutionBugInZentaoPage',
+                baseUrl,
+                productId,
+                bugData
+              }, (response) => {
+                clearTimeout(timeout);
+                resolve(response);
+              });
             });
-          });
-        }
+          }
+        } // 结束 else (普通执行)
+        } // 结束 if (executionId) 块
 
+        // 检查同步结果，如果成功则提取 bugId
         if (syncResponse && syncResponse.success) {
           // 适配返回结构，提取 bugId
           const data = syncResponse.data;
@@ -8634,7 +9040,13 @@ const BugManager = {
         console.log('[BugManager] ✓ Bug 保存到本地成功');
         console.log('[BugManager] 返回的 Bug 数据:', result.data);
 
-        Toast.success('Bug 已创建');
+        // 根据同步状态显示不同的提示
+        if (bugData.zentaoId) {
+          Toast.success('Bug 已创建并同步到禅道');
+        } else {
+          Toast.success('Bug 已保存到本地，稍后可点击"同步"按钮同步到禅道');
+        }
+
         this.clearDraft();
         this.hideBugModal();
         // 清除 modal 中的执行信息
