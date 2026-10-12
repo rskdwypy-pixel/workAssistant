@@ -87,8 +87,20 @@ const config = {
 
 // 验证必需的配置
 function validateConfig() {
-  if (!config.ai.apiKey) {
-    console.warn('⚠️  警告: OPENAI_API_KEY 未设置');
+  if (!config.ai.apiKey || !config.ai.apiKey.trim()) {
+    console.warn('');
+    console.warn('╔══════════════════════════════════════════════════════════════╗');
+    console.warn('║  ⚠️  AI 功能不可用：OPENAI_API_KEY 未配置                        ║');
+    console.warn('║                                                              ║');
+    console.warn('║  影响：任务自动拆解、执行归属匹配、日报生成均会降级为本地规则    ║');
+    console.warn('║  修复：在 .env 中填入有效的 API Key                             ║');
+    console.warn('║        OPENAI_API_KEY=你的密钥                                  ║');
+    console.warn('║        OPENAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4/    ║');
+    console.warn('║        OPENAI_MODEL=glm-4-flash                                 ║');
+    console.warn('╚══════════════════════════════════════════════════════════════╝');
+    console.warn('');
+  } else {
+    console.log(`✅ AI 已启用: ${config.ai.model} @ ${config.ai.baseURL}`);
   }
   if (!config.webhook.url) {
     console.log('ℹ️  Webhook 未配置，将仅使用系统通知');

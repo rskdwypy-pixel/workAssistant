@@ -64,28 +64,62 @@ async function readJSON(filePath) {
  * 写入JSON文件（原子写入）
  */
 async function writeJSON(filePath, data) {
+  const tmpPath = `${filePath}.tmp`;
   try {
     // 如果文件存在，先备份
     if (existsSync(filePath)) {
       await createBackup(filePath);
     }
 
-    // 写入临时文件
-    const tmpPath = `${filePath}.tmp`;
+    // 先把内容完整落到临时文件
     const content = JSON.stringify(data, null, 2);
     await fs.writeFile(tmpPath, content, 'utf-8');
 
-    // 原子重命名（如果目标文件存在，先删除）
-    if (existsSync(filePath)) {
-      await fs.unlink(filePath);
-    }
+    // rename 本身在 POSIX 上就是原子的，会直接覆盖目标文件。
+    // 旧实现先 unlink 再 rename，多一步删除动作，既非必要，
+    // 也会在受限环境下被拦截（表现为「写入失败」但任务其实没丢数据）。
     await fs.rename(tmpPath, filePath);
 
     return true;
   } catch (err) {
     console.error(`写入文件失败 ${filePath}:`, err.message);
-    return false;
+    // 兜底：rename 失败时退回直接覆盖写
+    try {
+      await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
+      return true;
+    } catch (err2) {
+      console.error(`回退写入同样失败 ${filePath}:`, err2.message);
+      return false;
+    }
   }
+}
+
+/**
+ * 任务数据写入互斥锁
+ *
+ * 背景：readTasks → 修改 → writeTasks 是「读-改-写」三步，
+ * 两个并发请求会各自读到同一份旧数据，后写的覆盖先写的，导致任务凭空消失。
+ * 这里用 Promise 链把所有任务写入串行化。
+ *
+ * @type {Promise<void>}
+ */
+let _tasksWriteLock = Promise.resolve();
+
+/**
+ * 以串行方式执行「读-改-写」事务，保证并发安全
+ * @param {(data:Object)=>Promise<Object>|Object} mutator - 接收当前数据，返回要写入的数据
+ * @returns {Promise<Object>} 写入后的数据
+ */
+async function updateTasks(mutator) {
+  const run = _tasksWriteLock.then(async () => {
+    const data = await readTasks();
+    const next = await mutator(data);
+    await writeTasks(next || data);
+    return next || data;
+  });
+  // 无论成功失败都要释放锁，避免一次异常导致后续全部卡死
+  _tasksWriteLock = run.then(() => undefined, () => undefined);
+  return run;
 }
 
 /**
@@ -186,6 +220,7 @@ function getTasksByDateRange(tasks, startDate, endDate) {
 export {
   readTasks,
   writeTasks,
+  updateTasks,
   readHistory,
   writeHistory,
   readTodayWorkHours,

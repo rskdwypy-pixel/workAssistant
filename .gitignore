@@ -11,8 +11,15 @@ logs/
 # 数据
 data/*.json
 
+# 本机环境相关（安装脚本生成，含本机 node 绝对路径）
+scripts/.node-path
+
 # 备份
 data/backups/
+
+# 测试产物（自动生成，含本机/内网运行数据）
+TEST_REPORT.json
+TEST_REPORT.md
 
 # 编辑器
 .vscode/

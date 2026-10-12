@@ -726,11 +726,25 @@
         <button class="close-btn" id="closeSettings">&times;</button>
       </div>
       <div class="modal-body">
+        <!-- 本地服务管理（由插件直接控制，无需手动跑 start.sh/stop.sh） -->
         <div class="settings-section" style="margin-bottom: 24px;">
-          <h4 style="display: flex; align-items: center; gap: 8px;">📋 服务状态 <span id="serviceStatusDot"
-              class="status-dot unknown" title="检测中..."></span></h4>
-          <div class="service-actions" style="margin-top: 8px;">
-            <p class="hint">⚠️ 浏览器插件无法直接使用，请先手动在命令行：使用 start.sh 启动服务，使用 stop.sh 停止服务</p>
+          <h4 style="display: flex; align-items: center; gap: 8px;">🖥️ 本地服务
+            <span id="serviceStatusDot" class="status-dot unknown" title="检测中..."></span>
+          </h4>
+          <div style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary,#f9fafb);">
+            <div style="font-size:13px;color:var(--text-secondary);" id="serviceStatusText">检测中…</div>
+            <div id="serviceStatusDetail"
+              style="font-size:12px;color:var(--text-tertiary,#9ca3af);margin-top:6px;line-height:1.6;"></div>
+            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center;">
+              <button id="serviceStartBtn" class="btn-secondary" style="padding:5px 12px;font-size:12px;">▶️ 启动服务</button>
+              <button id="serviceStopBtn" class="btn-secondary"
+                style="padding:5px 12px;font-size:12px;border-color:#fca5a5;color:#dc2626;">⏹️ 停止服务</button>
+              <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-secondary);cursor:pointer;">
+                <input type="checkbox" id="serviceDisableAutoStart" style="cursor:pointer;">
+                同时停用开机自启
+              </label>
+            </div>
+            <div id="serviceActionResult" class="test-result"></div>
           </div>
         </div>
 
@@ -858,7 +872,7 @@
           <div class="settings-item">
             <label>禅道 API 地址 <span class="required">*</span></label>
             <input type="text" id="zentaoUrl" placeholder="http://your-zentao.com">
-            <span class="input-hint">💡 如: http://10.128.1.8:8088</span>
+            <span class="input-hint">💡 如: http://your-zentao-host:port</span>
           </div>
           <div class="settings-item">
             <label>禅道账号 <span class="required">*</span></label>
@@ -1015,6 +1029,8 @@
   <!-- 禅道标签页和按钮状态管理器 -->
   <script src="zentaoTabManager.js"></script>
   <script src="buttonStateManager.js"></script>
+  <!-- AI 归属确认对话框（低置信度时让用户确认执行归属） -->
+  <script src="aiConfirmDialog.js"></script>
 
   <!-- 旧的 BugMode 翻转按钮已移除，现在使用 Tab 切换 -->
 

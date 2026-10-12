@@ -922,6 +922,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     ProgressToast.init();
   }
 
+  // 检查 AI 可用性并给出顶部提示（避免用户误以为「AI 不聪明」其实是没配 key）
+  checkAiAvailability();
+
+  // 检查后端连通性；未运行时由插件自动拉起
+  checkBackendHealth();
+
   // 监听来自 background.js 的进度更新消息
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log('[NewTab] 收到消息:', message.action, message);
@@ -2462,38 +2468,13 @@ function createTaskCard(task) {
     showTaskDetail(task);
   });
 
-  // 任务 ID 链接点击事件 - 复用禅道标签页
+  // 任务 ID 链接点击事件 - 在扩展内展示详情（不再打开禅道标签页）
   const taskLink = card.querySelector('.zentao-task-link');
   if (taskLink && task.zentaoId) {
-    taskLink.addEventListener('click', async (e) => {
+    taskLink.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-
-      try {
-        // 获取禅道配置
-        const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
-        const configResult = await configResp.json();
-
-        if (!configResult.success || !configResult.data || !configResult.data.url) {
-          Toast.error('禅道未配置');
-          return;
-        }
-
-        const baseUrl = configResult.data.url.replace(/\/$/, '');
-        const taskUrl = `${baseUrl}/zentao/task-view-${task.zentaoId}.html`;
-
-        // 使用 ZentaoTabManager 复用已存在的禅道标签页
-        const tab = await ZentaoTabManager.getOrCreateTab({
-          baseUrl,
-          targetUrl: taskUrl,
-          active: true  // 激活标签页
-        });
-
-        console.log('[TaskCard] 已在标签页', tab.id, '中打开任务详情');
-      } catch (err) {
-        console.error('[TaskCard] 打开任务详情失败:', err);
-        Toast.error('打开任务详情失败: ' + err.message);
-      }
+      showTaskDetail(task);
     });
   }
 
@@ -2688,7 +2669,7 @@ async function initTaskModal() {
   // 加载执行列表
   await loadExecutionOptions();
 
-  // 初始化指派人和抄送人的 multi-select
+  // 初始化指派人和抄送人的 multi-select（页面初始化阶段无 initialData）
   await initTaskUserSelects();
 
   // 草稿自动保存
@@ -2716,6 +2697,10 @@ async function showTaskModal(initialData = {}) {
   // 先加载执行列表（等待完成）
   await loadExecutionOptions();
 
+  // 每次打开都重置指派人组件，再按 initialData / 默认账号填入，
+  // 否则上一次打开时残留的选择会带到这一次。
+  await initTaskUserSelects(initialData);
+
   // 如果有初始数据，填充表单
   if (initialData.title) {
     document.getElementById('taskTitle').value = initialData.title;
@@ -2731,7 +2716,8 @@ async function showTaskModal(initialData = {}) {
     document.getElementById('taskPriority').value = initialData.priority;
   }
   // 移除状态的预填，状态将由进度自动计算
-  if (initialData.progress) {
+  // 注意：progress=0 是合法值，必须用 Number.isFinite 判断，不能用 if(0) 判假值
+  if (Number.isFinite(initialData.progress)) {
     document.getElementById('taskProgress').value = initialData.progress;
   }
   if (initialData.dueDate) {
@@ -2788,8 +2774,9 @@ async function loadExecutionOptions() {
 
 /**
  * 初始化任务弹框的指派人和抄送人多选组件
+ * @param {Object} initialData - 弹框初始数据（可含 assignedToList）
  */
-async function initTaskUserSelects() {
+async function initTaskUserSelects(initialData = {}) {
   // 获取用户列表
   let users = await ZentaoBrowserClient.getUsers();
   console.log('[TaskModal] 缓存的用户数量:', users ? Object.keys(users).length : 0);
@@ -2815,6 +2802,30 @@ async function initTaskUserSelects() {
 
   // 初始化抄送人多选组件
   initTaskMultiSelect('taskCc', users);
+
+  // 默认指派人：优先用草稿/初始数据，否则用当前禅道登录账号
+  let defaultAssignee = initialData.assignedToList && initialData.assignedToList.length
+    ? initialData.assignedToList
+    : null;
+
+  if (!defaultAssignee) {
+    const me = await getCurrentZentaoAccount();
+    if (me && Object.prototype.hasOwnProperty.call(users, me)) {
+      defaultAssignee = [me];
+      console.log('[TaskModal] 默认指派给当前禅道账号:', me, users[me]);
+    } else {
+      console.log('[TaskModal] 未取到当前禅道账号或该账号不在用户列表中，指派人留空');
+    }
+  }
+
+  if (defaultAssignee) {
+    setTaskMultiSelectValues('taskAssignee', defaultAssignee);
+  }
+
+  // 草稿里可能有抄送人
+  if (initialData.ccList && initialData.ccList.length) {
+    setTaskMultiSelectValues('taskCc', initialData.ccList);
+  }
 
   console.log('[TaskModal] 用户选择器初始化完成');
 }
@@ -2904,6 +2915,57 @@ function initTaskMultiSelect(fieldId, users) {
   // 保存引用以便后续访问
   container._selectedUsers = selectedUsers;
   container._users = users;
+  // 保存渲染函数，setTaskMultiSelectValues 需要重新渲染选中态
+  container._renderOptions = renderOptions;
+}
+
+/**
+ * 设置任务弹框多选组件的选中值
+ * @param {string} fieldId - taskAssignee / taskCc
+ * @param {Array<string>} accounts - 要选中的账号数组
+ */
+function setTaskMultiSelectValues(fieldId, accounts) {
+  const container = document.getElementById(`${fieldId}Container`);
+  if (!container || !container._selectedUsers || !container._users) return false;
+
+  const users = container._users;
+  const set = container._selectedUsers;
+
+  set.clear();
+  (accounts || []).forEach(acc => {
+    // 只有确实存在于用户列表中的账号才选中，避免显示成裸账号
+    if (acc && Object.prototype.hasOwnProperty.call(users, acc)) {
+      set.add(acc);
+    }
+  });
+
+  if (container._renderOptions) container._renderOptions();
+  updateTaskMultiSelectDisplay(fieldId, set, users);
+  return true;
+}
+
+/**
+ * 读取当前禅道登录账号，作为任务指派人的默认值
+ *
+ * 绝大多数情况下任务就是指派给自己，默认填好可以少一次手动选择。
+ * @returns {Promise<string|null>} 账号，找不到返回 null
+ */
+let _currentZentaoAccountCache = null;
+
+async function getCurrentZentaoAccount() {
+  if (_currentZentaoAccountCache) return _currentZentaoAccountCache;
+  try {
+    const resp = await fetch(`${API_BASE_URL}/api/zentao/config`);
+    const json = await resp.json();
+    const username = json && json.success && json.data && json.data.username;
+    if (username) {
+      _currentZentaoAccountCache = username;
+      return username;
+    }
+  } catch (e) {
+    console.warn('[TaskModal] 获取当前禅道账号失败:', e.message);
+  }
+  return null;
 }
 
 /**
@@ -3229,6 +3291,20 @@ async function addTask() {
       console.log('[AddTask] ✓ AI 分析成功');
       console.log('[AddTask] AI 分析结果:', result.data);
 
+      // —— AI 不可用：明确告知用户，而不是让用户误以为解析"不聪明" ——
+      if (result.aiAvailable === false) {
+        Toast.warning('AI 未配置，任务已按原文保存（标题/时间/优先级需手动填写）', 5000);
+      } else if (result.aiAnalysisFailed) {
+        Toast.warning('AI 解析失败，任务已按原文保存，请手动补充字段', 5000);
+      } else if (result.aiMatch && result.aiMatch.matchedBy) {
+        const m = result.aiMatch;
+        const viaMap = { 'ai-unified': 'AI', rule: '关键词', learning: '历史记录' };
+        console.log('[AddTask] 归属判定:', m.matchedBy, m.confidence, m.reason);
+        if (result.needConfirm) {
+          Toast.info(`AI 把握不大（${Math.round((m.confidence || 0) * 100)}%），请确认执行归属`, 4000);
+        }
+      }
+
       // 构建 initialData，包含 AI 分析的所有数据
       const initialData = {
         title: result.data.title || content.split('\n')[0],
@@ -3236,7 +3312,9 @@ async function addTask() {
         executionId: result.data.executionId || selectedExecutionId || '',
         priority: result.data.priority || 3,
         status: result.data.status || 'todo',
-        progress: result.data.progress || 0,
+        // 注意：progress 为 0 是合法值，必须透传，不能用 || 兜底成 0/空
+        progress: Number.isFinite(result.data.progress) ? result.data.progress : 0,
+        // 工期 → 截止时间（AI 已把「预计3天完成」换算成日期）
         dueDate: result.data.dueDate || ''
       };
 
@@ -3244,6 +3322,34 @@ async function addTask() {
 
       // 打开任务弹框并预填 AI 分析的数据（等待执行列表加载完成）
       await showTaskModal(initialData);
+
+      // —— 低置信度：不静默确认，弹出候选让用户选择 ——
+      if (result.needConfirm && Array.isArray(result.confirmCandidates) && result.confirmCandidates.length > 0) {
+        try {
+          const picked = await AiConfirmDialog.show(
+            '确认任务归属',
+            'AI 无法确定这条任务属于哪个执行，请选择：',
+            result.confirmCandidates,
+            initialData.executionId
+          );
+          if (picked) {
+            const selectEl = document.getElementById('taskExecution');
+            if (selectEl) {
+              selectEl.value = picked.id;
+              selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            // 记录纠正 → 下次同类描述可直接命中
+            fetch(`${API_BASE_URL}/api/ai/learn`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ content, executionId: picked.id })
+            }).catch(() => { });
+            Toast.success(`已记为「${picked.name}」，下次同类任务会自动匹配`);
+          }
+        } catch (e) {
+          console.warn('[AddTask] 归属确认取消:', e.message);
+        }
+      }
     } else {
       // AI 分析失败，打开弹框但只预填原始内容
       console.warn('[AddTask] AI 分析失败，使用原始内容');
@@ -3274,6 +3380,321 @@ async function addTask() {
     restoreButton();
     input.placeholder = originalPlaceholder;
   }
+}
+
+/**
+ * 检查后端 AI 是否可用，不可用时在页面顶部常驻提示条
+ *
+ * 背景：AI 不可用时后端会降级为本地规则，用户看到的效果是
+ * "标题没拆好、时间没识别" —— 很容易误判成模型能力差。
+ * 这里把真实原因直接摆在页面上。
+ */
+let _aiStatusCache = null;
+
+/**
+ * 检查后端连通性；不可用时由 background 通过 Native Messaging 自动拉起
+ *
+ * 正常情况下用户无需手动启动后端。这里只在自动拉起也失败时，
+ * 才给出一条带「重试」按钮的提示。
+ */
+async function checkBackendHealth() {
+  try {
+    const resp = await fetch(`${API_BASE_URL}/api/config`);
+    if (resp.ok) {
+      removeBackendOfflineBanner();
+      console.log('[后端状态] ✅ 已连接');
+      return true;
+    }
+  } catch (e) {
+    // 落到下面处理
+  }
+
+  console.warn('[后端状态] ❌ 后端未响应，尝试由插件自动拉起...');
+
+  // 交给 background 尝试拉起（connectNative 需要 background 权限）
+  let started = false;
+  try {
+    const r = await chrome.runtime.sendMessage({ action: 'startBackend' });
+    started = !!(r && r.success);
+    if (r && r.reason) console.warn('[后端状态] 拉起未成功:', r.reason);
+  } catch (e) {
+    console.warn('[后端状态] 无法与 background 通信:', e.message);
+  }
+
+  if (started) {
+    removeBackendOfflineBanner();
+    Toast.success('已自动启动本地服务');
+    // 后端就绪后重新走一遍 AI 可用性检查
+    setTimeout(() => checkAiAvailability(true), 800);
+    return true;
+  }
+
+  showBackendOfflineBanner();
+  return false;
+}
+
+function showBackendOfflineBanner() {
+  const ID = 'backendOfflineBanner';
+  if (document.getElementById(ID)) return;
+
+  const banner = document.createElement('div');
+  banner.id = ID;
+  banner.style.cssText = `
+    position:fixed; top:0; left:0; right:0; z-index:99999;
+    background:#fef2f2; border-bottom:1px solid #fecaca; color:#991b1b;
+    padding:8px 16px; font-size:13px; line-height:1.5;
+    display:flex; align-items:center; gap:10px; justify-content:center;
+    box-shadow:0 1px 4px rgba(0,0,0,.06);
+  `;
+  banner.innerHTML = `
+    <span>⚠️ <b>本地服务未运行</b>：任务同步、AI 解析等功能暂不可用。</span>
+    <button type="button" data-backend-retry
+      style="padding:4px 12px;border:1px solid #fca5a5;background:#fff;color:#991b1b;
+             border-radius:6px;cursor:pointer;font-size:13px;">重试启动</button>
+    <button type="button" data-backend-dismiss
+      style="border:none;background:transparent;cursor:pointer;font-size:16px;color:#991b1b;line-height:1;">×</button>
+  `;
+  document.body.appendChild(banner);
+
+  banner.querySelector('[data-backend-retry]').addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    e.target.textContent = '启动中...';
+    const ok = await checkBackendHealth();
+    if (!ok) {
+      e.target.disabled = false;
+      e.target.textContent = '重试启动';
+    }
+  });
+  banner.querySelector('[data-backend-dismiss]').addEventListener('click', removeBackendOfflineBanner);
+}
+
+function removeBackendOfflineBanner() {
+  const el = document.getElementById('backendOfflineBanner');
+  if (el && el.parentNode) el.parentNode.removeChild(el);
+}
+
+// ============================================================================
+// 本地服务管理（设置面板）
+// ============================================================================
+
+/**
+ * 刷新「本地服务」状态卡
+ *
+ * 状态如实展示：是否在跑、由谁启动、是否装了开机自启。
+ * 特别是「装了开机自启」这一项 —— 直接决定点「停止」能不能真停住，
+ * 不提前告知的话用户会看到服务秒回，误以为按钮坏了。
+ */
+async function checkServiceStatus() {
+  const dot = document.getElementById('serviceStatusDot');
+  const text = document.getElementById('serviceStatusText');
+  const detail = document.getElementById('serviceStatusDetail');
+  const startBtn = document.getElementById('serviceStartBtn');
+  const stopBtn = document.getElementById('serviceStopBtn');
+  if (!dot || !text) return;
+
+  text.textContent = '检测中…';
+
+  let resp = null;
+  try {
+    resp = await chrome.runtime.sendMessage({ action: 'getServiceStatus' });
+  } catch (e) {
+    resp = { success: false, reason: e.message };
+  }
+
+  if (resp && resp.success && resp.alive && resp.data) {
+    const d = resp.data;
+    // 复用已有的 status-dot 样式类，不另起内联样式，保持与主题一致
+    dot.className = 'status-dot online';
+    dot.title = '本地服务运行中';
+
+    const mins = Math.floor((d.uptimeSeconds || 0) / 60);
+    const uptime = mins >= 60
+      ? `${Math.floor(mins / 60)} 小时 ${mins % 60} 分`
+      : `${mins} 分钟`;
+
+    const sourceMap = {
+      native: '由插件自动拉起',
+      launchd: '开机自启',
+      manual: '手动启动'
+    };
+
+    text.textContent = `运行中 · PID ${d.pid}`;
+
+    let info = `已运行 ${uptime} · ${sourceMap[d.launchedBy] || d.launchedBy}`;
+    if (d.launchAgentInstalled) {
+      info += ' · 已安装开机自启（停止时会一并停用）';
+    }
+    detail.textContent = info;
+  } else {
+    dot.className = 'status-dot offline';
+    dot.title = '本地服务未运行';
+    text.textContent = '未运行';
+    detail.textContent = resp && resp.reason
+      ? `原因：${resp.reason}`
+      : '点击「启动服务」拉起（需已执行 npm run setup:chrome-host）';
+  }
+
+  if (startBtn) startBtn.style.opacity = (resp && resp.alive) ? '0.5' : '1';
+  if (stopBtn) stopBtn.disabled = !(resp && resp.alive);
+}
+
+/**
+ * 停止本地服务
+ */
+async function stopBackendService() {
+  const btn = document.getElementById('serviceStopBtn');
+  const resultEl = document.getElementById('serviceActionResult');
+  const disableAuto = document.getElementById('serviceDisableAutoStart');
+
+  if (!confirm(
+    '确定停止本地服务吗？\n\n' +
+    '停止后：任务同步、AI 解析、日报定时生成都会暂停。\n' +
+    '（日报定时任务依赖后端常驻，请确认现在不需要。）'
+  )) return;
+
+  if (btn) { btn.disabled = true; btn.textContent = '停止中…'; }
+  if (resultEl) { resultEl.textContent = ''; resultEl.style.color = 'var(--text-secondary)'; }
+
+  try {
+    const resp = await chrome.runtime.sendMessage({
+      action: 'stopBackend',
+      disableAutoStart: !!(disableAuto && disableAuto.checked)
+    });
+
+    if (resp && resp.success) {
+      const notes = (resp.notes && resp.notes.length) ? `（${resp.notes.join('；')}）` : '';
+      if (resultEl) {
+        resultEl.textContent = '✓ 已停止' + notes;
+        resultEl.style.color = '#16a34a';
+      }
+      Toast.success('本地服务已停止');
+      // 服务已停，隐藏离线提示条由后台判断，这里直接移除避免重复提示
+      removeBackendOfflineBanner();
+    } else {
+      const why = (resp && (resp.reason || resp.message)) || '未知原因';
+      if (resultEl) {
+        resultEl.textContent = '✗ 停止失败：' + why;
+        resultEl.style.color = '#dc2626';
+      }
+      Toast.error('停止失败：' + why);
+    }
+  } catch (e) {
+    if (resultEl) {
+      resultEl.textContent = '✗ 停止异常：' + e.message;
+      resultEl.style.color = '#dc2626';
+    }
+    Toast.error('停止异常：' + e.message);
+  } finally {
+    if (btn) { btn.textContent = '⏹️ 停止服务'; }
+    await checkServiceStatus();
+  }
+}
+
+/**
+ * 启动本地服务
+ */
+async function startBackendService() {
+  const btn = document.getElementById('serviceStartBtn');
+  const resultEl = document.getElementById('serviceActionResult');
+
+  if (btn) { btn.disabled = true; btn.textContent = '启动中…'; }
+  if (resultEl) { resultEl.textContent = ''; resultEl.style.color = 'var(--text-secondary)'; }
+
+  try {
+    const resp = await chrome.runtime.sendMessage({ action: 'startBackend' });
+
+    if (resp && resp.success) {
+      if (resultEl) {
+        resultEl.textContent = '✓ 已启动';
+        resultEl.style.color = '#16a34a';
+      }
+      Toast.success('本地服务已启动');
+    } else {
+      const why = (resp && resp.reason) || '未知原因';
+      if (resultEl) {
+        resultEl.textContent = '✗ 启动失败：' + why;
+        resultEl.style.color = '#dc2626';
+      }
+      Toast.error('启动失败：' + why);
+    }
+  } catch (e) {
+    if (resultEl) {
+      resultEl.textContent = '✗ 启动异常：' + e.message;
+      resultEl.style.color = '#dc2626';
+    }
+    Toast.error('启动异常：' + e.message);
+  } finally {
+    if (btn) { btn.textContent = '▶️ 启动服务'; }
+    await checkServiceStatus();
+  }
+}
+
+// 绑定本地服务管理按钮（DOMContentLoaded 时元素才存在）
+document.addEventListener('DOMContentLoaded', () => {
+  const stopBtn = document.getElementById('serviceStopBtn');
+  const startBtn = document.getElementById('serviceStartBtn');
+  if (stopBtn) stopBtn.addEventListener('click', stopBackendService);
+  if (startBtn) startBtn.addEventListener('click', startBackendService);
+});
+
+async function checkAiAvailability(force = false) {
+  if (_aiStatusCache && !force) return _aiStatusCache;
+
+  try {
+    const resp = await fetch(`${API_BASE_URL}/api/config`);
+    const json = await resp.json();
+    const ai = json && json.data && json.data.ai;
+    if (!ai) return null;
+
+    _aiStatusCache = {
+      available: !!ai.available,
+      reason: ai.unavailableReason || '',
+      model: ai.aiModel || '',
+      baseURL: ai.apiBaseUrl || ''
+    };
+  } catch (e) {
+    console.warn('[AI状态] 获取配置失败:', e.message);
+    return null;
+  }
+
+  if (_aiStatusCache.available) {
+    console.log('[AI状态] ✅ AI 可用:', _aiStatusCache.model);
+    removeAiUnavailableBanner();
+    return _aiStatusCache;
+  }
+
+  console.warn('[AI状态] ⚠️ AI 不可用:', _aiStatusCache.reason);
+  showAiUnavailableBanner(_aiStatusCache);
+  return _aiStatusCache;
+}
+
+function showAiUnavailableBanner(info) {
+  const ID = 'aiUnavailableBanner';
+  if (document.getElementById(ID)) return;
+
+  const banner = document.createElement('div');
+  banner.id = ID;
+  banner.style.cssText = `
+    position:fixed; top:0; left:0; right:0; z-index:99999;
+    background:#fffbeb; border-bottom:1px solid #fcd34d; color:#92400e;
+    padding:8px 16px; font-size:13px; line-height:1.5;
+    display:flex; align-items:center; gap:10px; justify-content:center;
+    box-shadow:0 1px 4px rgba(0,0,0,.06);
+  `;
+  banner.innerHTML = `
+    <span>⚠️ <b>AI 智能解析未启用</b>：后端未配置 API Key，任务标题/时间/优先级将按原文保存，需手动填写。</span>
+    <span style="opacity:.75">（填写 .env 的 OPENAI_API_KEY 后重启后端即可启用）</span>
+    <button type="button" data-ai-dismiss
+      style="margin-left:8px;border:none;background:transparent;cursor:pointer;font-size:16px;color:#92400e;line-height:1;">×</button>
+  `;
+  document.body.appendChild(banner);
+
+  banner.querySelector('[data-ai-dismiss]').addEventListener('click', removeAiUnavailableBanner);
+}
+
+function removeAiUnavailableBanner() {
+  const el = document.getElementById('aiUnavailableBanner');
+  if (el && el.parentNode) el.parentNode.removeChild(el);
 }
 
 // 更新任务进度
@@ -4245,25 +4666,8 @@ async function loadZentaoConfigStatus() {
 }
 
 // 检查服务状态
-async function checkServiceStatus() {
-  const statusDot = document.getElementById('serviceStatusDot');
-
-  statusDot.className = 'status-dot unknown';
-  statusDot.title = '检测中...';
-
-  try {
-    const response = await fetch(`${API_BASE_URL}/health`);
-    if (response.ok) {
-      statusDot.className = 'status-dot online';
-      statusDot.title = '后端服务在线';
-    } else {
-      throw new Error('服务异常');
-    }
-  } catch (err) {
-    statusDot.className = 'status-dot offline';
-    statusDot.title = '后端服务离线';
-  }
-}
+// 说明：完整实现（状态卡 + 启动/停止）见文件后段 checkServiceStatus()，
+// 此处原有的精简版已移除，避免重复声明。
 
 // 显示历史日报列表
 async function showHistoryModal() {
@@ -5247,120 +5651,29 @@ const ZentaoBrowserClient = {
    * 通过创建临时标签页访问 my-team.html，注入脚本提取用户信息
    */
   async loadUsersFromTeamPage() {
-    const config = await this.initConfig();
-    const baseUrl = config?.url?.replace(/\/$/, '');
-    if (!baseUrl) {
-      console.warn('[ZentaoBrowser] 无法获取 baseUrl，跳过用户列表加载');
-      return {};
-    }
-
-    console.log('[ZentaoBrowser] 开始从禅道页面加载用户列表...');
-
-    // 创建临时标签页获取用户列表（不使用 ZentaoTabManager，避免关闭用户标签页）
-    const targetUrl = `${baseUrl}/zentao/my-team.html`;
-    const tab = await ZentaoTabManager.getOrCreateTab({
-      baseUrl,
-      targetUrl,
-      active: false,
-      reload: false
-    });
-
-    // 标记这是临时标签页，需要在加载完成后关闭
-    let shouldCloseTab = false;
-
-    // 如果标签页不在目标页面，导航过去
-    if (!tab.url.includes('my-team.html')) {
-      console.log('[ZentaoBrowser] 标签页不在 my-team.html，导航中...');
-      await ZentaoTabManager.navigateTo(tab, targetUrl, { waitTimeout: 10000 });
-      // 导航后不关闭，因为这是复用的标签页
-    } else {
-      // 如果已经在目标页面，说明是复用的标签页，不关闭
-      console.log('[ZentaoBrowser] 标签页已在目标页面，复用现有标签页');
-    }
-
-    // 注入脚本提取用户 - 参考 Gemini 方案的纯函数设计
-    console.log('[ZentaoBrowser] 准备注入脚本，tab ID:', tab.id, 'URL:', tab.url);
-
-    // 先获取 tab 信息确认页面已加载
-    const updatedTab = await chrome.tabs.get(tab.id);
-    console.log('[ZentaoBrowser] Tab 当前状态:', {
-      id: updatedTab.id,
-      url: updatedTab.url,
-      status: updatedTab.status,
-      title: updatedTab.title
-    });
-
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: scrapeUserDataFromZentao
-    });
-
-    console.log('[ZentaoBrowser] 脚本注入完成，results:', results);
-
-    if (results && results.length > 0) {
-      const data = results[0].result;
-      console.log('[ZentaoBrowser] 返回数据:', data);
-
-      // 打印所有从注入脚本返回的日志
-      if (data && data.logs && Array.isArray(data.logs)) {
-        console.log('[ZentaoBrowser] ========== 注入脚本日志开始 ==========');
-        data.logs.forEach(logEntry => {
-          console.log('[scrapeUserData]', ...logEntry.args);
-        });
-        console.log('[ZentaoBrowser] ========== 注入脚本日志结束 ==========');
-      }
-
-      if (data && data.status === 'success' && data.data) {
-        const newUserCount = Object.keys(data.data).length;
-        const existingUserCount = Object.keys(this.users).length;
-
-        // 只有当新加载的用户数量大于已有数量时才更新
-        if (newUserCount > existingUserCount) {
-          this.users = data.data;
-          this.usersLoaded = true;
-          console.log('[ZentaoBrowser] 从禅道页面加载用户列表成功:', newUserCount, '个用户 (之前:', existingUserCount, '个)');
-          console.log('[ZentaoBrowser] 用户列表:', this.users);
-          if (data.list) {
-            console.log('[ZentaoBrowser] 用户详细信息:', data.list);
-          }
-
-          // 保存用户列表到后端
-          await this.saveUsersToBackend(this.users);
-        } else {
-          console.log('[ZentaoBrowser] 新加载的用户数量(', newUserCount, ') 不多于已有数量(', existingUserCount, ')，保留现有数据');
-        }
-      } else if (data && data.status === 'error') {
-        console.warn('[ZentaoBrowser] 提取用户失败:', data.message);
-        // 不覆盖已有数据
-        if (Object.keys(this.users).length === 0) {
-          this.users = {};
-          this.usersLoaded = true;
-        }
-      } else if (data && data.status === 'fatal') {
-        console.error('[ZentaoBrowser] 提取过程发生致命错误:', data.message);
-        // 不覆盖已有数据
-        if (Object.keys(this.users).length === 0) {
-          this.users = {};
-          this.usersLoaded = true;
-        }
+    // 后端直连：用户列表已由后端缓存到 /api/zentao/users，不再打开 my-team.html 标签页
+    console.log('[ZentaoBrowser] 从后端加载禅道用户列表...');
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/zentao/users`);
+      const result = await resp.json();
+      const users = (result && result.data) || {};
+      const count = Object.keys(users).length;
+      if (count > 0) {
+        this.users = users;
+        this.usersLoaded = true;
+        console.log('[ZentaoBrowser] 已从后端加载用户列表:', count, '个用户');
       } else {
-        console.warn('[ZentaoBrowser] 返回数据格式异常:', data);
-        // 不覆盖已有数据
-        if (Object.keys(this.users).length === 0) {
-          this.users = {};
-          this.usersLoaded = true;
-        }
+        this.users = this.users || {};
+        this.usersLoaded = true;
+        console.warn('[ZentaoBrowser] 后端用户列表为空');
       }
-    } else {
-      console.warn('[ZentaoBrowser] 用户列表加载失败，无结果');
-      this.users = {};
+      return this.users;
+    } catch (err) {
+      console.warn('[ZentaoBrowser] 加载用户列表失败:', err.message);
+      this.users = this.users || {};
       this.usersLoaded = true;
+      return this.users;
     }
-
-    // 不关闭标签页，因为它是通过 ZentaoTabManager 复用的，可能是用户正在使用的标签页
-    console.log('[ZentaoBrowser] 用户列表加载完成，保留标签页');
-
-    return this.users;
   },
 
   /**
@@ -5586,88 +5899,13 @@ const ZentaoBrowserClient = {
         return result;
       }
 
-      const data = result.data;
-
-      // 检查是否是登录失效
-      if (data.result === false && data.message && (
-        data.message.includes('登录已超时') ||
-        data.message.includes('请重新登入') ||
-        data.message.includes('请先登录')
-      )) {
-        console.log('[ZentaoBrowser] 检测到登录失效，尝试刷新 Cookie...');
-
-        // 直接在浏览器端重新登录，获取新的 Cookie，仅重试一次防死循环
-        const refreshSuccess = await this.refreshCookies();
-
-        if (refreshSuccess) {
-          if (taskData._retryCount) {
-            console.log('[ZentaoBrowser] Cookie 已刷新但重试仍失败，放弃。');
-            return { success: false, fallbackNeeded: true, reason: 'retry_failed' };
-          }
-          console.log('[ZentaoBrowser] Cookie 已刷新，重试创建任务');
-          taskData._retryCount = 1;
-          return await this.createTask(taskData);
-        }
-
-        console.log('[ZentaoBrowser] Cookie 刷新失败');
-        return { success: false, fallbackNeeded: true, reason: 'not_logged_in' };
+      // 后端直连返回 { success, taskId, duplicate, message }
+      if (result.taskId) {
+        console.log('[ZentaoBrowser] ✓ 任务创建成功，taskId:', result.taskId);
+        return { success: true, taskId: parseInt(result.taskId, 10) };
       }
-
-      // 检查创建结果
-      if (data && data.result === 'success' && data.locate) {
-        console.log('[ZentaoBrowser] 任务创建成功，locate:', data.locate);
-
-        // 如果是 .json 接口，locate 有时会带参数，也可能是重定向 URL
-        let taskId = null;
-
-        // 尝试多种正则模式提取任务ID
-        const patterns = [
-          /task[-_]view[-_]?(\d+)/,   // task-view-123
-          /taskID=(\d+)/,             // taskID=123
-          /tasks.*?id=(\d+)/,         // tasks?id=123
-          /taskId[=:](\d+)/,          // taskId:123 或 taskId=123
-          /["']id["']:\s*(\d+)/       // "id": 123 (从JSON中提取)
-        ];
-
-        // 注意：execution-task-{id}-xxx 中的 id 是执行ID，不是任务ID，不能直接使用
-        // 如果 locate 是执行任务列表页，需要从页面中提取第一个任务ID
-
-        for (const pattern of patterns) {
-          const match = data.locate.match(pattern);
-          if (match) {
-            taskId = match[1];
-            console.log('[ZentaoBrowser] ✓ 从 locate 提取到任务ID:', taskId, '模式:', pattern.source);
-            break;
-          }
-        }
-
-        if (taskId) {
-          return { success: true, taskId: parseInt(taskId, 10) };
-        }
-
-        // 尝试解析 JSON 如果服务端直接返回 id（极少数情况）
-        if (data.id) {
-          const taskId = parseInt(data.id, 10);
-          console.log('[ZentaoBrowser] ✓ 从响应中获取到任务ID:', taskId);
-          return { success: true, taskId };
-        }
-
-        // 如果直接提取失败，尝试访问页面
-        console.log('[ZentaoBrowser] 尝试从页面提取任务ID');
-        taskId = await this.extractTaskIdFromHtml(data.locate);
-        if (taskId) {
-          const numericTaskId = parseInt(taskId, 10);
-          console.log('[ZentaoBrowser] ✓ 从页面提取到任务ID:', numericTaskId);
-          return { success: true, taskId: numericTaskId };
-        }
-      } else if (data && data.message) {
-        console.warn('[ZentaoBrowser] 创建任务失败，提示:', data.message);
-        // 作为 JSON 数组或者字符串对象解析出来给前端提示
-        return { success: false, reason: typeof data.message === 'string' ? data.message : JSON.stringify(data.message) };
-      }
-
-      console.log('[ZentaoBrowser] 创建任务未返回有效结果', data);
-      return { success: false, reason: 'unrecognized_response' };
+      console.warn('[ZentaoBrowser] 创建任务未返回任务ID:', result);
+      return { success: false, reason: result.reason || result.message || 'unrecognized_response' };
     } catch (err) {
       console.warn('[ZentaoBrowser] 创建任务异常:', err.message);
       return { success: false, reason: err.message };
@@ -6857,220 +7095,29 @@ const ExecutionFavorites = {
 
       const zentaoUrl = configResult.data.url.replace(/\/$/, '');
 
-      // 使用浏览器 cookie 调用禅道 API 获取执行列表
-      const cookie = await this.getZentaoCookie(zentaoUrl);
-      if (!cookie) {
-        throw new Error('无法获取禅道会话，请先在浏览器中登录禅道');
+      // 通过后端获取执行列表（后端持有禅道会话，无需浏览器 cookie，也不会打开标签页）
+      const execResp = await fetch(`${API_BASE_URL}/api/zentao/executions`);
+      const execResult = await execResp.json();
+      if (!execResult.success) {
+        throw new Error(execResult.message || '获取执行列表失败');
       }
-
-      // 调用禅道 API 获取执行列表
-      // 先获取项目列表
-      let projects = [];
-      try {
-        const projResp = await fetch(`${zentaoUrl}/zentao/project-browse-all-all--------.json`, {
-          headers: { 'Cookie': cookie }
-        });
-        console.log('[ExecutionFavorites] 项目列表响应状态:', projResp.status);
-        if (projResp.ok) {
-          const projData = await projResp.json();
-          console.log('[ExecutionFavorites] 项目列表原始数据:', projData);
-          // 禅道返回的数据在 data 字段中，且是 JSON 字符串
-          if (projData && projData.status === 'success' && projData.data) {
-            try {
-              const nested = JSON.parse(projData.data);
-              console.log('[ExecutionFavorites] 解析后的数据键:', Object.keys(nested));
-              if (Array.isArray(nested.projects)) {
-                projects = nested.projects;
-                console.log('[ExecutionFavorites] 获取到项目列表 (nested.projects):', projects.length);
-              } else if (nested.projectStats && typeof nested.projectStats === 'object') {
-                // projectStats 是一个对象 {id: projectInfo}
-                projects = Object.values(nested.projectStats);
-                console.log('[ExecutionFavorites] 获取到项目列表 (projectStats):', projects.length);
-              } else if (Array.isArray(nested)) {
-                projects = nested;
-                console.log('[ExecutionFavorites] 获取到项目列表 (nested):', projects.length);
-              } else {
-                console.log('[ExecutionFavorites] 数据结构不匹配，projects:', nested.projects, 'nested:', nested);
-              }
-            } catch (parseErr) {
-              console.error('[ExecutionFavorites] 解析项目数据失败:', parseErr);
-            }
-          } else if (projData && Array.isArray(projData.projects)) {
-            projects = projData.projects;
-            console.log('[ExecutionFavorites] 获取到项目列表 (直接):', projects.length);
-          }
-        }
-      } catch (e) {
-        console.error('[ExecutionFavorites] 获取项目列表失败:', e.message);
-      }
-
-      if (projects.length === 0) {
-        throw new Error('未获取到项目列表');
-      }
-
-      console.log('[ExecutionFavorites] 开始遍历', projects.length, '个项目获取执行...');
-
-      // 按项目分组存储执行
-      const executionsByProject = {};
-
-      // 先获取全局执行列表
-      let allExecutionsData = null;
-      try {
-        // 使用之前成功的 execution-browse API
-        const resp = await fetch(`${zentaoUrl}/zentao/execution-browse-all-all--------0-200-1.json`, {
-          headers: { 'Cookie': cookie }
-        });
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data && data.status === 'success' && data.data) {
-            const nested = JSON.parse(data.data);
-            console.log('[ExecutionFavorites] execution-browse 数据键:', Object.keys(nested));
-
-            // 尝试获取执行列表
-            if (nested.executions && typeof nested.executions === 'object') {
-              allExecutionsData = Object.entries(nested.executions).map(([id, name]) => ({
-                id,
-                name: name || `执行 ${id}`
-              }));
-            } else if (nested.executionStats && typeof nested.executionStats === 'object') {
-              allExecutionsData = Object.entries(nested.executionStats).map(([id, name]) => ({
-                id,
-                name: name || `执行 ${id}`
-              }));
-            } else if (Array.isArray(nested.executionStats)) {
-              allExecutionsData = nested.executionStats;
-            } else if (Array.isArray(nested.executions)) {
-              allExecutionsData = nested.executions;
-            }
-            console.log('[ExecutionFavorites] 获取到全局执行列表:', allExecutionsData?.length);
-          }
-        }
-      } catch (e) {
-        console.log('[ExecutionFavorites] 获取全局执行列表失败:', e.message);
-      }
-
-      if (!allExecutionsData || allExecutionsData.length === 0) {
+      const rawExecutions = Array.isArray(execResult.data) ? execResult.data : [];
+      if (rawExecutions.length === 0) {
         throw new Error('未找到执行数据');
       }
 
-      // 创建项目 ID 到项目名称的映射
-      const projectMap = {};
-      projects.forEach(p => {
-        projectMap[p.id] = p.name || p.title;
-      });
-      console.log('[ExecutionFavorites] 项目映射:', projectMap);
-
-      // 对每个执行获取详情（包括项目信息）
-      const batchSize = 10;
-      for (let i = 0; i < allExecutionsData.length; i += batchSize) {
-        const batch = allExecutionsData.slice(i, i + batchSize);
-        const details = await Promise.all(batch.map(async (exec) => {
-          try {
-            const detailResp = await fetch(`${zentaoUrl}/zentao/execution-view-${exec.id}.json`, {
-              headers: { 'Cookie': cookie }
-            });
-            if (detailResp.ok) {
-              const detailData = await detailResp.json();
-              if (detailData && detailData.status === 'success' && detailData.data) {
-                const nested = JSON.parse(detailData.data);
-                // 打印前几个执行的详情
-                if (allExecutionsData.indexOf(exec) < 3) {
-                  console.log(`[ExecutionFavorites] 执行 ${exec.id} 详情数据键:`, Object.keys(nested));
-                  console.log(`[ExecutionFavorites] 执行 ${exec.id} nested.execution.type:`, nested.execution?.type);
-                  console.log(`[ExecutionFavorites] 执行 ${exec.id} nested.type:`, nested.type);
-                }
-                // 正确处理 project 对象
-                let projectName = '';
-                let projectId = '';
-                if (nested.project && typeof nested.project === 'object') {
-                  projectId = nested.project.id || '';
-                  projectName = projectId ? (projectMap[projectId] || nested.project.name || '') : '';
-                } else if (typeof nested.project === 'string') {
-                  projectName = nested.project;
-                }
-                if (!projectName && nested.projectID && projectMap[nested.projectID]) {
-                  projectName = projectMap[nested.projectID];
-                  projectId = nested.projectID;
-                }
-                // 关键：执行类型在 nested.execution.type 中，不是 nested.type
-                const executionType = nested.execution?.type || 'execution';
-                return {
-                  id: exec.id,
-                  name: exec.name,
-                  projectName: projectName,
-                  projectId: projectId,
-                  status: nested.execution?.status || 'open',
-                  // 执行类型: kanban, sprint, stage
-                  type: executionType
-                };
-              }
-            }
-          } catch (e) {
-            console.log(`[ExecutionFavorites] 执行 ${exec.id} 详情获取失败:`, e.message);
-          }
-          return null;
-        }));
-
-        details.forEach(detail => {
-          if (detail && detail.projectName) {
-            if (!executionsByProject[detail.projectName]) {
-              executionsByProject[detail.projectName] = {
-                project: null,
-                executions: []
-              };
-            }
-            executionsByProject[detail.projectName].executions.push(detail);
-          }
-        });
-
-        console.log('[ExecutionFavorites] 已处理', Math.min(i + batchSize, allExecutionsData.length), '/', allExecutionsData.length);
-      }
-
-      console.log('[ExecutionFavorites] 共有', Object.keys(executionsByProject).length, '个项目有执行');
-
-      if (Object.keys(executionsByProject).length === 0) {
-        throw new Error('未找到执行数据，请尝试手动在禅道中打开执行列表页面');
-      }
-
-      // 将数据转换为扁平数组格式
-      executions = [];
-      Object.entries(executionsByProject).forEach(([projectName, data]) => {
-        data.executions.forEach(exec => {
-          if (exec) { // 确保 exec 不为 null
-            executions.push({
-              id: String(exec.id),
-              name: exec.name || exec.title || `执行 ${exec.id}`,
-              projectName: projectName,
-              projectId: exec.projectId || data.project?.id || '',
-              status: exec.status || 'open',
-              // 关键：保留执行类型字段
-              type: exec.type || 'execution'
-            });
-          }
-        });
-      });
-
-      console.log('[ExecutionFavorites] 最终执行列表长度:', executions.length);
-      console.log('[ExecutionFavorites] 执行类型分布:', executions.reduce((acc, ex) => {
-        acc[ex.type] = (acc[ex.type] || 0) + 1;
-        return acc;
-      }, {}));
-
-      // 格式化执行数据（已包含项目信息和类型）
-      const formattedExecutions = executions.map(ex => {
-        // 直接使用从 API 获取的准确 type 字段
+      const formattedExecutions = rawExecutions.map(ex => {
         const executionType = ex.type || 'execution';
-
         return {
-          id: ex.id,
+          id: String(ex.id),
           name: ex.name,
-          projectName: ex.projectName,
-          projectId: ex.projectId,
+          projectName: ex.projectName || '',
+          projectId: String(ex.projectId || ''),
           productName: ex.productName || '',
           status: ex.status || 'open',
-          type: executionType,  // 使用从 API 获取的执行类型: kanban, sprint, stage
-          kanbanId: executionType === 'kanban' ? ex.id : null,  // 看板ID
-          isDefault: ex.id === String(configResult.data.executionId)
+          type: executionType,
+          kanbanId: executionType === 'kanban' ? String(ex.id) : null,
+          isDefault: String(ex.id) === String(configResult.data.executionId)
         };
       });
 
@@ -7671,14 +7718,13 @@ const BugManager = {
       </div>
     `;
 
-    // Bug ID 点击事件 - 跳转到禅道详情页面
+    // Bug ID 点击事件 - 在扩展内展示详情（不再打开禅道标签页）
     const bugIdLink = card.querySelector('.bug-id-link-inline');
     if (bugIdLink) {
       bugIdLink.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        const zentaoBugId = bugIdLink.dataset.bugId;
-        this.openBugDetailInZentao(zentaoBugId);
+        this.showBugDetail(bug.id);
       });
     }
 
@@ -8099,34 +8145,15 @@ const BugManager = {
   },
 
   /**
-   * 在禅道中打开 Bug 详情页面
-   * @param {string|number} bugId - Bug ID
+   * 在扩展内展示 Bug 详情（不再打开禅道标签页）
+   * @param {string|number} bugId - 本地 Bug ID 或禅道 Bug ID
    */
   async openBugDetailInZentao(bugId) {
-    try {
-      const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
-      const configResult = await configResp.json();
-      const baseUrl = configResult.data?.url?.replace(/\/$/, '');
-
-      if (!baseUrl) {
-        Toast.error('未配置禅道地址');
-        return;
-      }
-
-      const bugDetailUrl = `${baseUrl}/zentao/bug-view-${bugId}.html`;
-
-      // 使用 ZentaoTabManager 复用已存在的禅道标签页
-      const tab = await ZentaoTabManager.getOrCreateTab({
-        baseUrl,
-        targetUrl: bugDetailUrl,
-        active: true
-      });
-
-      console.log('[BugManager] 使用标签页', tab.id, '打开禅道 Bug 详情:', bugDetailUrl);
-    } catch (error) {
-      console.error('[BugManager] 打开 Bug 详情失败:', error);
-      Toast.error('打开 Bug 详情失败');
+    const local = (this.bugs || []).find(b => b.id === bugId || String(b.zentaoId) === String(bugId));
+    if (local) {
+      return this.showBugDetail(local.id);
     }
+    Toast.error('未找到对应的 Bug 详情');
   },
 
   getBugTypeText(type) {
@@ -9924,50 +9951,14 @@ const BugManager = {
    * 从禅道获取 Bug 详情
    */
   async fetchBugDetailFromZentao(zentaoBugId) {
+    // 后端直连：不再打开 bug-view 标签页
     try {
-      const config = await ZentaoBrowserClient.initConfig();
-      const baseUrl = config?.url?.replace(/\/$/, '');
-      if (!baseUrl) {
-        console.warn('[BugManager] 无法获取 baseUrl');
-        return null;
+      const resp = await fetch(`${API_BASE_URL}/api/zentao/bug/detail?bugId=${encodeURIComponent(zentaoBugId)}`);
+      const result = await resp.json();
+      if (result && result.success && result.data) {
+        console.log('[BugManager] 从后端获取到 Bug 详情:', result.data);
+        return result.data;
       }
-
-      // 使用 ZentaoTabManager 复用已存在的禅道标签页获取 Bug 详情
-      const bugDetailUrl = `${baseUrl}/zentao/bug-view-${zentaoBugId}.html`;
-      const tab = await ZentaoTabManager.getOrCreateTab({
-        baseUrl,
-        targetUrl: bugDetailUrl,
-        active: false
-      });
-
-      // 注入脚本提取 Bug 详情
-      const results = await ZentaoTabManager.executeScript(tab, () => {
-        // 提取指派人
-        const assignedToElement = document.querySelector('#openedBy');
-        const assignedTo = assignedToElement ? assignedToElement.value.trim() : '';
-
-        // 提取抄送人列表
-        const ccList = [];
-        const ccElements = document.querySelectorAll('input[name="cc[]"]');
-        ccElements.forEach(element => {
-          if (element.value) {
-            ccList.push(element.value.trim());
-          }
-        });
-
-        return {
-          assignedTo,
-          cc: ccList
-        };
-      });
-
-      // 不关闭标签页，因为它是复用的已存在的标签页
-
-      if (results && results.length > 0 && results[0].result) {
-        console.log('[BugManager] 从禅道获取到 Bug 详情:', results[0].result);
-        return results[0].result;
-      }
-
       return null;
     } catch (err) {
       console.error('[BugManager] 获取 Bug 详情失败:', err);
@@ -10552,58 +10543,17 @@ window.testKanbanView = async function(kanbanId) {
   console.log('==================== 测试结束 ====================');
 };
 
-// 测试获取看板参数（通过直接打开禅道标签页）
+// 测试获取看板参数（走后端，不打开标签页）
 // 用法: testGetKanbanParamsSimple(148)
-window.testGetKanbanParamsSimple = async function(executionId = 148) {
-  console.log('==================== 测试获取看板参数（简化版）====================');
-
+window.testGetKanbanParamsSimple = async function(executionId = 148, laneType = 'task', columnType = 'wait') {
+  console.log('==================== 测试获取看板参数（后端）====================');
   try {
-    // 获取禅道配置
-    const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
-    const configResult = await configResp.json();
-
-    if (!configResult.success || !configResult.data || !configResult.data.url) {
-      console.error('[Test] 禅道未配置');
-      return;
-    }
-
-    const config = configResult.data;
-    const baseUrl = config.url.replace(/\/$/, '');
-    const kanbanUrl = `${baseUrl}/zentao/execution-kanban-${executionId}.html`;
-
-    console.log('[Test] 将打开禅道标签页:', kanbanUrl);
-    console.log('[Test] 请在新打开的标签页控制台中运行以下代码获取参数:');
-    console.log('');
-    console.log('```');
-    console.log('// 获取 regionId');
-    console.log('const regionId = document.querySelector(".region")?.getAttribute("data-id");');
-    console.log('console.log("regionId:", regionId);');
-    console.log('');
-    console.log('// 获取 laneId (任务)');
-    console.log('const lanes = document.querySelectorAll(".kanban-lane");');
-    console.log('let laneId; for (const lane of lanes) { const name = lane.querySelector(".kanban-lane-name"); if (name?.getAttribute("title") === "任务") { laneId = lane.getAttribute("data-id"); break; } }');
-    console.log('console.log("laneId:", laneId);');
-    console.log('');
-    console.log('// 获取 columnId (未开始)');
-    console.log('const columnId = document.querySelector(".kanban-col[data-type=\\"wait\\"]")?.getAttribute("data-id");');
-    console.log('console.log("columnId:", columnId);');
-    console.log('```');
-    console.log('');
-    console.log('[Test] 正在打开禅道标签页...');
-
-    // 使用 ZentaoTabManager 复用已存在的禅道标签页
-    const newTab = await ZentaoTabManager.getOrCreateTab({
-      baseUrl: configResult.data.url,
-      targetUrl: kanbanUrl,
-      active: true
-    });
-
-    console.log('[Test] ✓ 标签页已打开，ID:', newTab.id);
-    console.log('[Test] 请切换到新标签页，在控制台中运行上面的代码');
+    const resp = await fetch(`${API_BASE_URL}/api/zentao/kanban/params?executionId=${encodeURIComponent(executionId)}&laneType=${encodeURIComponent(laneType)}&columnType=${encodeURIComponent(columnType)}`);
+    const data = await resp.json();
+    console.log('[Test] 后端返回:', data);
   } catch (err) {
     console.error('[Test] ✗ 异常:', err.message);
   }
-
   console.log('==================== 测试结束 ====================');
 };
 

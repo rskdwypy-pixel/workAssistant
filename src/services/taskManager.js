@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { readTasks, writeTasks, getTasksByDate } from '../utils/storage.js';
+import { readTasks, writeTasks, updateTasks, getTasksByDate } from '../utils/storage.js';
 import { analyzeTask } from '../ai/openai.js';
 
 /**
@@ -211,12 +211,17 @@ function findSimilarTask(tasks, title) {
 
 /**
  * 添加或更新任务（智能去重）
+ *
+ * options.preAnalysis：若路由层已完成统一分析，可直接复用，避免二次调用 AI
  */
 async function addOrUpdateTask(content, options = {}) {
-  const data = await readTasks();
-
-  // AI分析任务
-  const analysis = await analyzeTask(content);
+  // 优先复用路由层的统一分析结果；没有才单独调用（兼容旧调用方）
+  let analysis;
+  if (options.preAnalysis && !options.preAnalysis.failed) {
+    analysis = { success: true, failed: false, data: options.preAnalysis };
+  } else {
+    analysis = await analyzeTask(content);
+  }
 
   // 依据进度二次修正状态
   let parsedStatus = analysis.data.status || 'todo';
@@ -245,44 +250,76 @@ async function addOrUpdateTask(content, options = {}) {
     executionName: executionName
   };
 
-  // 查找相似任务
-  const similarTask = findSimilarTask(data.tasks, newTask.title);
-
-  if (similarTask) {
-    // 更新现有任务，保留原有的 zentaoId 和 zentaoExecution
-    Object.assign(similarTask, {
-      content: content,
-      status: newTask.status,
-      progress: newTask.progress,
-      reminderTime: newTask.reminderTime || similarTask.reminderTime,
-      zentaoId: options.zentaoId || similarTask.zentaoId,  // 优先使用传入的，否则保留原值
-      zentaoExecution: options.zentaoExecution || similarTask.zentaoExecution,  // 优先使用传入的，否则保留原值
-      executionId: options.executionId || similarTask.executionId,
-      executionName: executionName || similarTask.executionName,
-      updatedAt: new Date().toISOString()
-    });
-
-    await writeTasks(data);
-    return { task: similarTask, isNew: false };
+  // —— 表单值优先于 AI 推断 ——
+  // 用户在弹窗里手动改过的字段就是最终结论（显式操作 > 模型推断）。
+  // 早期版本这些表单字段被后端整体忽略，导致用户在弹窗里改的
+  // 优先级/进度/截止时间/指派人一提交就丢。
+  const fd = options.formData || {};
+  if (Number.isFinite(fd.priority)) newTask.priority = fd.priority;
+  if (Number.isFinite(fd.progress)) newTask.progress = fd.progress;
+  if (fd.status) newTask.status = fd.status;
+  if (fd.dueDate) newTask.dueDate = fd.dueDate;
+  if (Array.isArray(fd.assignees)) {
+    newTask.assignedToList = fd.assignees;
+    newTask.assignedTo = fd.assignees[0] || null;
+  }
+  if (Array.isArray(fd.cc)) {
+    newTask.ccList = fd.cc;
   }
 
-  // 创建新任务
-  const task = {
-    id: uuidv4(),
-    type: 'task',  // 明确设置类型为 'task'
-    content: content,
-    ...newTask,
-    zentaoId: options.zentaoId || null,        // 支持传入浏览器端已创建的 zentaoId
-    zentaoExecution: options.zentaoExecution || options.executionId || null,  // 禅道执行 ID，兼容旧字段
-    totalConsumedTime: 0,  // 累计消耗工时（用于计算剩余工时）
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
+  // 进度与状态最终一致性（表单覆盖后重新对齐）
+  if (newTask.progress > 0 && newTask.progress < 100) newTask.status = 'in_progress';
+  if (newTask.progress >= 100) newTask.status = 'done';
+  if (newTask.progress === 0 && newTask.status === 'in_progress') newTask.status = 'todo';
 
-  data.tasks.push(task);
-  await writeTasks(data);
+  // 读-改-写整体放进互斥事务，防止并发下任务凭空丢失
+  let result = null;
 
-  return { task, isNew: true };
+  await updateTasks((data) => {
+    // 查找相似任务
+    const similarTask = findSimilarTask(data.tasks, newTask.title);
+
+    if (similarTask) {
+      // 更新现有任务，保留原有的 zentaoId 和 zentaoExecution
+      Object.assign(similarTask, {
+        content: content,
+        status: newTask.status,
+        progress: newTask.progress,
+        priority: newTask.priority,
+        dueDate: newTask.dueDate || similarTask.dueDate,
+        assignedTo: newTask.assignedTo || similarTask.assignedTo,
+        assignedToList: newTask.assignedToList || similarTask.assignedToList,
+        ccList: newTask.ccList || similarTask.ccList,
+        reminderTime: newTask.reminderTime || similarTask.reminderTime,
+        zentaoId: options.zentaoId || similarTask.zentaoId,
+        zentaoExecution: options.zentaoExecution || similarTask.zentaoExecution,
+        executionId: options.executionId || similarTask.executionId,
+        executionName: executionName || similarTask.executionName,
+        updatedAt: new Date().toISOString()
+      });
+
+      result = { task: similarTask, isNew: false };
+      return data;
+    }
+
+    const task = {
+      id: uuidv4(),
+      type: 'task',
+      content: content,
+      ...newTask,
+      zentaoId: options.zentaoId || null,
+      zentaoExecution: options.zentaoExecution || options.executionId || null,
+      totalConsumedTime: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    data.tasks.push(task);
+    result = { task, isNew: true };
+    return data;
+  });
+
+  return { ...result, aiAnalysisFailed: !!analysis.failed };
 }
 
 /**
@@ -410,15 +447,15 @@ async function syncTaskToExecution(task, updates, oldStatus) {
  * 删除任务
  */
 async function deleteTask(taskId) {
-  const data = await readTasks();
-  const index = data.tasks.findIndex(t => t.id === taskId);
-
-  if (index === -1) {
-    throw new Error('任务不存在');
-  }
-
-  data.tasks.splice(index, 1);
-  await writeTasks(data);
+  // 走互斥事务，避免与并发的「读-改-写」互相覆盖
+  await updateTasks((data) => {
+    const index = data.tasks.findIndex(t => t.id === taskId);
+    if (index === -1) {
+      throw new Error('任务不存在');
+    }
+    data.tasks.splice(index, 1);
+    return data;
+  });
 
   return { success: true };
 }
@@ -775,8 +812,32 @@ async function cleanupZentaoDuplicates() {
   return { tasksRemoved, bugsRemoved };
 }
 
+/**
+ * 获取近期任务标题（供 AI 理解用户表达习惯与项目黑话）
+ *
+ * 只取标题、不做去重等额外处理，避免为了喂上下文而加载全量任务对象。
+ *
+ * @param {number} limit - 最多返回多少条
+ * @returns {Promise<string[]>}
+ */
+async function getRecentTaskTitles(limit = 8) {
+  try {
+    const data = await readTasks();
+    const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+    return tasks
+      .filter(t => t && t.title)
+      .slice(-limit)
+      .map(t => String(t.title))
+      .reverse();
+  } catch (e) {
+    console.warn('[TaskManager] 读取近期任务标题失败:', e.message);
+    return [];
+  }
+}
+
 export {
   getAllTasks,
+  getRecentTaskTitles,
   getTodayTasks,
   getTasksByDateFilter,
   searchTasks,

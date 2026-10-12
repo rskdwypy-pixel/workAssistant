@@ -396,6 +396,59 @@ async function getExecutionsOrdered() {
   return [...favorites, ...others];
 }
 
+/**
+ * 构建 AI 匹配的候选执行集合
+ *
+ * 设计要点：早期实现只把「收藏执行」喂给 AI，用户一旦没收藏，
+ * AI 拿到的就是空候选表，匹配功能等于关闭。
+ * 现在改为：收藏优先 + 其余全部执行兜底（并做去重与容量上限）。
+ *
+ * @param {Object} options
+ * @param {number} options.limit - 最多返回多少个候选，默认 120
+ * @returns {Promise<{candidates: Array, favoriteCount: number, totalCount: number, truncated: boolean}>}
+ */
+async function getAiCandidateExecutions(options = {}) {
+  const limit = Number(options.limit) || 120;
+  const data = ensureExecutionsFile();
+  const executions = data.executions || [];
+  const favoriteIds = (data.favoriteExecutionIds || []).map(String);
+  const defaultId = data.defaultExecutionId != null ? String(data.defaultExecutionId) : null;
+
+  // 收藏在前，其余在后；默认执行无论是否收藏都强制置顶，避免兜底时选错
+  const favorites = [];
+  const others = [];
+  executions.forEach(exec => {
+    const id = String(exec.id);
+    if (favoriteIds.includes(id)) favorites.push({ ...exec, isFavorite: true });
+    else others.push({ ...exec, isFavorite: false });
+  });
+
+  const defaultExec = defaultId ? executions.find(e => String(e.id) === defaultId) : null;
+  const ordered = [];
+  if (defaultExec) ordered.push({ ...defaultExec, isFavorite: favoriteIds.includes(defaultId), isDefault: true });
+  for (const f of favorites) {
+    if (String(f.id) !== defaultId) ordered.push(f);
+  }
+  for (const o of others) ordered.push(o);
+
+  // 去重（默认执行可能同时出现在收藏里）
+  const seen = new Set();
+  const deduped = ordered.filter(e => {
+    const id = String(e.id);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+
+  const candidates = deduped.slice(0, limit);
+  return {
+    candidates,
+    favoriteCount: favorites.length,
+    totalCount: executions.length,
+    truncated: deduped.length > candidates.length
+  };
+}
+
 export {
   getExecutions,
   getExecutionsOrdered,
@@ -410,5 +463,6 @@ export {
   getFavoriteExecutions,
   setFavoriteExecutions,
   addFavoriteExecution,
-  removeFavoriteExecution
+  removeFavoriteExecution,
+  getAiCandidateExecutions
 };

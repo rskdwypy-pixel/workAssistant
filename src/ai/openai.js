@@ -1,11 +1,29 @@
 import OpenAI from 'openai';
 import { config } from '../config.js';
+import {
+  lookupLearned,
+  recordMatch,
+  buildLearningHint
+} from '../services/executionLearning.js';
 
-// 创建 OpenAI 客户端
-const client = new OpenAI({
-  apiKey: config.ai.apiKey,
-  baseURL: config.ai.baseURL
-});
+/**
+ * 创建 OpenAI 兼容客户端
+ *
+ * 单独抽出工厂，便于统一分析与路由层在无 key 环境下按需延迟创建、
+ * 以及在测试中注入 mock 客户端。
+ *
+ * @returns {OpenAI|null} API key 缺失时返回 null
+ */
+function createOpenAIClient() {
+  if (!config.ai.apiKey || !config.ai.apiKey.trim()) return null;
+  return new OpenAI({
+    apiKey: config.ai.apiKey,
+    baseURL: config.ai.baseURL
+  });
+}
+
+// 创建 OpenAI 客户端（模块级复用，保持原有调用方式可用）
+const client = createOpenAIClient();
 
 /**
  * 任务分析提示词
@@ -266,13 +284,16 @@ async function analyzeTask(userInput) {
       data: result
     };
   } catch (err) {
-    console.error('AI分析失败:', err.message);
+    console.error('[AI] analyzeTask 解析失败:', err.message);
 
-    // 失败时返回基础解析
+    // 失败时返回基础解析，但必须带 failed 标记，
+    // 否则前端会把「AI 失败降级」误认为「AI 正常解析」，用户无法察觉问题
     return {
       success: false,
+      failed: true,
+      error: err.message,
       data: {
-        title: userInput.slice(0, 20),
+        title: userInput.slice(0, 30),
         status: 'todo',
         priority: 3,
         reminderTime: null,
@@ -760,12 +781,25 @@ function ruleBasedMatch(taskContent, executions) {
 }
 
 /**
- * 分析任务并匹配最合适的执行（规则 + AI 双引擎）
+ * 分析任务并匹配最合适的执行（历史学习 → 规则引擎 → AI 三级）
+ *
+ * 匹配顺序：
+ *  1. 历史学习：用户之前纠正过的同类描述，直接命中，零成本零延迟
+ *  2. 规则引擎：项目名/别名唯一命中
+ *  3. AI 分析：规则引擎无匹配或多匹配时才调用模型
+ *
  * @param {string} taskContent - 任务内容
- * @param {Array} executions - 可用的执行列表
- * @returns {Promise<string|null>} - 匹配的执行ID，如果没有匹配则返回null
+ * @param {Array} executions - 候选执行列表
+ * @returns {Promise<Object>} { executionId, matchedBy, reason, confidence }
  */
 async function analyzeTaskForExecution(taskContent, executions) {
+  const noMatch = (reason) => ({
+    executionId: null,
+    matchedBy: 'none',
+    reason: reason || '未能匹配到执行',
+    confidence: 0
+  });
+
   try {
     console.log('[Routing] ========== 任务路由分析 ==========');
     console.log('[Routing] 任务内容:', taskContent);
@@ -773,13 +807,34 @@ async function analyzeTaskForExecution(taskContent, executions) {
 
     if (!executions || executions.length === 0) {
       console.log('[Routing] 没有可用的执行列表');
-      return null;
+      return noMatch('没有可用的执行列表');
+    }
+
+    // 第零步：查历史学习结果
+    const learnedId = lookupLearned(taskContent);
+    if (learnedId && executions.some(e => String(e.id) === learnedId)) {
+      console.log('[Routing] ✓ 命中历史学习结果:', learnedId);
+      const ex = executions.find(e => String(e.id) === learnedId);
+      recordMatch(taskContent, learnedId);
+      return {
+        executionId: learnedId,
+        matchedBy: 'learning',
+        reason: `与历史记录「${ex.name}」一致`,
+        confidence: 0.99
+      };
     }
 
     // 第一步：本地规则引擎匹配
     const ruleMatch = ruleBasedMatch(taskContent, executions);
     if (ruleMatch) {
-      return ruleMatch; // 规则引擎唯一匹配，直接返回
+      recordMatch(taskContent, ruleMatch);
+      const ex = executions.find(e => String(e.id) === String(ruleMatch));
+      return {
+        executionId: String(ruleMatch),
+        matchedBy: 'rule',
+        reason: `任务中包含「${ex ? ex.name : ruleMatch}」关键词`,
+        confidence: 0.9
+      };
     }
 
     // 第二步：AI 分析（规则引擎无匹配或多匹配）
@@ -814,15 +869,19 @@ async function analyzeTaskForExecution(taskContent, executions) {
       aliases: ['无法确定', '其他', '默认']
     });
 
+    // 历史修正提示（用户提供，最高优先级参考）
+    const learningHint = buildLearningHint(taskContent);
+
     // 使用 JSON Mode 和 Few-Shot 优化提示词
     const prompt = `你是任务分类路由引擎。请分析【用户任务】，从【可用列表】中匹配最合适的执行项目，并输出 JSON 格式。
 
 【可用列表】
 ${JSON.stringify(executionListForAI, null, 2)}
-
+${learningHint}
 【匹配规则】
 1. 优先根据别名和关键词进行精确映射
 2. 如果任务描述模糊或无法匹配任何可用列表中的项目，请务必返回 id: 0 (未分类)
+3. 若【用户历史修正记录】中有相似描述，优先采用其中的执行
 
 【示例】
 任务："测试阿迪新版本" -> 返回：{"executionId": 123}
@@ -856,28 +915,39 @@ ${JSON.stringify(executionListForAI, null, 2)}
       result = JSON.parse(content);
     } catch (e) {
       console.error('[Routing] JSON 解析失败:', content);
-      return null;
+      return noMatch('AI 返回结果解析失败');
     }
 
     const aiExecutionId = result.executionId;
 
     // 验证 ID
-    if (aiExecutionId === 0) {
+    if (!aiExecutionId || aiExecutionId === 0) {
       console.log('[Routing] AI 推断为"无法确定"，将使用默认执行');
-      return null; // 返回 null 让调用方使用默认执行
+      return noMatch('AI 判断无法确定归属');
     }
 
     const exists = executions.find(e => String(e.id) === String(aiExecutionId));
     if (exists) {
       console.log('[Routing] ✓ AI 推断成功:', aiExecutionId, exists.name, '项目:', exists.projectName);
-      return String(aiExecutionId);
+      recordMatch(taskContent, aiExecutionId);
+      return {
+        executionId: String(aiExecutionId),
+        matchedBy: 'ai',
+        reason: `AI 判断归属「${exists.name}」`,
+        confidence: 0.75
+      };
     }
 
     console.log('[Routing] AI 返回的 ID 不在候选列表中:', aiExecutionId);
-    return null;
+    return noMatch('AI 返回的执行不在候选列表中');
   } catch (err) {
     console.error('[Routing] AI 分析失败:', err.message);
-    return null;
+    return {
+      executionId: null,
+      matchedBy: 'error',
+      reason: `AI 调用失败: ${err.message}`,
+      confidence: 0
+    };
   }
 }
 
@@ -914,6 +984,7 @@ async function generateResponse(prompt, maxTokens = 500) {
 }
 
 export {
+  createOpenAIClient,
   analyzeTask,
   analyzeTaskForExecution,
   generateSummary,

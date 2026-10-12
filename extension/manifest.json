@@ -16,7 +16,8 @@
     "tabs",
     "scripting",
     "notifications",
-    "storage"
+    "storage",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "<all_urls>"

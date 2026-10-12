@@ -1,6 +1,7 @@
 import express from 'express';
 import { config, validateConfig } from './config.js';
 import apiRouter from './routes/api.js';
+import adminRouter from './routes/admin.js';
 import { startReminder } from './services/reminder.js';
 import { startSummary } from './services/summary.js';
 
@@ -30,6 +31,7 @@ app.use((req, res, next) => {
 
 // API路由
 app.use('/api', apiRouter);
+app.use('/api', adminRouter);
 
 // 健康检查
 app.get('/health', (req, res) => {
