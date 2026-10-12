@@ -13,11 +13,16 @@
 #      Brave / Helium）就完全失效。本脚本改为自动探测本机所有浏览器。
 #   2. 宿主注册文件在扩展沙箱之外，插件自己写不了，必须由用户执行一次。
 #   3. 浏览器启动宿主时不继承 shell 环境变量，node 绝对路径必须落盘。
+#   4. allowed_origins 必须写扩展的真实 ID。unpacked 扩展（manifest.json 无 key 字段）
+#      的 ID 由「安装路径的 SHA-256」派生，换机/换路径都会变，且 Chromium 官方文档
+#      明确 allowed_origins 不支持通配符——所以不能写死 ID，也不能用 chrome-extension://*/。
+#      本脚本按当前仓库路径自动计算，并允许 --extension-id / WORKASSISTANT_EXT_ID 覆盖。
 #
 # 用法：
-#   bash scripts/install-native-host.sh            # 注册到所有已探测到的浏览器
-#   bash scripts/install-native-host.sh --detect   # 只探测不写入，用于排查
-#   bash scripts/install-native-host.sh --browser "Google Chrome"   # 只注册指定浏览器
+#   bash scripts/install-native-host.sh                    # 注册到所有已探测到的浏览器
+#   bash scripts/install-native-host.sh --detect           # 只探测不写入，用于排查
+#   bash scripts/install-native-host.sh --browser "Helium" # 只注册指定浏览器
+#   bash scripts/install-native-host.sh --extension-id ID  # 手动指定扩展 ID
 
 set -euo pipefail
 
@@ -29,6 +34,7 @@ NODE_PATH_FILE="$PROJECT_DIR/scripts/.node-path"
 
 DETECT_ONLY=0
 ONLY_BROWSER=""
+EXT_ID_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -40,8 +46,12 @@ while [[ $# -gt 0 ]]; do
       ONLY_BROWSER="${2:-}"
       shift 2 || shift
       ;;
+    --extension-id|-e)
+      EXT_ID_OVERRIDE="${2:-}"
+      shift 2 || shift
+      ;;
     -h|--help)
-      sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -127,8 +137,31 @@ detect_browsers() {
   done <<< "$BROWSER_TABLE"
 }
 
+# ─────────────────────────────────────────────────────────────
+# 扩展 ID 计算
+#
+# unpacked 扩展（manifest.json 无 "key" 字段）的 ID 不是随机值：
+# Chromium 取「扩展目录绝对路径的 SHA-256」前 32 个十六进制字符，
+# 再按 0-9→a-j、a-f→k-p 映射成 32 位字母，即 chrome://extensions 上显示的 ID。
+# 因此：
+#   - 换了安装路径（仓库搬家等）ID 会变，重跑本脚本即可同步；
+#   - 这里算出的值必须和浏览器扩展管理页里显示的完全一致，
+#     不一致时（例如从副本目录加载）用 --extension-id 手动指定。
+# ─────────────────────────────────────────────────────────────
+compute_extension_id() {
+  local ext_dir="$1" hex=""
+  if command -v shasum >/dev/null 2>&1; then
+    hex="$(printf '%s' "$ext_dir" | shasum -a 256 | awk '{print $1}')"
+  elif command -v openssl >/dev/null 2>&1; then
+    hex="$(printf '%s' "$ext_dir" | openssl dgst -sha256 | awk '{print $NF}')"
+  fi
+  [[ ${#hex} -ge 32 ]] || { echo ""; return 1; }
+  printf '%s' "${hex:0:32}" | tr '0-9a-f' 'a-p'
+}
+
 # 生成宿主 JSON
 #   $1=类型 chromium|firefox
+#   $2=目标目录
 write_host_file() {
   local kind="$1" target_dir="$2"
 
@@ -149,8 +182,9 @@ write_host_file() {
 }
 JSON
   else
-    # Chromium 系：allowed_origins 支持单个 * 通配，可匹配任意扩展 ID，
-    # 因此换机后即使扩展 ID 变化（未打包的扩展 ID 由路径派生）也依然有效。
+    # Chromium 系：allowed_origins 不支持通配符（官方文档明令禁止），
+    # 只能列出真实扩展 ID；unpacked 扩展的 ID 由安装路径派生，故按当前
+    # 仓库路径动态计算，换机/换路径重跑本脚本即可保持同步。
     cat > "$target_dir/$HOST_NAME.json" <<JSON
 {
   "name": "$HOST_NAME",
@@ -158,8 +192,7 @@ JSON
   "path": "$LAUNCHER",
   "type": "stdio",
   "allowed_origins": [
-    "chrome-extension://hceiphnkbdcloohaeinpmoiolpomlegi/",
-    "chrome-extension://*/"
+    "chrome-extension://$EXTENSION_ID/"
   ]
 }
 JSON
@@ -179,10 +212,33 @@ chmod +x "$LAUNCHER"
 
 NODE_BIN="${WORKASSISTANT_NODE:-$(command -v node || true)}"
 
+# ── 解析扩展 ID（Chromium 系授权必需；Firefox 分支不使用） ──
+if [[ -n "$EXT_ID_OVERRIDE" ]]; then
+  EXTENSION_ID="$EXT_ID_OVERRIDE"
+elif [[ -n "${WORKASSISTANT_EXT_ID:-}" ]]; then
+  EXTENSION_ID="$WORKASSISTANT_EXT_ID"
+else
+  EXTENSION_ID="$(compute_extension_id "$PROJECT_DIR/extension")"
+fi
+
 echo "════════════════════════════════════════════"
 echo "  工作助手 · 后端自动启动宿主注册"
 echo "════════════════════════════════════════════"
 echo "  项目目录: $PROJECT_DIR"
+echo ""
+
+if [[ -z "$EXTENSION_ID" ]]; then
+  echo "❌ 无法计算扩展 ID（需要 shasum 或 openssl）"
+  echo ""
+  echo "   请手动指定（ID 在浏览器扩展管理页可见）："
+  echo "     bash scripts/install-native-host.sh --extension-id <扩展ID>"
+  echo ""
+  exit 1
+fi
+
+echo "  扩展 ID:  $EXTENSION_ID"
+echo "    （unpacked 扩展 ID 由安装路径派生；若浏览器扩展管理页显示的 ID"
+echo "      与此不同，请用 --extension-id <ID> 重新执行本脚本）"
 echo ""
 
 DETECTED="$(detect_browsers)"
@@ -197,9 +253,10 @@ if [[ -z "$DETECTED" ]]; then
   echo "   可以手动注册（把 <目录> 换成浏览器实际读取的路径）："
   echo ""
   echo "     mkdir -p \"\$HOME/Library/Application Support/<目录>/NativeMessagingHosts\""
-  echo "     # 然后把本文件内容写成 com.workassistant.backend.json："
+  echo "     # 然后把本文件内容写成 com.workassistant.backend.json"
+  echo "     # （allowed_origins 换成浏览器扩展管理页里显示的真实扩展 ID，不支持通配符）："
   echo "     {\"name\":\"$HOST_NAME\",\"path\":\"$LAUNCHER\",\"type\":\"stdio\","
-  echo "      \"allowed_origins\":[\"chrome-extension://*/\"]}"
+  echo "      \"allowed_origins\":[\"chrome-extension://<扩展ID>/\"]}"
   echo ""
   echo "   💡 但其实不必依赖浏览器 —— 后端本质是常驻服务（日报定时任务需要它一直跑），"
   echo "      用开机自启更省心，且与用哪个浏览器无关："

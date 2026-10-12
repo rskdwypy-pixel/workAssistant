@@ -40,9 +40,12 @@ const config = {
   },
 
   // 服务配置
+  // host 不能用 'localhost'：Node 会把 localhost 解析为 ::1 并只绑 IPv6，
+  // 而扩展端固定访问 http://127.0.0.1:3721（IPv4），会连不上。
+  // 绑定 127.0.0.1 仅限本机访问；确需对外时用 HOST=0.0.0.0 覆盖。
   server: {
     port: parseInt(process.env.PORT || '3721', 10),
-    host: 'localhost'
+    host: process.env.HOST || '127.0.0.1'
   },
 
   // 定时任务配置
