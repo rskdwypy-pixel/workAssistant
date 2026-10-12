@@ -1116,7 +1116,36 @@ body {
 
 /* ==================== 设置模态框 ==================== */
 .settings-modal-content {
-  max-width: 540px;
+  /* 设置项较多（含 AI 供应商、禅道配置、定时任务等），
+     540px 会让所有内容挤成单列长条，可读性很差。
+     这里放宽到 960px，并把内部区块排成两列，充分利用横向空间。 */
+  max-width: 960px;
+  width: 94%;
+  max-height: 88vh;
+}
+
+/* 双列栅格：窄屏自动回落为单列 */
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 0 28px;
+  align-items: start;
+}
+
+/* 需要整行占用的区块（服务状态、提示词等）不参与分栏 */
+.settings-section-full {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 760px) {
+  .settings-modal-content {
+    width: 96%;
+    max-width: 100%;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .settings-section {

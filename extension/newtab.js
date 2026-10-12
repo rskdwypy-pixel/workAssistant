@@ -1005,13 +1005,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log('[ZentaoBrowser] 自动登录跳过:', err.message);
   });
 
-  // 初始化备份功能
-  if (typeof backupManager !== 'undefined' && typeof BackupUI !== 'undefined') {
-    await backupManager.init();
-    const backupUI = new BackupUI(backupManager);
-    backupUI.init();
-    window.backupUI = backupUI; // 保存到全局以便后续使用
-  }
+  // 数据备份功能已下线（设置页入口已移除）。
+// 如需恢复：恢复 newtab.html 中的备份区块 + backupManager/storage-webdav 脚本引入，
+// 并把下面的 init 调用加回来。
 
   // 初始化任务弹框
   await initTaskModal();
@@ -1280,28 +1276,302 @@ function bindEvents() {
   });
   // ====================================
 
-  // AI服务选择切换
-  document.getElementById('aiProvider').addEventListener('change', (e) => {
-    const provider = e.target.value;
-    const presets = {
-      zhipu: {
-        baseUrl: 'https://open.bigmodel.cn/api/paas/v4/',
-        model: 'glm-4-flash'
-      },
-      openai: {
-        baseUrl: 'https://api.openai.com/v1',
-        model: 'gpt-4o-mini'
-      },
-      custom: {
-        baseUrl: '',
-        model: ''
-      }
-    };
+  // ====================================
+// AI 服务商预设表
+// ====================================
 
-    if (presets[provider]) {
-      document.getElementById('apiBaseUrl').value = presets[provider].baseUrl;
-      document.getElementById('aiModel').value = presets[provider].model;
+/**
+ * 支持的 AI 服务商。
+ * 覆盖国内主流 + 海外 + 本地部署，均为 OpenAI 兼容协议（除标注外）。
+ * key 与 <select id="aiProvider"> 的 option value 一一对应。
+ */
+const AI_PROVIDERS = {
+  zhipu: {
+    label: '智谱 GLM',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4/',
+    model: 'glm-4-flash',
+    keyUrl: 'https://open.bigmodel.cn/usercenter/apikeys',
+    hint: '国产全能，GLM-4-Flash 速度快成本低，推荐用于任务解析'
+  },
+  deepseek: {
+    label: 'DeepSeek',
+    baseUrl: 'https://api.deepseek.com/v1',
+    model: 'deepseek-chat',
+    keyUrl: 'https://platform.deepseek.com/api_keys',
+    hint: '性价比高，JSON 遵循度好，适合结构化任务'
+  },
+  moonshot: {
+    label: '月之暗面 Kimi',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    model: 'moonshot-v1-8k',
+    keyUrl: 'https://platform.moonshot.cn/console/api-keys',
+    hint: '长文本能力强，适合日报/周报生成'
+  },
+  qwen: {
+    label: '通义千问 DashScope',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen-turbo',
+    keyUrl: 'https://bailian.console.aliyun.com/',
+    hint: '阿里出品，qwen-turbo 速度快，支持超长上下文'
+  },
+  doubao: {
+    label: '豆包（火山方舟）',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    model: 'doubao-pro-32k',
+    keyUrl: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey',
+    hint: '字节出品，需在火山方舟控制台开通服务后使用'
+  },
+  ernie: {
+    label: '百度文心一言',
+    baseUrl: 'https://qianfan.baidubce.com/v2',
+    model: 'ernie-4.0-8k',
+    keyUrl: 'https://console.bce.baidu.com/qianfan/ais/console/apikey',
+    hint: '百度千帆平台，需 Access Key 而非普通 API Key'
+  },
+  minimax: {
+    label: 'MiniMax',
+    baseUrl: 'https://api.minimax.chat/v1',
+    model: 'abab6.5s-chat',
+    keyUrl: 'https://platform.minimaxi.com/user-center/basic-api/interface-key',
+    hint: '国内大模型，长文本处理稳定'
+  },
+  siliconflow: {
+    label: '硅基流动 SiliconFlow',
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    model: 'Qwen/Qwen2.5-7B-Instruct',
+    keyUrl: 'https://cloud.siliconflow.cn/account/ak',
+    hint: '一站式接入多个开源模型，有免费额度'
+  },
+  together: {
+    label: 'Together AI',
+    baseUrl: 'https://api.together.xyz/v1',
+    model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+    keyUrl: 'https://api.together.ai/settings/api-keys',
+    hint: '海外聚合平台，模型丰富'
+  },
+  openai: {
+    label: 'OpenAI 官方',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o-mini',
+    keyUrl: 'https://platform.openai.com/api-keys',
+    hint: '需海外网络环境'
+  },
+  anthropic: {
+    label: 'Anthropic Claude',
+    baseUrl: 'https://api.anthropic.com/v1',
+    model: 'claude-3-5-sonnet-20241022',
+    keyUrl: 'https://console.anthropic.com/settings/keys',
+    hint: '⚠️ 官方接口非 OpenAI 协议，建议改用支持 Claude 的聚合服务'
+  },
+  openrouter: {
+    label: 'OpenRouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    model: 'anthropic/claude-3.5-sonnet',
+    keyUrl: 'https://openrouter.ai/keys',
+    hint: '聚合平台，一个 Key 访问 Claude/GPT/Llama 等'
+  },
+  ollama: {
+    label: 'Ollama 本地部署',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    model: 'qwen3:8b',
+    keyUrl: null,
+    hint: '数据完全不出本机；Key 填任意非空值即可（本地校验用）'
+  },
+  custom: {
+    label: '自定义（OpenAI 兼容）',
+    baseUrl: '',
+    model: '',
+    keyUrl: null,
+    hint: '适用于自建网关、代理服务等任何 OpenAI 兼容接口'
+  }
+};
+
+/**
+ * 应用服务商预设：自动填入接口地址、模型与提示
+ * @param {string} provider - 服务商 key
+ */
+function applyAiProviderPreset(provider) {
+  const preset = AI_PROVIDERS[provider];
+  if (!preset) return;
+
+  const baseUrlEl = document.getElementById('apiBaseUrl');
+  const modelEl = document.getElementById('aiModel');
+  const hintEl = document.getElementById('aiProviderHint');
+  const modelHintEl = document.getElementById('aiModelHint');
+  const keyEl = document.getElementById('apiKey');
+
+  if (baseUrlEl && preset.baseUrl) baseUrlEl.value = preset.baseUrl;
+  if (modelEl && preset.model) modelEl.value = preset.model;
+
+  if (hintEl) {
+    hintEl.textContent = preset.hint + (preset.keyUrl ? ` · 获取 Key：${preset.keyUrl}` : '');
+  }
+  if (modelHintEl) {
+    modelHintEl.textContent = provider === 'ollama'
+      ? '本地模型名需与 `ollama list` 输出一致'
+      : (preset.model ? `默认模型：${preset.model}` : '');
+  }
+
+  if (keyEl && !keyEl.value && provider === 'ollama') {
+    keyEl.placeholder = '本地部署可填任意值，如 ollama';
+  } else if (keyEl) {
+    keyEl.placeholder = '请输入 API Key';
+  }
+}
+
+// ====================================
+// 配置导出 / 导入（换机迁移）
+// ====================================
+
+/** 导出时故意排除的敏感字段 */
+const CONFIG_EXPORT_EXCLUDE = ['apiKey', 'zentaoPassword'];
+
+/**
+ * 导出全部配置为 JSON 文件
+ *
+ * 有意**不导出** API Key 与禅道密码：配置文件常经聊天工具/网盘传递，
+ * 带密钥的明文文件一旦外泄风险太高。导入后用户自行补填这两项即可。
+ */
+async function exportAllConfig() {
+  const resultEl = document.getElementById('configTransferResult');
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/config`);
+    const json = await response.json();
+    if (!json.success) throw new Error(json.message || '获取配置失败');
+
+    const config = json.data || {};
+    const exported = { __app: 'workAssistant', __version: 1, exportedAt: new Date().toISOString(), config: {} };
+
+    // 深拷贝并剔除敏感项
+    for (const [k, v] of Object.entries(config)) {
+      if (CONFIG_EXPORT_EXCLUDE.includes(k)) continue;
+      if (v && typeof v === 'object') {
+        const copy = { ...v };
+        for (const secret of CONFIG_EXPORT_EXCLUDE) delete copy[secret];
+        // 用占位标记提示用户需补填
+        if (k === 'ai') copy.apiKey = '';
+        if (k === 'zentao') copy.hasPassword = !!v.hasPassword;
+        exported.config[k] = copy;
+      } else {
+        exported.config[k] = v;
+      }
     }
+
+    // 附带本地提示词（后端已存，不含敏感信息）
+    try {
+      const pr = await (await fetch(`${API_BASE_URL}/api/prompts`)).json();
+      if (pr.success && pr.data) exported.prompts = pr.data;
+    } catch (e) { /* 提示词可选，失败不影响导出 */ }
+
+    const blob = new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `workAssistant-config-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    if (resultEl) {
+      resultEl.textContent = '✅ 配置已导出（不含 API Key 与禅道密码，换机后需重新填写）';
+      resultEl.className = 'test-result success';
+    }
+    Toast.success('配置已导出');
+  } catch (err) {
+    if (resultEl) {
+      resultEl.textContent = '✗ 导出失败：' + err.message;
+      resultEl.className = 'test-result error';
+    }
+    Toast.error('导出失败：' + err.message);
+  }
+}
+
+/**
+ * 导入配置文件并写回后端
+ * @param {File} file - 用户选择的 JSON 文件
+ */
+async function importAllConfig(file) {
+  const resultEl = document.getElementById('configTransferResult');
+  if (resultEl) { resultEl.textContent = '导入中...'; resultEl.className = 'test-result'; }
+
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    if (!parsed || !parsed.config || typeof parsed.config !== 'object') {
+      throw new Error('不是有效的配置文件');
+    }
+
+    if (!confirm(
+      `确定导入配置吗？\n\n导入来源：${file.name}\n` +
+      `将覆盖当前 AI / 通知 / 禅道 等设置。\n` +
+      `（API Key 与禅道密码不参与导入，需要另行填写）`
+    )) return;
+
+    const payload = { ...parsed.config };
+    // 密钥不覆盖：避免把导出文件里的空值写回去，冲掉用户已填的 Key
+    if (payload.ai) payload.ai.apiKey = undefined;
+    if (payload.zentao) payload.zentao.password = undefined;
+
+    const response = await fetch(`${API_BASE_URL}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    if (!result.success && !result.ok) {
+      throw new Error(result.message || result.error || '写入失败');
+    }
+
+    if (parsed.prompts) {
+      try {
+        await fetch(`${API_BASE_URL}/api/prompts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(parsed.prompts)
+        });
+      } catch (e) { /* 提示词失败不阻断 */ }
+    }
+
+    if (resultEl) {
+      resultEl.textContent = '✅ 配置已导入，正在刷新…';
+      resultEl.className = 'test-result success';
+    }
+    Toast.success('配置已导入');
+    setTimeout(() => location.reload(), 900);
+  } catch (err) {
+    if (resultEl) {
+      resultEl.textContent = '✗ 导入失败：' + err.message;
+      resultEl.className = 'test-result error';
+    }
+    Toast.error('导入失败：' + err.message);
+  }
+}
+
+// AI服务选择切换
+  document.getElementById('aiProvider').addEventListener('change', (e) => {
+    applyAiProviderPreset(e.target.value);
+  });
+
+  // 模型选型说明展开/收起
+  const aiModelHelpBtn = document.getElementById('aiModelHelpBtn');
+  const aiModelHelp = document.getElementById('aiModelHelp');
+  if (aiModelHelpBtn && aiModelHelp) {
+    aiModelHelpBtn.addEventListener('click', () => {
+      aiModelHelp.style.display = aiModelHelp.style.display === 'none' ? 'block' : 'none';
+    });
+  }
+
+  // 配置导出 / 导入
+  document.getElementById('exportConfigBtn')?.addEventListener('click', exportAllConfig);
+  document.getElementById('importConfigBtn')?.addEventListener('click', () => {
+    document.getElementById('importConfigFile').click();
+  });
+  document.getElementById('importConfigFile')?.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) importAllConfig(file);
+    e.target.value = ''; // 允许重复导入同一个文件
   });
 
   // 测试AI连接
@@ -2715,11 +2985,13 @@ async function showTaskModal(initialData = {}) {
   if (initialData.priority) {
     document.getElementById('taskPriority').value = initialData.priority;
   }
-  // 移除状态的预填，状态将由进度自动计算
-  // 注意：progress=0 是合法值，必须用 Number.isFinite 判断，不能用 if(0) 判假值
-  if (Number.isFinite(initialData.progress)) {
-    document.getElementById('taskProgress').value = initialData.progress;
-  }
+  // 进度：AI 明确识别出进度才填，否则一律归 0。
+  // 这里必须「无条件赋值」而不能只在有值时赋值 ——
+  // 否则 AI 失败/未识别时，表单会残留上一次打开时的进度值，
+  // 用户看到的就是一个凭空出现的 10%/50%。
+  document.getElementById('taskProgress').value = Number.isFinite(initialData.progress)
+    ? initialData.progress
+    : 0;
   if (initialData.dueDate) {
     document.getElementById('taskDueDate').value = initialData.dueDate;
   }
@@ -3459,10 +3731,31 @@ function showBackendOfflineBanner() {
   banner.querySelector('[data-backend-retry]').addEventListener('click', async (e) => {
     e.target.disabled = true;
     e.target.textContent = '启动中...';
+    // 先清掉上一次的说明
+    const prev = banner.querySelector('[data-backend-hint]');
+    if (prev) prev.remove();
+
     const ok = await checkBackendHealth();
     if (!ok) {
       e.target.disabled = false;
       e.target.textContent = '重试启动';
+      // 启动失败时把原因和修复命令直接摊在横幅上。
+      // 换机场景最常见的卡点是「这台机器用的不是 Chrome，宿主没注册」，
+      // 静默失败会让用户反复点重试却永远起不来。
+      const resp = await chrome.runtime.sendMessage({ action: 'startBackend' }).catch(() => null);
+      const help = resp && resp.help;
+      const code = (resp && resp.code) || '';
+      if (help) {
+        const hint = document.createElement('span');
+        hint.setAttribute('data-backend-hint', '');
+        hint.style.cssText = 'flex-basis:100%;text-align:center;margin-top:4px;font-size:12px;opacity:.92;';
+        const cmd = (code === 'host_not_registered' || code === 'bad_manifest'
+          || code === 'permission_denied' || code === 'unsupported')
+          ? '（在项目目录执行：npm run setup:auto-start）'
+          : '';
+        hint.textContent = help + cmd;
+        banner.appendChild(hint);
+      }
     }
   });
   banner.querySelector('[data-backend-dismiss]').addEventListener('click', removeBackendOfflineBanner);
@@ -3531,7 +3824,7 @@ async function checkServiceStatus() {
     text.textContent = '未运行';
     detail.textContent = resp && resp.reason
       ? `原因：${resp.reason}`
-      : '点击「启动服务」拉起（需已执行 npm run setup:chrome-host）';
+      : '点击「启动服务」拉起（需已执行 npm run setup:auto-start）';
   }
 
   if (startBtn) startBtn.style.opacity = (resp && resp.alive) ? '0.5' : '1';
@@ -3610,12 +3903,40 @@ async function startBackendService() {
       }
       Toast.success('本地服务已启动');
     } else {
-      const why = (resp && resp.reason) || '未知原因';
+      // 优先展示 background 归类好的中文指引；没有 help 时退回原始报错。
+      // 换机场景最常见的是「这台机器没装 Chrome / 用的不是 Chrome」，
+      // 直接把英文原生报错透给用户等于没给任何帮助。
+      const why = (resp && resp.help) || (resp && resp.reason) || '未知原因';
+      const code = (resp && resp.code) || '';
       if (resultEl) {
-        resultEl.textContent = '✗ 启动失败：' + why;
+        resultEl.innerHTML = '';
         resultEl.style.color = '#dc2626';
+        const head = document.createElement('div');
+        head.textContent = '✗ 启动失败' + (code ? `（${code}）` : '');
+        head.style.fontWeight = '600';
+        resultEl.appendChild(head);
+        const detail = document.createElement('div');
+        detail.textContent = why;
+        detail.style.marginTop = '4px';
+        detail.style.lineHeight = '1.6';
+        resultEl.appendChild(detail);
+        // 宿主未注册时，把要执行的命令直接给出来，用户照抄即可
+        if (code === 'host_not_registered' || code === 'bad_manifest' || code === 'permission_denied') {
+          const cmd = document.createElement('div');
+          cmd.textContent = 'npm run setup:auto-start';
+          cmd.style.cssText = 'margin-top:6px;padding:4px 8px;background:var(--bg-secondary,#f3f4f6);'
+            + 'border-radius:4px;font-family:monospace;font-size:11px;display:inline-block;'
+            + 'user-select:all;cursor:pointer;';
+          cmd.title = '点击复制';
+          cmd.addEventListener('click', () => {
+            navigator.clipboard.writeText(cmd.textContent)
+              .then(() => Toast.success('命令已复制'))
+              .catch(() => Toast.info('请手动选中复制'));
+          });
+          resultEl.appendChild(cmd);
+        }
       }
-      Toast.error('启动失败：' + why);
+      Toast.error('启动失败，请看下方提示');
     }
   } catch (e) {
     if (resultEl) {

@@ -48,7 +48,7 @@ router.post('/task', async (req, res) => {
 
     // 候选集：收藏优先 + 全部执行兜底（早期只给收藏，导致没收藏时 AI 无候选可用）
     const { getAiCandidateExecutions } = await import('../services/executionManager.js');
-    const { candidates, favoriteCount, totalCount } = await getAiCandidateExecutions();
+    const { candidates, totalCount } = await getAiCandidateExecutions();
 
     const userPickedExecution = !!(executionId && executionId !== '');
     let finalExecutionId = userPickedExecution ? executionId : null;
@@ -129,7 +129,7 @@ router.post('/task', async (req, res) => {
         candidates: needConfirm
           ? candidates.slice(0, 8).map(e => ({ id: e.id, name: e.name, projectName: e.projectName || '' }))
           : [],
-        meta: { favoriteCount, totalCount, candidateCount: candidates.length, aiAvailable }
+        meta: { totalCount, candidateCount: candidates.length, aiAvailable }
       });
     }
 
@@ -1474,7 +1474,7 @@ router.post('/ai/match-execution', async (req, res) => {
 
     // 获取候选执行（收藏优先 + 全部执行兜底）
     const { getAiCandidateExecutions } = await import('../services/executionManager.js');
-    const { candidates, favoriteCount, totalCount, truncated } = await getAiCandidateExecutions();
+    const { candidates, totalCount, truncated } = await getAiCandidateExecutions();
 
     if (candidates.length === 0) {
       return res.json({
@@ -1510,7 +1510,7 @@ router.post('/ai/match-execution', async (req, res) => {
       matchedBy: match?.matchedBy || 'none',
       reason: match?.reason || '',
       confidence: match?.confidence ?? 0,
-      meta: { favoriteCount, totalCount, candidateCount: candidates.length, truncated }
+      meta: { totalCount, candidateCount: candidates.length, truncated }
     });
   } catch (err) {
     console.error('[API] AI 匹配执行失败:', err);
@@ -1527,7 +1527,7 @@ router.post('/ai/match-execution', async (req, res) => {
 router.get('/ai/candidates', async (req, res) => {
   try {
     const { getAiCandidateExecutions } = await import('../services/executionManager.js');
-    const { candidates, favoriteCount, totalCount, truncated } = await getAiCandidateExecutions();
+    const { candidates, totalCount, truncated } = await getAiCandidateExecutions();
     res.json({
       success: true,
       data: candidates.map(c => ({
@@ -1538,7 +1538,7 @@ router.get('/ai/candidates', async (req, res) => {
         isFavorite: !!c.isFavorite,
         isDefault: !!c.isDefault
       })),
-      meta: { favoriteCount, totalCount, candidateCount: candidates.length, truncated }
+      meta: { totalCount, candidateCount: candidates.length, truncated }
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

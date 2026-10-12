@@ -38,7 +38,11 @@ async function isBackendAlive(timeout = 1500) {
  */
 async function launchBackendViaNative() {
   if (!chrome.runtime.connectNative) {
-    return { started: false, reason: '当前浏览器不支持 Native Messaging' };
+    return {
+      started: false,
+      code: 'unsupported',
+      reason: '当前浏览器不支持 Native Messaging'
+    };
   }
 
   return new Promise((resolve) => {
@@ -49,15 +53,19 @@ async function launchBackendViaNative() {
     try {
       port = chrome.runtime.connectNative(NATIVE_HOST);
     } catch (e) {
-      return done({ started: false, reason: e.message });
+      return done({ started: false, code: classifyLaunchError(e.message), reason: e.message });
     }
 
-    // Chrome 启动宿主需要时间，超时则判定失败
+    // 浏览器启动宿主需要时间，超时则判定失败
     const timer = setTimeout(async () => {
       if (await isBackendAlive()) {
         done({ started: true });
       } else {
-        done({ started: false, reason: '宿主已请求但后端未就绪，请确认已执行 scripts/install-native-host.sh' });
+        done({
+          started: false,
+          code: 'timeout',
+          reason: '宿主已请求但后端未就绪，请确认已执行 scripts/install-native-host.sh'
+        });
       }
     }, 6000);
 
@@ -70,27 +78,86 @@ async function launchBackendViaNative() {
     });
 
     port.onDisconnect.addListener(async () => {
-      // Chrome 关闭了端口：宿主被终止。此时检查后端是否还活着。
+      // 关键：lastError 只在 disconnect 事件触发时有效，必须在这里同步读取。
+      // 宿主不存在（换机未注册 / 浏览器不是 Chrome）时，Chrome 不会同步抛错，
+      // 而是通过 disconnect + lastError 报 "Specified native messaging host not found"。
+      // 早期实现没读它，一律归为 disconnected，用户拿到的指引完全不对症。
+      let lastErr = '';
+      try {
+        lastErr = (chrome.runtime.lastError && chrome.runtime.lastError.message) || '';
+      } catch (e) {
+        lastErr = e.message;
+      }
+
       const alive = await isBackendAlive();
       clearTimeout(timer);
       if (!settled) {
         // 宿主已退出（通常是浏览器/插件重启），后端多半也被清理了
+        const code = alive ? '' : (lastErr ? classifyLaunchError(lastErr) : 'disconnected');
         done({
           started: alive,
-          reason: alive ? undefined : '后端宿主已断开'
+          code,
+          reason: alive ? undefined : (lastErr || '后端宿主已断开')
         });
       }
     });
 
-    // 主动发一条消息，触发 Chrome 启动宿主
+    // 主动发一条消息，触发浏览器启动宿主
     try {
       port.postMessage({ type: 'launch' });
     } catch (e) {
       clearTimeout(timer);
-      done({ started: false, reason: e.message });
+      done({ started: false, code: classifyLaunchError(e.message), reason: e.message });
     }
   });
 }
+
+/**
+ * 把浏览器的原生报错归类，供前端给出针对性的修复指引。
+ *
+ * 这一步很关键：换过电脑的用户最常见的卡点就是「这台机器没装 Chrome，
+ * 于是注册脚本写错了目录，connectNative 报 host not found」，
+ * 但插件此前只把英文原文透传出去，用户完全不知道该做什么。
+ */
+function classifyLaunchError(message) {
+  const m = String(message || '').toLowerCase();
+  if (!m) return 'unknown';
+  // 宿主未注册：绝大多数情况是「这台电脑用的不是 Chrome」或「没跑注册脚本」
+  if (m.includes('not found') || m.includes('no such host') || m.includes('access to the specified native messaging host')) {
+    return 'host_not_registered';
+  }
+  if (m.includes('not allowed') || m.includes('permission') || m.includes('denied')) {
+    return 'permission_denied';
+  }
+  if (m.includes('manifest') || m.includes('parse')) {
+    return 'bad_manifest';
+  }
+  if (m.includes('timeout') || m.includes('timed out')) {
+    return 'timeout';
+  }
+  return 'unknown';
+}
+
+/** 各类失败对应的用户指引（中文、可直接展示） */
+const LAUNCH_ERROR_HELP = {
+  host_not_registered:
+    '未找到后端宿主。通常是这台电脑没有注册过，或用的浏览器不是 Chrome。'
+    + '在项目目录执行 npm run setup:auto-start 即可（会自动探测本机浏览器），'
+    + '完成后重新加载插件。',
+  permission_denied:
+    '浏览器拒绝了宿主启动。宿主文件路径中的脚本需要可执行权限，'
+    + '可执行 chmod +x scripts/*.sh 后重试。',
+  bad_manifest:
+    '宿主配置文件格式有误，请重新执行 npm run setup:auto-start 覆盖它。',
+  timeout:
+    '宿主已拉起但后端未就绪。首次启动需加载配置与禅道登录，约需 3-8 秒；'
+    + '若持续失败请查看日志 /tmp/workassistant-backend.log。',
+  unsupported:
+    '当前浏览器不支持 Native Messaging。建议改用开机自启：'
+    + '在项目目录执行 npm run setup:auto-start。',
+  disconnected: '宿主启动后立即断开，请查看 /tmp/workassistant-backend.log 中的错误。',
+  unknown: '请在项目目录执行 npm run setup:auto-start 重新注册宿主后重试。'
+};
 
 /**
  * 确保后端可用：未运行时尝试自动拉起
@@ -657,9 +724,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     launchBackendViaNative()
       .then(async (r) => {
         const alive = await isBackendAlive();
-        sendResponse({ success: alive, started: r.started, reason: r.reason || '', url: API_BASE_URL });
+        const code = alive ? undefined : (r.code || 'unknown');
+        sendResponse({
+          success: alive,
+          started: r.started,
+          code: code || '',
+          reason: r.reason || '',
+          // 前端直接展示这段中文指引，省去用户自己解读英文原生报错
+          help: code ? (LAUNCH_ERROR_HELP[code] || LAUNCH_ERROR_HELP.unknown) : '',
+          url: API_BASE_URL
+        });
       })
-      .catch(err => sendResponse({ success: false, reason: err.message }));
+      .catch(err => sendResponse({
+        success: false,
+        code: 'unknown',
+        reason: err.message,
+        help: LAUNCH_ERROR_HELP.unknown
+      }));
     return true;
   }
 

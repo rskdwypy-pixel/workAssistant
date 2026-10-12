@@ -1,51 +1,160 @@
 #!/usr/bin/env bash
-# 注册 Native Messaging 宿主，让 Chrome 在插件请求时自动拉起后端
+# 注册 Native Messaging 宿主，让浏览器在插件请求时自动拉起后端
 #
-# 背景：Chrome MV3 扩展无法直接启动本地进程（无 child_process、service worker
-# 会被回收）。Chrome 官方的解决方案是 Native Messaging：
-# 插件调用 chrome.runtime.connectNative() 时，Chrome 会自动启动这里注册的宿主进程。
+# 背景：MV3 扩展无法直接启动本地进程（无 child_process、service worker 会被回收）。
+# 浏览器官方的解决方案是 Native Messaging：插件调用 chrome.runtime.connectNative()
+# 时，浏览器会自动启动这里注册的宿主进程。
 #
-# 本脚本只需执行一次。Chrome 只会授予「已注册宿主」启动权限，这一步无法由插件自身完成
-# （该目录在扩展沙箱之外），因此必须由用户在终端执行一次。
+# 关键设计（踩过坑才这么写）：
+#   1. 注册目录由「浏览器的产品标识」决定，不是「装没装 Chrome」。
+#      Chrome 读 ~/Library/Application Support/Google/Chrome/，
+#      Edge 读 .../Microsoft Edge/，Helium 读 .../net.imput.helium/（用的是 bundle id）。
+#      早期版本把 6 个 Chrome 路径写死，换台没装 Chrome 的电脑（比如用 Edge /
+#      Brave / Helium）就完全失效。本脚本改为自动探测本机所有浏览器。
+#   2. 宿主注册文件在扩展沙箱之外，插件自己写不了，必须由用户执行一次。
+#   3. 浏览器启动宿主时不继承 shell 环境变量，node 绝对路径必须落盘。
+#
+# 用法：
+#   bash scripts/install-native-host.sh            # 注册到所有已探测到的浏览器
+#   bash scripts/install-native-host.sh --detect   # 只探测不写入，用于排查
+#   bash scripts/install-native-host.sh --browser "Google Chrome"   # 只注册指定浏览器
 
 set -euo pipefail
 
 HOST_NAME="com.workassistant.backend"
+HOST_DESC="工作助手本地后端服务"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-NODE_BIN="${WORKASSISTANT_NODE:-$(command -v node || true)}"
-
-if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
-  echo "❌ 找不到 node 可执行文件"
-  echo "   请先安装 Node.js，或用环境变量指定："
-  echo "   WORKASSISTANT_NODE=/path/to/node bash scripts/install-native-host.sh"
-  exit 1
-fi
-
 LAUNCHER="$PROJECT_DIR/scripts/backend-launcher.sh"
+NODE_PATH_FILE="$PROJECT_DIR/scripts/.node-path"
 
-if [[ ! -f "$LAUNCHER" ]]; then
-  echo "❌ 找不到启动器: $LAUNCHER"
-  exit 1
-fi
+DETECT_ONLY=0
+ONLY_BROWSER=""
 
-chmod +x "$LAUNCHER"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --detect|--dry-run|-n)
+      DETECT_ONLY=1
+      shift
+      ;;
+    --browser|-b)
+      ONLY_BROWSER="${2:-}"
+      shift 2 || shift
+      ;;
+    -h|--help)
+      sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *)
+      echo "未知参数: $1（用 --help 查看用法）"
+      exit 1
+      ;;
+  esac
+done
 
-# 固化 node 路径：Chrome 启动宿主时不继承 shell 环境变量，
-# 启动器必须能从文件读到 node 的绝对路径。
-echo "$NODE_BIN" > "$PROJECT_DIR/scripts/.node-path"
-echo "  已固化 node 路径: $NODE_BIN"
+# ─────────────────────────────────────────────────────────────
+# 浏览器识别表
+#
+# Chromium 系：注册目录 = Application Support 下的一个子目录，
+#   不同发行版命名规则不同（Google 用 "Google/Chrome"，多数第三方用 bundle id）。
+# Firefox 系：目录固定为 Mozilla/NativeMessagingHosts，且 JSON 字段不同
+#   （allowed_extensions 而非 allowed_origins），必须单独生成。
+# ─────────────────────────────────────────────────────────────
 
-install_host() {
-  local app_support_rel="$1"
-  local browser_name="$2"
-  local browser_dir="$HOME/Library/Application Support/$app_support_rel/NativeMessagingHosts"
+# bundle_id|显示名|Application Support 相对目录|类型
+# 类型：chromium | firefox
+BROWSER_TABLE="
+com.google.Chrome|Google Chrome|Google/Chrome|chromium
+com.google.Chrome.beta|Google Chrome Beta|Google/Chrome Beta|chromium
+com.google.Chrome.canary|Google Chrome Canary|Google/Chrome Canary|chromium
+com.google.Chrome.for.testing|Google Chrome for Testing|Google/Chrome for Testing|chromium
+com.google.Chrome.headless|Google Chrome-headless|Google/Chrome-headless|chromium
+org.chromium.Chromium|Chromium|Chromium|chromium
+com.microsoft.edgemac|Microsoft Edge|Microsoft Edge|chromium
+com.brave.Browser|Brave Browser|BraveSoftware/Brave-Browser|chromium
+net.imput.helium|Helium|net.imput.helium|chromium
+company.thebrowser.Browser|Arc|Arc/User Data|chromium
+com.vivaldi.Vivaldi|Vivaldi|Vivaldi|chromium
+com.operasoftware.Opera|Opera|com.operasoftware.Opera|chromium
+com.operasoftware.OperaNext|Opera GX|com.operasoftware.OperaNext|chromium
+org.mozilla.firefox|Firefox|Mozilla/NativeMessagingHosts|firefox
+org.mozilla.firefoxdeveloperedition|Firefox Developer Edition|Mozilla/NativeMessagingHosts|firefox
+"
 
-  mkdir -p "$browser_dir"
+# 从 Info.plist 读值（不依赖 PlistBuddy，兼容老系统）
+read_plist_value() {
+  local plist="$1" key="$2"
+  /usr/libexec/PlistBuddy -c "Print :$key" "$plist" 2>/dev/null || true
+}
 
-  cat > "$browser_dir/$HOST_NAME.json" <<JSON
+# 输出已安装浏览器的 TSV：bundle_id<TAB>显示名<TAB>目录<TAB>类型<TAB>app路径
+detect_browsers() {
+  local app_dirs=("/Applications" "$HOME/Applications")
+  local entry app plist bid name rel type found
+
+  while IFS='|' read -r bid name rel type; do
+    [[ -z "$bid" ]] && continue
+    found=""
+    for d in "${app_dirs[@]}"; do
+      # bundle id 反查 app 名很麻烦，改为遍历 app 目录后比对 plist
+      :
+    done
+
+    for d in "${app_dirs[@]}"; do
+      [[ -d "$d" ]] || continue
+      for app in "$d"/*.app; do
+        [[ -d "$app" ]] || continue
+        plist="$app/Contents/Info.plist"
+        [[ -f "$plist" ]] || continue
+        # 快速过滤：路径里含浏览器关键字才读 plist，减少开销
+        case "$app" in
+          *Chrome*|*Chromium*|*Edge*|*Brave*|*Helium*|*Arc*|*Vivaldi*|*Opera*|*Firefox*)
+            ;;
+          *)
+            continue
+            ;;
+        esac
+        name_found="$(read_plist_value "$plist" CFBundleIdentifier)"
+        if [[ "$name_found" == "$bid" ]]; then
+          found="$app"
+          break 2
+        fi
+      done
+    done
+
+    if [[ -n "$found" ]]; then
+      printf '%s\t%s\t%s\t%s\t%s\n' "$bid" "$name" "$rel" "$type" "$found"
+    fi
+  done <<< "$BROWSER_TABLE"
+}
+
+# 生成宿主 JSON
+#   $1=类型 chromium|firefox
+write_host_file() {
+  local kind="$1" target_dir="$2"
+
+  mkdir -p "$target_dir"
+
+  if [[ "$kind" == "firefox" ]]; then
+    # Firefox 的 native messaging 清单格式不同：
+    #   - 用 allowed_extensions（Firefox 扩展 ID），不是 allowed_origins
+    #   - 没有扩展 ID 时留空数组，Firefox 会拒绝连接，需用户在 about:debugging
+    #     查看临时安装扩展的 ID 后填入（README 有说明）
+    cat > "$target_dir/$HOST_NAME.json" <<JSON
 {
   "name": "$HOST_NAME",
-  "description": "工作助手本地后端服务",
+  "description": "$HOST_DESC",
+  "path": "$LAUNCHER",
+  "type": "stdio",
+  "allowed_extensions": []
+}
+JSON
+  else
+    # Chromium 系：allowed_origins 支持单个 * 通配，可匹配任意扩展 ID，
+    # 因此换机后即使扩展 ID 变化（未打包的扩展 ID 由路径派生）也依然有效。
+    cat > "$target_dir/$HOST_NAME.json" <<JSON
+{
+  "name": "$HOST_NAME",
+  "description": "$HOST_DESC",
   "path": "$LAUNCHER",
   "type": "stdio",
   "allowed_origins": [
@@ -54,36 +163,128 @@ install_host() {
   ]
 }
 JSON
-
-  echo "  ✅ $browser_name"
+  fi
 }
+
+# ─────────────────────────────────────────────────────────────
+# 开始
+# ─────────────────────────────────────────────────────────────
+
+if [[ ! -f "$LAUNCHER" ]]; then
+  echo "❌ 找不到启动器: $LAUNCHER"
+  exit 1
+fi
+
+chmod +x "$LAUNCHER"
+
+NODE_BIN="${WORKASSISTANT_NODE:-$(command -v node || true)}"
 
 echo "════════════════════════════════════════════"
 echo "  工作助手 · 后端自动启动宿主注册"
 echo "════════════════════════════════════════════"
 echo "  项目目录: $PROJECT_DIR"
-echo "  Node:     $NODE_BIN"
 echo ""
-echo "  注册到以下浏览器（Chrome 按产品名读取不同目录）："
 
-# Chrome 按「产品名」决定读取哪个目录，不同发行版路径不同：
-#   Google Chrome              → Google/Chrome
-#   Google Chrome for Testing  → Google/Chrome for Testing
-#   Chromium                   → Chromium
-# 一次注册到全部常见位置，避免换浏览器后又失效。
-install_host "Google/Chrome" "Google Chrome"
-install_host "Google/Chrome for Testing" "Google Chrome for Testing"
-install_host "Google/Chrome Beta" "Google Chrome Beta"
-install_host "Google/Chrome Canary" "Google Chrome Canary"
-install_host "Chromium" "Chromium"
-install_host "Microsoft Edge" "Microsoft Edge"
+DETECTED="$(detect_browsers)"
+
+if [[ -z "$DETECTED" ]]; then
+  echo "⚠️  未探测到任何受支持的浏览器"
+  echo ""
+  echo "   已查找: /Applications 与 ~/Applications 下的"
+  echo "           Chrome / Edge / Chromium / Brave / Helium / Arc / Vivaldi / Opera / Firefox"
+  echo ""
+  echo "   如果你用的是其他浏览器，或浏览器装在非标准位置，"
+  echo "   可以手动注册（把 <目录> 换成浏览器实际读取的路径）："
+  echo ""
+  echo "     mkdir -p \"\$HOME/Library/Application Support/<目录>/NativeMessagingHosts\""
+  echo "     # 然后把本文件内容写成 com.workassistant.backend.json："
+  echo "     {\"name\":\"$HOST_NAME\",\"path\":\"$LAUNCHER\",\"type\":\"stdio\","
+  echo "      \"allowed_origins\":[\"chrome-extension://*/\"]}"
+  echo ""
+  echo "   💡 但其实不必依赖浏览器 —— 后端本质是常驻服务（日报定时任务需要它一直跑），"
+  echo "      用开机自启更省心，且与用哪个浏览器无关："
+  echo ""
+  echo "        npm run setup:auto-start"
+  echo ""
+  exit 0
+fi
+
+echo "  探测到以下浏览器："
+echo ""
+
+APP_SUPPORT="$HOME/Library/Application Support"
+REGISTERED=0
+SKIPPED=0
+
+while IFS=$'\t' read -r bid name rel kind app; do
+  [[ -z "$bid" ]] && continue
+  if [[ -n "$ONLY_BROWSER" && "$name" != *"$ONLY_BROWSER"* ]]; then
+    continue
+  fi
+
+  if [[ "$kind" == "firefox" ]]; then
+    target_dir="$APP_SUPPORT/$rel"
+    # Firefox 的 rel 已是完整相对路径（含 NativeMessagingHosts）
+    if [[ "$rel" == */NativeMessagingHosts ]]; then
+      target_dir="$APP_SUPPORT/$rel"
+    fi
+  else
+    target_dir="$APP_SUPPORT/$rel/NativeMessagingHosts"
+  fi
+
+  exists_mark="  "
+  if [[ -d "$target_dir" ]]; then
+    exists_mark="✓ "
+  fi
+
+  printf '    %s%-30s %s\n' "$exists_mark" "$name" "$bid"
+
+  if [[ $DETECT_ONLY -eq 1 ]]; then
+    printf '        → %s\n' "$target_dir/$HOST_NAME.json"
+    continue
+  fi
+
+  write_host_file "$kind" "$target_dir"
+  REGISTERED=$((REGISTERED + 1))
+done <<< "$DETECTED"
 
 echo ""
-echo "✅ 注册完成"
+
+if [[ $DETECT_ONLY -eq 1 ]]; then
+  echo "🔍 仅探测模式，未写入任何文件（去掉 --detect 执行注册）"
+  echo ""
+  exit 0
+fi
+
+# 固化 node 路径：浏览器启动宿主时不继承 shell 环境变量，
+# 启动器必须能从文件读到 node 的绝对路径。
+if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
+  echo "⚠️  当前 shell 里找不到 node，未固化路径"
+  echo "   宿主将回退用 PATH 查找，换机后可能失败。"
+  echo "   如 node 不在 PATH 中，请执行："
+  echo "     WORKASSISTANT_NODE=/path/to/node bash scripts/install-native-host.sh"
+  echo ""
+else
+  echo "$NODE_BIN" > "$NODE_PATH_FILE"
+  echo "  ✅ node 路径已固化: $NODE_BIN"
+fi
+
 echo ""
+echo "✅ 已注册 $REGISTERED 个浏览器"
+echo ""
+
+if [[ $REGISTERED -eq 0 ]]; then
+  echo "⚠️  没有匹配到指定浏览器（--browser $ONLY_BROWSER）"
+  exit 1
+fi
+
 echo "接下来："
-echo "  1. 在 chrome://extensions 重新加载插件"
+echo "  1. 在浏览器的扩展管理页重新加载插件"
+echo "     Chrome/Edge: chrome://extensions   Edge: edge://extensions"
 echo "  2. 打开新标签页，后端会自动在 127.0.0.1:3721 启动"
 echo ""
 echo "启动/停止：插件「设置 → 本地服务」里有「启动服务 / 停止服务」按钮"
 echo "命令行停止：pkill -f 'node src/index.js'"
+echo ""
+echo "💡 若浏览器启动后端仍不生效，改用开机自启（与浏览器无关，最稳）："
+echo "     npm run setup:auto-start"

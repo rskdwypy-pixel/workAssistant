@@ -32,14 +32,15 @@ const TASK_ANALYSIS_PROMPT = `你是智能任务管理助手。当前时间是�
 
 分析规则：
 1. title: 提取完整的项目名和具体修饰事项作为标题，不要随意删减长关键词或项目名，长度控制在5-30字以内。
-2. status: 根据内容判断状态
-   - 包含"完成、搞定、done、100%"等 → done
-   - 包含"正在、进行、doing"等，或进度介于1-99之间 → in_progress
-   - 其他 → todo
+2. status: 判断依据必须来自原文明确表述
+   - 明确说"完成、搞定、做完了、done、100%" → done
+   - 明确说"正在做、进行中、doing"，或原文给出 1-99 的进度 → in_progress
+   - 其他一律 → todo
+   注意："预计3天完成""工期一周""下周交付"只是排期，不代表任务已经在做，status 应为 todo。
 3. reminderTime: 提取文本中的提醒时间或截止时间（需精确到YYYY-MM-DDTHH:mm:ss格式的标准ISO时间戳，如自动推算的"明天下午3点"等。若文本中未提及明确或隐晦的时间点，则返回null）
 4. progress: 任务进度（0-100的整数）
-   - 识别格式如 "50%", "50 percent", "一半", "1/2", "进行中(50%)" 等
-   - 如果是进行中状态但未明确进度，默认为 10
+   - 只在原文**明确给出进度**时填写：识别 "50%"、"50 percent"、"一半"、"1/2"、"进行中(50%)" 等
+   - **原文完全没有提到进度时必须填 0**，不要凭空给 10 之类的估值
    - 如果进度介于1-99之间，status必须是 in_progress
    - 待办状态为 0，完成状态为 100
 5. priority: 任务优先级（1-4的整数）
@@ -278,6 +279,21 @@ async function analyzeTask(userInput) {
     }
 
     const result = JSON.parse(content);
+
+    // —— 代码层兜底：不凭空给进度 ——
+    // 部分模型会忽略提示词自行给"进行中→10%"这类估值。
+    // 这里把 progress 归一到 0-100 并与 status 对齐：
+    // 进度为 0 却标 in_progress 的，退回 todo（原文大概率没提进度）。
+    let progress = Number(result.progress);
+    if (!Number.isFinite(progress)) progress = 0;
+    progress = Math.max(0, Math.min(100, Math.round(progress)));
+    if (progress > 0 && progress < 100) result.status = 'in_progress';
+    if (progress >= 100) {
+      progress = 100;
+      result.status = 'done';
+    }
+    if (progress === 0 && result.status === 'in_progress') result.status = 'todo';
+    result.progress = progress;
 
     return {
       success: true,

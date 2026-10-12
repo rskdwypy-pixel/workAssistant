@@ -726,8 +726,9 @@
         <button class="close-btn" id="closeSettings">&times;</button>
       </div>
       <div class="modal-body">
+        <div class="settings-grid">
         <!-- 本地服务管理（由插件直接控制，无需手动跑 start.sh/stop.sh） -->
-        <div class="settings-section" style="margin-bottom: 24px;">
+        <div class="settings-section settings-section-full" style="margin-bottom: 24px;">
           <h4 style="display: flex; align-items: center; gap: 8px;">🖥️ 本地服务
             <span id="serviceStatusDot" class="status-dot unknown" title="检测中..."></span>
           </h4>
@@ -748,89 +749,60 @@
           </div>
         </div>
 
-        <!-- 数据备份配置 -->
-        <div class="settings-section">
-          <h4>☁️ 数据备份</h4>
-
-          <div class="sync-provider-tabs">
-            <button class="sync-tab active" data-provider="jianguoyun">坚果云</button>
-            <button class="sync-tab" data-provider="custom">自定义 WebDAV</button>
-          </div>
-
-          <div id="jianguoyunHelp" class="jianguoyun-help">
-            <p>📌 <strong>坚果云</strong>是国内快速稳定的 WebDAV 服务，免费可用</p>
-            <p style="margin-top: 8px; font-size: 12px; color: #8b949e;">配置步骤：</p>
-            <ol style="margin: 4px 0 8px 0; padding-left: 16px; font-size: 12px; color: #8b949e;">
-              <li>登录坚果云网页版 → 头像 → 账户信息</li>
-              <li>安全选项 → 勾选「启用第三方应用管理」</li>
-              <li>生成应用密码（<strong>非登录密码</strong>）</li>
-            </ol>
-            <a href="https://help.jianguoyun.com/?p=1416" target="_blank" class="help-link">查看详细教程 →</a>
-          </div>
-
-          <div class="settings-item">
-            <label>WebDAV 服务器地址</label>
-            <input type="text" id="backupWebdavUrl" placeholder="https://dav.jianguoyun.com/dav/">
-          </div>
-          <div class="settings-item">
-            <label>坚果云账号 / 邮箱</label>
-            <input type="text" id="backupWebdavUsername" placeholder="your-email@example.com">
-          </div>
-          <div class="settings-item">
-            <label>坚果云应用密码 <span style="color: #f85149;">*</span></label>
-            <input type="password" id="backupWebdavPassword" placeholder="应用密码（在坚果云安全选项中生成）">
-            <span class="input-hint">⚠️ 请使用应用密码，<strong>不是</strong>坚果云登录密码</span>
-          </div>
-
-          <div class="settings-item">
-            <label class="checkbox-label">
-              <input type="checkbox" id="backupAutoEnabled" checked>
-              <span>定期自动备份（每小时）</span>
-            </label>
-          </div>
-
-          <div style="display: flex; gap: 8px; margin-top: 12px;">
-            <button id="testBackupConnection" class="btn-secondary">🧪 测试连接</button>
-            <button id="backupNowBtn" class="btn-secondary" disabled>💾 立即备份</button>
-            <button id="restoreNowBtn" class="btn-secondary" disabled>📥 恢复数据</button>
-          </div>
-          <span id="backupTestResult" class="test-result"></span>
-          <span id="backupLastTime" class="sync-last-time"></span>
-
-          <div class="backup-info" style="margin-top: 16px; padding: 12px; background: rgba(56, 139, 253, 0.1); border-radius: 6px; font-size: 12px; color: #8b949e;">
-            <p style="margin: 0;">💡 <strong>备份说明：</strong></p>
-            <ul style="margin: 4px 0 0 0; padding-left: 20px;">
-              <li>备份配置文件、报告数据、本地任务（不含禅道）</li>
-              <li>已同步到禅道的任务和 Bug 不会备份</li>
-              <li>换设备后可通过恢复功能导入所有数据</li>
-            </ul>
-          </div>
-        </div>
-
         <div class="settings-section">
           <h4>🤖 AI 配置</h4>
           <div class="settings-item">
             <label>API 服务</label>
             <select id="aiProvider">
-              <option value="zhipu">智谱AI (推荐)</option>
-              <option value="openai">OpenAI 官方</option>
-              <option value="custom">自定义</option>
+              <optgroup label="── 国内主流 ──">
+                <option value="zhipu">智谱 GLM（推荐）</option>
+                <option value="deepseek">DeepSeek 深度求索</option>
+                <option value="moonshot">月之暗面 Kimi</option>
+                <option value="qwen">阿里通义千问 DashScope</option>
+                <option value="doubao">字节豆包（火山方舟）</option>
+                <option value="ernie">百度文心一言</option>
+                <option value="minimax">MiniMax</option>
+                <option value="siliconflow">硅基流动 SiliconFlow</option>
+                <option value="together">Together AI（聚合）</option>
+              </optgroup>
+              <optgroup label="── 海外 / 其他 ──">
+                <option value="openai">OpenAI 官方</option>
+                <option value="anthropic">Anthropic Claude</option>
+                <option value="openrouter">OpenRouter（聚合）</option>
+                <option value="ollama">Ollama 本地部署</option>
+                <option value="custom">自定义（OpenAI 兼容）</option>
+              </optgroup>
             </select>
+            <span class="input-hint" id="aiProviderHint">选择后会自动填入推荐接口地址与模型，可直接修改</span>
           </div>
           <div class="settings-item">
             <label>API Key <span class="required">*</span></label>
-            <input type="password" id="apiKey" placeholder="请输入 API Key">
+            <input type="password" id="apiKey" placeholder="请输入 API Key" autocomplete="off">
+            <span class="input-hint" id="apiKeyHint">🔒 密钥仅保存在本机 <code>.env</code>，不会同步或上传</span>
           </div>
           <div class="settings-item">
             <label>API 地址</label>
-            <input type="text" id="apiBaseUrl" placeholder="https://open.bigmodel.cn/api/paas/v4/">
+            <input type="text" id="apiBaseUrl" placeholder="https://open.bigmodel.cn/api/paas/v4/" spellcheck="false">
           </div>
           <div class="settings-item">
             <label>模型</label>
-            <input type="text" id="aiModel" placeholder="glm-4-flash">
+            <input type="text" id="aiModel" placeholder="glm-4-flash" spellcheck="false">
+            <span class="input-hint" id="aiModelHint"></span>
           </div>
-          <button id="testAi" class="btn-secondary">🧪 测试连接</button>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button id="testAi" class="btn-secondary">🧪 测试连接</button>
+            <button id="aiModelHelpBtn" class="btn-secondary">📖 模型怎么选？</button>
+          </div>
           <span id="aiTestResult" class="test-result"></span>
+          <div id="aiModelHelp" class="backup-info" style="display:none; margin-top: 12px; padding: 12px; background: rgba(56,139,253,.08); border-radius: 6px; font-size: 12px; color: var(--text-muted); line-height: 1.7;">
+            <p style="margin:0 0 6px;"><strong>选型建议</strong></p>
+            <ul style="margin:0; padding-left:18px;">
+              <li><strong>任务解析 / 分类</strong>（本插件主力场景）：选<strong>轻量快速模型</strong>即可，如 glm-4-flash、deepseek-chat、qwen-turbo —— 响应快、成本低、JSON 遵循度高</li>
+              <li><strong>日报 / 周报生成</strong>：可选更强的推理模型，如 glm-4-plus、deepseek-reasoner，文字组织更好</li>
+              <li><strong>本地隐私</strong>：选 Ollama + <code>qwen3:8b</code> 或 <code>llama3.1</code>，数据不出本机（接口地址填 <code>http://127.0.0.1:11434/v1</code>，Key 随便填）</li>
+              <li>所有国内供应商均兼容 OpenAI 协议，切换服务商通常只需换 Key</li>
+            </ul>
+          </div>
         </div>
 
         <div class="settings-section">
@@ -897,26 +869,26 @@
           <span id="zentaoUsersResult" class="test-result"></span>
         </div>
 
-        <!-- 执行收藏配置 -->
-        <div class="settings-section">
-          <h4>⭐ 常用执行（AI 将优先匹配这些执行）</h4>
-          <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-            <button id="syncExecutionsBtn" class="btn-secondary">🔄 从禅道同步执行</button>
-            <span id="syncExecutionsResult" class="test-result"></span>
-          </div>
-          <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
-            <input type="checkbox" id="showClosedExecutions" style="cursor: pointer;">
-            <label for="showClosedExecutions" style="cursor: pointer; font-size: 13px;">显示已关闭的执行</label>
-          </div>
-          <div id="executionFavoritesList" class="project-favorites-list">
-            <p class="hint">点击「从禅道同步执行」加载执行列表</p>
-          </div>
-        </div>
 
+        <!-- 配置导出 / 导入（换机迁移用） -->
+        <div class="settings-section settings-section-full">
+          <h4>📦 配置导出 / 导入</h4>
+          <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 12px; line-height: 1.6;">
+            导出全部配置（AI、通知、禅道、提示词），用于<strong>换机迁移或备份</strong>。
+            出于安全考虑，<strong>不包含</strong> API Key 与禅道密码 —— 换机后需重新填写这两项。
+          </p>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button id="exportConfigBtn" class="btn-secondary">📤 导出配置文件</button>
+            <button id="importConfigBtn" class="btn-secondary">📥 导入配置文件</button>
+            <input type="file" id="importConfigFile" accept="application/json,.json" style="display: none;">
+          </div>
+          <span id="configTransferResult" class="test-result"></span>
+        </div>
 
         <div class="settings-footer">
           <button id="saveSettings" class="btn-primary">💾 保存配置</button>
           <button id="resetSettings" class="btn-secondary">🔄 重置默认</button>
+        </div>
         </div>
       </div>
     </div>
@@ -1020,9 +992,7 @@
     </div>
   </div>
 
-  <!-- 同步功能脚本 -->
-  <script src="storage-webdav.js"></script>
-  <script src="backupManager.js"></script>
+  <!-- 数据备份功能已下线：backupManager.js / storage-webdav.js 不再引入 -->
   <script src="sync.js"></script>
   <script src="sync-ui.js"></script>
 
