@@ -17,14 +17,14 @@ chmod +x install.sh
 
 安装脚本会自动完成以下步骤：
 
-#### ✅ [1/9] 检查运行环境
+#### ✅ [1/10] 检查运行环境
 - 检查 Node.js、npm、git
 - 自动提示安装命令（如果缺失）
 
-#### ✅ [2/9] 安装项目依赖
+#### ✅ [2/10] 安装项目依赖
 - 自动运行 `npm install`
 
-#### ✅ [3/9] 配置环境文件
+#### ✅ [3/10] 配置环境文件
 **（新增：交互式配置）**
 ```
 🤖 AI 配置（必须）
@@ -43,11 +43,11 @@ chmod +x install.sh
 ✅ AI 连接测试成功！
 ```
 
-#### ✅ [4/9] 初始化数据目录
+#### ✅ [4/10] 初始化数据目录
 - 创建 `data/` 和 `logs/` 目录
 - 初始化 `tasks.json`
 
-#### ✅ [5/9] 配置禅道（可选）
+#### ✅ [5/10] 配置禅道（可选）
 **（新增：交互式禅道配置）**
 ```
 🐉 禅道集成配置
@@ -59,7 +59,7 @@ chmod +x install.sh
 禅道地址: http://10.128.1.8:8088
 禅道用户名: your-account
 禅道密码: ******
-执行 ID (execution ID): 167
+默认执行 ID (execution ID, 选填): 167
 
 配置摘要：
   禅道地址: http://10.128.1.8:8088
@@ -74,12 +74,14 @@ chmod +x install.sh
 ✓ 禅道配置已保存
 ```
 
-#### ✅ [6/9] 创建全局命令
+> **执行 ID 是选填的。** 直接回车留空即可 —— 留空后，「添加任务」弹窗会自动拉取该禅道账号下的**全部执行**供你选择，不需要提前在这里指定。
+
+#### ✅ [6/10] 创建全局命令
 - 创建 `wa`、`wastop`、`walog` 命令
 - **自动添加到 PATH**
 - **自动在当前会话生效**
 
-#### ✅ [7/9] 安装 Chrome 扩展
+#### ✅ [7/10] 安装 Chrome 扩展
 **（新增：自动打开扩展页面）**
 ```
 📦 Chrome 扩展安装步骤：
@@ -99,12 +101,44 @@ chmod +x install.sh
 ✓ 已在 Chrome 中打开扩展页面
 ```
 
-#### ✅ [8/9] 启动后端服务
+#### ✅ [8/10] 启动后端服务
 - 自动检测端口占用
 - 自动启动服务
 - 服务在后台运行
 
-#### ✅ [9/9] 验证安装
+#### ✅ [9/10] 安装开机自启与浏览器宿主
+**（新增）**
+- 注册 Native Messaging 宿主，扩展可唤起本地后端
+- 安装 macOS LaunchAgent（登录后自动拉起后端）
+- 可在「设置 → 本地服务 → 开机自启」中随时开关
+
+> **关于「系统里为什么看不到开机自启项」**
+>
+> 本项目的开机自启用的是 macOS 的 **LaunchAgent**（`~/Library/LaunchAgents/com.workassistant.backend.plist`），
+> 这跟「登录项（Login Items）」不是同一个东西，表现也不一样：
+>
+> | | 登录项 App | 本项目用的 LaunchAgent |
+> |---|---|---|
+> | 添加时是否弹窗确认 | 会 | **不会，静默注册** |
+> | 系统设置里在哪看 | 通用 → 登录项与扩展 → 「打开时」 | 同页面的「**允许在后台**」列表（需 job 已被 launchd 加载后才会出现） |
+> | 怎么核对 | 图形界面 | `launchctl print gui/$(id -u)/com.workassistant.backend` |
+>
+> 所以「没弹窗」不等于没生效。真正要确认的是 launchd 里有没有这个 job：
+>
+> ```bash
+> # 有输出 = 已加载（含 state / pid / program 等字段）
+> launchctl print gui/$(id -u)/com.workassistant.backend
+>
+> # 查不到时手动加载一次
+> launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.workassistant.backend.plist
+> ```
+>
+> ⚠️ 注意：`launchctl bootstrap` 无法从被 macOS 沙箱限制的进程里执行
+> （会报 `Bootstrap failed: 5: Input/output error`）。
+> 如果你是从 IDE / 沙箱终端触发的安装，请改用**系统自带的「终端」App** 执行上面这条命令，
+> 或者干脆**注销/重启一次** —— launchd 会在登录时自动加载 `~/Library/LaunchAgents/` 下的所有 plist。
+
+#### ✅ [10/10] 验证安装
 **（新增：安装验证）**
 ```
 验证安装...

@@ -56,7 +56,7 @@ function startServer() {
     console.log('⚠️  配置验证有警告，但继续启动...');
   }
 
-  app.listen(server.port, server.host, () => {
+  const httpServer = app.listen(server.port, server.host, () => {
     console.log('╔════════════════════════════════════════╗');
     console.log('║        🏠 工作助手服务已启动           ║');
     console.log('╠════════════════════════════════════════╣');
@@ -64,10 +64,26 @@ function startServer() {
     console.log(`║  早间提醒: 每天 ${config.schedule.morningHour}:00           ║`);
     console.log(`║  晚间日报: 每天 ${config.schedule.eveningHour}:00           ║`);
     console.log('╚════════════════════════════════════════╝');
+
+    // 端口真正拿到手了才挂定时任务，否则会多出一份重复的调度
+    startReminder();
+    startSummary();
   });
 
-  startReminder();
-  startSummary();
+  // 端口被占用不是「崩溃」，而是「已经有一个后端在跑」。
+  // 必须安静地以 0 退出：LaunchAgent 的 KeepAlive 只对异常退出重启，
+  // 若这里以非 0 退出，launchd 会反复拉起一个注定绑不上端口的进程，
+  // 把 /tmp/workassistant-backend.log 刷成 EADDRINUSE 死循环。
+  httpServer.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(
+        `端口 ${server.port} 已被占用，本实例退出（已有后端在运行，不会重复启动）`
+      );
+      process.exit(0);
+    }
+    console.error('服务启动失败:', err);
+    process.exit(1);
+  });
 }
 
 // 优雅关闭

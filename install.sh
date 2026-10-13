@@ -173,7 +173,7 @@ echo -e "${GREEN}✓ 检测到操作系统: $OS${NC}"
 
 # ==================== 步骤1: 环境检查 ====================
 echo ""
-echo -e "${BOLD}[1/9]${NC} 检查运行环境..."
+echo -e "${BOLD}[1/10]${NC} 检查运行环境..."
 
 # 检查 Node.js
 if ! command -v node &> /dev/null; then
@@ -219,7 +219,7 @@ fi
 
 # ==================== 步骤2: 安装依赖 ====================
 echo ""
-echo -e "${BOLD}[2/9]${NC} 安装项目依赖..."
+echo -e "${BOLD}[2/10]${NC} 安装项目依赖..."
 
 if [ ! -d "node_modules" ]; then
     echo "正在安装 npm 依赖..."
@@ -281,7 +281,7 @@ echo -e "${GREEN}✓ 关键依赖验证通过${NC}"
 
 # ==================== 步骤3: 配置文件 ====================
 echo ""
-echo -e "${BOLD}[3/9]${NC} 配置环境文件..."
+echo -e "${BOLD}[3/10]${NC} 配置环境文件..."
 
 if [ ! -f ".env" ]; then
     echo "创建 .env 配置文件..."
@@ -471,7 +471,7 @@ fi
 
 # ==================== 步骤4: 创建数据目录 ====================
 echo ""
-echo -e "${BOLD}[4/9]${NC} 初始化数据目录..."
+echo -e "${BOLD}[4/10]${NC} 初始化数据目录..."
 
 mkdir -p data/backups
 mkdir -p logs
@@ -486,7 +486,7 @@ fi
 
 # ==================== 步骤5: 配置禅道（可选）====================
 echo ""
-echo -e "${BOLD}[5/9]${NC} 配置禅道（可选）..."
+echo -e "${BOLD}[5/10]${NC} 配置禅道（可选）..."
 echo ""
 echo -e "${CYAN}🐉 禅道集成配置${NC}"
 echo "禅道集成可以实现任务和 Bug 的双向同步"
@@ -525,20 +525,18 @@ if [[ $config_zentao =~ ^[Yy]$ ]]; then
         exit 1
     fi
 
-    # 输入执行 ID
-    prompt_input "执行 ID (execution ID)" "" ZENTAO_EXECUTION_ID
+    # 输入默认执行 ID（选填）
+    prompt_input "默认执行 ID (execution ID, 选填)" "" ZENTAO_EXECUTION_ID
     if [ -z "$ZENTAO_EXECUTION_ID" ]; then
-        echo -e "${RED}❌ 执行 ID 不能为空${NC}"
-        echo -e "${YELLOW}提示: 从禅道任务创建页面的 URL 中获取${NC}"
-        echo -e "${YELLOW}如: task-create-167-0-0.html 中的 167${NC}"
-        exit 1
+        echo -e "${YELLOW}ℹ️  未填写执行 ID：稍后可在扩展的「设置 - 禅道集成」中补充${NC}"
+        echo -e "${YELLOW}   留空时，「添加任务」弹窗会自动拉取禅道账号下的全部执行供选择${NC}"
     fi
 
     echo ""
     echo -e "${CYAN}配置摘要：${NC}"
     echo "  禅道地址: $ZENTAO_URL"
     echo "  用户名: $ZENTAO_USERNAME"
-    echo "  执行 ID: $ZENTAO_EXECUTION_ID"
+    echo "  执行 ID: ${ZENTAO_EXECUTION_ID:-（未设置，选填）}"
     echo ""
 
     # 测试连接
@@ -584,7 +582,7 @@ fi
 
 # ==================== 步骤6: 创建全局命令 ====================
 echo ""
-echo -e "${BOLD}[6/9]${NC} 创建全局命令..."
+echo -e "${BOLD}[6/10]${NC} 创建全局命令..."
 
 BIN_DIR="$HOME/bin"
 mkdir -p "$BIN_DIR"
@@ -643,7 +641,7 @@ echo -e "${GREEN}✓ 全局命令已创建${NC}"
 
 # ==================== 步骤7: 安装扩展 ====================
 echo ""
-echo -e "${BOLD}[7/9]${NC} 安装 Chrome 扩展..."
+echo -e "${BOLD}[7/10]${NC} 安装 Chrome 扩展..."
 
 EXTENSION_PATH="$SCRIPT_DIR/extension"
 
@@ -702,7 +700,7 @@ echo ""
 
 # ==================== 步骤8: 启动后端服务 ====================
 echo ""
-echo -e "${BOLD}[8/9]${NC} 启动后端服务..."
+echo -e "${BOLD}[8/10]${NC} 启动后端服务..."
 
 # 检查端口是否被占用
 PORT=3721
@@ -750,9 +748,46 @@ else
     fi
 fi
 
-# ==================== 步骤9: 验证安装 ====================
+# ==================== 步骤9: 开机自启与浏览器宿主 ====================
 echo ""
-echo -e "${BOLD}[9/9]${NC} 验证安装..."
+echo -e "${BOLD}[9/10]${NC} 安装开机自启与浏览器宿主..."
+
+echo ""
+echo -e "${CYAN}🔄 开机自启${NC}"
+echo "让后端在登录系统时自动启动，无需打开浏览器。"
+echo "定时提醒（早 ${MORNING_HOUR:-9}:00 / 晚 ${EVENING_HOUR:-21}:00 / 周五周报）依赖它常驻运行。"
+echo ""
+
+read -p "${CYAN}是否安装开机自启？[Y/n]: ${NC}" install_autostart
+install_autostart=${install_autostart:-Y}
+
+if [[ $install_autostart =~ ^[Yy]$ ]]; then
+    # 两件事一起做：
+    #   宿主注册 —— 让插件能按需拉起后端（扩展沙箱外，只能在这里做一次）
+    #   登录项   —— 让系统开机自动拉起后端，不依赖浏览器
+    # 用 if 包裹是为了绕开 set -e：某个子步骤失败不应中断整个安装。
+    if bash "$SCRIPT_DIR/scripts/install-native-host.sh"; then
+        echo -e "${GREEN}✓ Native Messaging 宿主注册完成${NC}"
+    else
+        echo -e "${YELLOW}⚠️  宿主注册失败，可稍后手动执行: npm run setup:chrome-host${NC}"
+    fi
+    echo ""
+
+    if bash "$SCRIPT_DIR/scripts/install-launchagent.sh"; then
+        echo -e "${GREEN}✓ 开机自启安装完成${NC}"
+    else
+        echo -e "${YELLOW}⚠️  开机自启安装失败，可稍后手动执行: npm run setup:autostart${NC}"
+    fi
+else
+    echo -e "${YELLOW}⊘ 跳过开机自启${NC}"
+    echo -e "${YELLOW}  之后可在插件「设置 → 本地服务」里一键开启，或执行: npm run setup:auto-start${NC}"
+fi
+
+echo ""
+
+# ==================== 步骤10: 验证安装 ====================
+echo ""
+echo -e "${BOLD}[10/10]${NC} 验证安装..."
 
 # 验证全局命令
 if command -v wa &> /dev/null; then
@@ -818,12 +853,18 @@ echo "  - 全局命令已安装到 $BIN_DIR"
 echo "  - 查看日志: tail -f $SCRIPT_DIR/logs/service.log"
 echo ""
 
+echo -e "${BLUE}🔄 开机自启：${NC}"
+echo "  安装后可在插件「设置 → 本地服务 → 开机自启」里随时开关，无需回到终端。"
+echo "  查看状态: launchctl print gui/\$(id -u)/com.workassistant.backend"
+echo "  卸载:     npm run teardown:auto-start"
+echo ""
+
 echo -e "${BLUE}🔧 可选配置：${NC}"
 echo ""
 echo "  ${CYAN}• 禅道集成${NC} - 在扩展设置中配置禅道账号"
 echo "  ${CYAN}• Webhook 通知${NC} - 在 .env 中配置 WEBHOOK_URL"
 echo "  ${CYAN}• 数据备份${NC} - 在扩展设置中配置坚果云/WebDAV"
-echo "  ${CYAN}• PM2 开机自启${NC} - 运行: pm2 startup && pm2 save"
+echo "  ${CYAN}• PM2 开机自启${NC} - 运行: pm2 startup && pm2 save（已装 LaunchAgent 则不需要）"
 echo ""
 
 echo -e "${GREEN}✨ 现在可以打开新标签页，开始使用工作助手了！${NC}"

@@ -301,9 +301,17 @@ async function syncFromZentaoViaBackend() {
       });
     } catch (e) { /* 通知失败忽略 */ }
 
+    // 字段要齐全：前端会拼「已同步 N 个任务和 M 个Bug」，
+    // 少一个就是这个字面量 undefined 出现在用户眼前（曾经的真实 bug）。
     return {
       success: true,
-      data: { tasksSynced: d.total || 0, added: d.added || 0, updated: d.updated || 0 }
+      data: {
+        tasksSynced: d.total || 0,
+        added: d.added || 0,
+        updated: d.updated || 0,
+        skipped: d.skipped || 0,
+        bugsSynced: d.bugsSynced || 0
+      }
     };
   } catch (err) {
     console.error('[Background] 后端同步异常:', err);
@@ -786,6 +794,49 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
       })
       .catch(err => sendResponse({ success: false, alive: true, reason: err.message }));
+    return true;
+  }
+
+  // 开机自启（写 LaunchAgent，必须由本机后端代劳：
+  // 扩展沙箱既不能写文件也不能执行 launchctl）
+  if (action === 'setAutoStart') {
+    fetch(`${API_BASE_URL}/api/admin/autostart`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !!request.enabled })
+    })
+      .then(async (resp) => {
+        const json = await resp.json().catch(() => ({}));
+
+        // 404 说明后端还是旧版本（进程没重启，代码没加载）。
+        // 必须单独说清楚：否则前端只能显示一句「操作失败」，
+        // 用户完全猜不到问题出在「后端该重启了」。
+        if (resp.status === 404) {
+          sendResponse({
+            success: false,
+            message: '后端服务版本过旧，没有「开机自启」接口。请重启本地服务后重试。',
+            output: ''
+          });
+          return;
+        }
+        if (!resp.ok) {
+          sendResponse({
+            success: false,
+            message: `后端返回异常 (HTTP ${resp.status})`,
+            output: (json && json.message) ? String(json.message) : ''
+          });
+          return;
+        }
+
+        sendResponse({
+          success: !!json.success,
+          // 以接口回报的实际状态为准，不要假设操作成功
+          enabled: !!json.enabled,
+          message: json.message || (json.success ? '操作完成' : '操作失败'),
+          output: json.output || ''
+        });
+      })
+      .catch(err => sendResponse({ success: false, reason: err.message }));
     return true;
   }
 

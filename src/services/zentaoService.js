@@ -454,8 +454,28 @@ async function getTasks(filters = {}) {
 }
 
 /**
+ * 把底层传输错误翻译成用户能看懂的一句话
+ *
+ * 禅道跑在内网，最常见的失败就是「本机连不上那台机器」——VPN 没开、
+ * 不在公司网络、主机名/端口写错。Node 的原生报错只有一句 `fetch failed`，
+ * 直接抛给用户完全没法定位，所以在这里补上目标地址和可能原因。
+ *
+ * @param {Error|any} err
+ * @returns {string}
+ */
+function describeZentaoTransportError(err) {
+  const msg = String((err && err.message) || err || '未知错误');
+  const base = (config.zentao?.url || '').replace(/\/$/, '') || '(未配置禅道地址)';
+  if (/fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ECONNRESET|EAI_AGAIN|network|abort/i.test(msg)) {
+    return `无法连接禅道 ${base}（网络不可达：请确认已连内网 / VPN，以及地址与端口是否正确）`;
+  }
+  return msg;
+}
+
+/**
  * 查询"我的任务"（地盘 → 我的任务）
  * @returns {Promise<Array>} 任务列表
+ * @throws {Error} 禅道不可达、登录失败或返回异常时抛出（不再静默返回空数组）
  */
 async function getMyTasks() {
   try {
@@ -497,7 +517,10 @@ async function getMyTasks() {
     }));
   } catch (err) {
     console.error('[ZentaoService] 查询我的任务失败:', err.message);
-    return [];
+    // 关键：这里不能 return []。空数组和「禅道不可达」在下游长得一模一样，
+    // 结果是同步接口返回 success:true / 0 条，用户看到绿色「同步完成」，
+    // 实际一条都没拉到。必须把失败抛出去，让调用方如实报错。
+    throw new Error(describeZentaoTransportError(err));
   }
 }
 

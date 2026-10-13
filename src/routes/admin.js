@@ -2,12 +2,22 @@ import express from 'express';
 import { execFile } from 'child_process';
 import { existsSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 
 const router = express.Router();
 
 const LABEL = 'com.workassistant.backend';
 const START_TIME = Date.now();
+
+// src/routes/admin.js → 项目根
+const PROJECT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+/** 本项目只有本机回环访问，其他来源一律拒绝 */
+function isLocalRequest(req) {
+  const ip = (req.ip || '').replace('::ffff:', '');
+  return ip === '127.0.0.1' || ip === '::1' || ip === '';
+}
 
 /**
  * 进程信息：谁启动的我
@@ -28,6 +38,26 @@ function detectLauncher() {
 
 function isLaunchAgentInstalled() {
   return existsSync(join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`));
+}
+
+/**
+ * launchd 是否真的认识这个 job（已 bootstrap / 已加载）
+ *
+ * 只看 plist 文件在不在是不够的。文件在、但 job 没被 bootstrap 的情况下：
+ *   · `launchctl print` 查不到（Bad request / Could not find service）
+ *   · macOS 系统设置「通用 → 登录项与扩展 → 允许在后台」里也不显示
+ * 用户看到的现象就是「开关说开了，可系统里什么都没有」，很自然地判定为假的。
+ * 所以这两个状态必须分开报，前端才能给出可核对的提示。
+ *
+ * @returns {Promise<boolean>}
+ */
+function isLaunchAgentLoaded() {
+  const uid = process.getuid ? process.getuid() : 501;
+  return new Promise((resolve) => {
+    execFile('launchctl', ['print', `gui/${uid}/${LABEL}`], { timeout: 5000 }, (err) => {
+      resolve(!err);
+    });
+  });
 }
 
 /**
@@ -57,17 +87,21 @@ router.get('/admin/status', async (req, res) => {
   try {
     const launchedBy = detectLauncher();
     const launchAgentInstalled = isLaunchAgentInstalled();
+    const launchAgentLoaded = launchAgentInstalled ? await isLaunchAgentLoaded() : false;
 
     res.json({
       success: true,
       data: {
         running: true,
         pid: process.pid,
-        port: process.env.WORKASSISTANT_PORT || 3721,
+        // 必须用 PORT：config.js 读的是 PORT，
+        // 而前端会把这个值直接显示成「监听地址」，写错会误导排障。
+        port: parseInt(process.env.PORT || '3721', 10),
         uptimeSeconds: Math.floor((Date.now() - START_TIME) / 1000),
         startedAt: new Date(START_TIME).toISOString(),
         launchedBy,
         launchAgentInstalled,
+        launchAgentLoaded,
         // 只有常驻服务（登录项）才需要先停用才能真正关闭
         needsLaunchAgentStop: launchAgentInstalled,
         canStop: true
@@ -89,19 +123,21 @@ router.get('/admin/status', async (req, res) => {
 router.post('/admin/shutdown', async (req, res) => {
   try {
     // —— 来源校验 ——
-    const ip = (req.ip || '').replace('::ffff:', '');
-    const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '';
-    if (!isLocal) {
+    if (!isLocalRequest(req)) {
       console.warn('[Admin] 拒绝非本机关闭请求:', req.ip);
       return res.status(403).json({ success: false, message: '仅允许本机请求' });
     }
 
     const disableAutoStart = !!(req.body && req.body.disableAutoStart);
     const launchAgentInstalled = isLaunchAgentInstalled();
+    // bootout 只对「已加载的 job」有意义。plist 在、但 launchd 还没加载它时
+    // 执行 bootout 必然失败，然后前端会显示一句并不成立的「停用开机自启失败」——
+    // 那种情况本来就没东西需要停用，所以先判断 loaded 再决定要不要 bootout。
+    const launchAgentLoaded = launchAgentInstalled ? await isLaunchAgentLoaded() : false;
     const notes = [];
 
     // 先停掉登录项，否则进程一退出就被 KeepAlive 立刻拉回来
-    if (launchAgentInstalled) {
+    if (launchAgentLoaded) {
       const uid = process.getuid ? process.getuid() : 501;
       const r = await runLaunchctl(['bootout', `gui/${uid}/${LABEL}`]);
       if (r.ok) {
@@ -119,6 +155,16 @@ router.post('/admin/shutdown', async (req, res) => {
         }
       } else {
         notes.push(`停用开机自启失败(不影响本次关闭): ${r.output}`);
+      }
+    } else if (launchAgentInstalled && disableAutoStart) {
+      // 已注册但未加载：无需 bootout，但仍要按用户要求把注册项移除
+      const plistPath = join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`);
+      try {
+        const { unlinkSync } = await import('fs');
+        unlinkSync(plistPath);
+        notes.push('已删除开机自启配置');
+      } catch (e) {
+        notes.push(`删除登录项配置失败: ${e.message}`);
       }
     }
 
@@ -157,6 +203,88 @@ router.post('/admin/restart-support', async (req, res) => {
       hint: '关闭后请在设置中点击「启动服务」，或等待开机自启/手动启动'
     }
   });
+});
+
+/**
+ * 执行 scripts/ 下的脚本
+ *
+ * 开机自启的安装/卸载逻辑刻意不在这里用 JS 重写一遍，而是直接调用现成脚本：
+ * plist 内容、node 路径解析、KeepAlive 策略都只该有一处定义，
+ * 否则插件里点一下和终端里跑一次会得到两种结果。
+ *
+ * @param {string} scriptName scripts 目录下的文件名
+ * @returns {Promise<{ok: boolean, output: string}>}
+ */
+function runScript(scriptName) {
+  return new Promise((resolve) => {
+    const scriptPath = join(PROJECT_DIR, 'scripts', scriptName);
+    execFile(
+      'bash',
+      [scriptPath],
+      { timeout: 20000, cwd: PROJECT_DIR },
+      (err, stdout, stderr) => {
+        const output = [String(stdout || ''), String(stderr || '')]
+          .join('\n')
+          .trim();
+        resolve({ ok: !err, output });
+      }
+    );
+  });
+}
+
+/**
+ * POST /api/admin/autostart - 开启 / 关闭开机自启
+ * body: { enabled: boolean }
+ *
+ * 与 shutdown 同样的安全约束：只接受本机请求。
+ *
+ * 注意这里**只写配置、不动进程**：脚本在端口被占用时不会去 bootstrap，
+ * 也不会 bootout 正在服务的实例。否则这个请求会把自己的后端杀掉。
+ */
+router.post('/admin/autostart', async (req, res) => {
+  try {
+    if (!isLocalRequest(req)) {
+      console.warn('[Admin] 拒绝非本机开机自启请求:', req.ip);
+      return res.status(403).json({ success: false, message: '仅允许本机请求' });
+    }
+
+    const enabled = !!(req.body && req.body.enabled);
+    const script = enabled ? 'install-launchagent.sh' : 'uninstall-launchagent.sh';
+    const r = await runScript(script);
+
+    // 不信任脚本的退出码，以「文件是否真的在」为准
+    const installed = isLaunchAgentInstalled();
+    // 顺带回报 launchd 是否已加载，前端据此区分
+    // 「已加载、马上生效」与「已注册、下次登录生效」
+    const loaded = installed ? await isLaunchAgentLoaded() : false;
+    const ok = r.ok && installed === enabled;
+
+    if (enabled && installed) {
+      console.log('[Admin] 已开启开机自启', loaded ? '(launchd 已加载)' : '(待下次登录生效)');
+    } else if (!enabled && !installed) {
+      console.log('[Admin] 已关闭开机自启');
+    } else {
+      console.warn('[Admin] 开机自启操作未达到预期状态', { enabled, installed });
+    }
+
+    res.json({
+      success: ok,
+      // 前端用这个值同步开关的实际状态，而不是假设操作成功
+      enabled: installed,
+      installed,
+      loaded,
+      output: r.output,
+      message: enabled
+        ? (installed
+            ? (loaded ? '已开启开机自启（launchd 已加载，下次登录会自动启动）'
+                      : '已开启开机自启（已注册，下次登录生效）')
+            : '未能开启开机自启，请查看详情')
+        : (installed ? '未能关闭开机自启，请查看详情' : '已关闭开机自启')
+    });
+  } catch (err) {
+    console.error('[Admin] 开机自启操作失败:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 export default router;

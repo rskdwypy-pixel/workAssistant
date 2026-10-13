@@ -66,7 +66,15 @@ const config = {
     url: process.env.ZENTAO_URL || '',
     username: process.env.ZENTAO_USERNAME || '',
     password: process.env.ZENTAO_PASSWORD || '',
-    createTaskUrl: process.env.ZENTAO_CREATE_TASK_URL || '',
+    // 「默认执行 ID」——设置页里是选填项，留空表示不兜底。
+    // 兼容两个 env 键名：ZENTAO_CREATE_TASK_URL 是安装脚本写的，
+    // ZENTAO_EXECUTION_ID 是早期版本/手工写入的，两者同义。
+    createTaskUrl: process.env.ZENTAO_CREATE_TASK_URL || process.env.ZENTAO_EXECUTION_ID || '',
+    // 别名：executionManager / api.js 的兜底逻辑按 executionId 读，
+    // 过去这里没有这个字段，导致「配置了执行 ID 也兜不住」。
+    // 做成读写别名，赋值不会在严格模式下抛错，且与 createTaskUrl 始终同步。
+    get executionId() { return this.createTaskUrl; },
+    set executionId(v) { this.createTaskUrl = v || ''; },
     users: loadZentaoUsers(),
     usersUpdatedAt: null
   },
