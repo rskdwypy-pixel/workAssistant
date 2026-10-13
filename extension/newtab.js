@@ -124,8 +124,8 @@ const ZentaoSync = {
     }
 
     try {
-      // 使用进度 Toast 显示同步进度（共7步）
-      ProgressToast.show('正在登录禅道...', 1, 7);
+      // 进度 Toast：与 background.js 的 sendProgressUpdate 步数保持一致（共 2 步）
+      ProgressToast.show('正在登录禅道...', 1, 2);
 
       // 通过 background.js 触发同步
       const response = await chrome.runtime.sendMessage({
@@ -135,7 +135,17 @@ const ZentaoSync = {
       ProgressToast.hide();
 
       if (response && response.success) {
-        Toast.success(`同步完成！已同步 ${response.data.tasksSynced} 个任务和 ${response.data.bugsSynced} 个Bug`);
+        // 只拼真实存在的字段：以前直接读 data.bugsSynced，而后端从不返回它，
+        // 于是用户在界面上看到「已同步 0 个任务和 undefined 个Bug」。
+        const d = response.data || {};
+        const added = Number(d.added) || 0;
+        const updated = Number(d.updated) || 0;
+        const total = Number(d.tasksSynced) || 0;
+        const bugs = Number(d.bugsSynced) || 0;
+        const detail = (added || updated)
+          ? `新增 ${added} 个，更新 ${updated} 个`
+          : `共 ${total} 条，无变化`;
+        Toast.success(`禅道同步完成：${detail}${bugs ? `，Bug ${bugs} 个` : ''}`);
 
         // 重新加载任务列表
         await loadTasks();
@@ -149,8 +159,8 @@ const ZentaoSync = {
         // 更新同步状态显示
         await this.updateSyncStatusDisplay();
       } else {
-        const reason = response ? response.reason : '未知错误';
-        Toast.error(`同步失败: ${reason}`);
+        const reason = (response && response.reason) || '未知错误';
+        Toast.error(`同步失败: ${reason}`, 8000);
       }
     } catch (err) {
       ProgressToast.hide();
@@ -952,8 +962,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (savedDebugMode === 'true') {
     debugMode = true;
     const testButtons = document.getElementById('testButtons');
-    testButtons.classList.add('visible');
+    if (testButtons) testButtons.classList.add('visible');
     if (debugModeToggle) debugModeToggle.checked = true;
+    // 调试模式下才显示「更新用户列表」等维护操作（见 settings.css 的 .debug-only）
+    document.body.classList.add('debug-on');
     console.log('%c[调试模式] 已自动开启', 'color: #f59e0b; font-size: 14px; font-weight: bold;');
   }
 
@@ -964,12 +976,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       const testButtons = document.getElementById('testButtons');
 
       if (debugMode) {
-        testButtons.classList.add('visible');
+        if (testButtons) testButtons.classList.add('visible');
+        document.body.classList.add('debug-on');
         localStorage.setItem('debugMode', 'true');
         Toast.success('调试模式已开启');
         console.log('%c[调试模式] 测试按钮已显示', 'color: #f59e0b; font-size: 14px; font-weight: bold;');
       } else {
-        testButtons.classList.remove('visible');
+        if (testButtons) testButtons.classList.remove('visible');
+        document.body.classList.remove('debug-on');
         localStorage.removeItem('debugMode');
         Toast.info('调试模式已关闭');
       }
@@ -1188,91 +1202,33 @@ function bindEvents() {
     document.getElementById('settingsModal').classList.remove('active');
   });
 
-  // ========== 提示词设置相关 ==========
-  let defaultSummaryPrompt = '';
-  let defaultAddTaskPrompt = '';
-  document.getElementById('promptSettingsBtn').addEventListener('click', async () => {
-    const modal = document.getElementById('promptModal');
-    modal.classList.add('active');
+  // ========== 提示词（提示词读写见顶层 loadPrompts / savePrompts）==========
 
-    // 获取当前配置的提示词
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/prompts`);
-      const result = await response.json();
-      if (result.success) {
-        defaultSummaryPrompt = result.data.default?.summary || '';
-        defaultAddTaskPrompt = result.data.default?.addTask || '';
-        document.getElementById('promptAddTask').value = result.data.custom.addTask || defaultAddTaskPrompt;
-        document.getElementById('promptDaily').value = result.data.custom.daily || defaultSummaryPrompt;
-        document.getElementById('promptWeekly').value = result.data.custom.weekly || defaultSummaryPrompt;
-        document.getElementById('promptMonthly').value = result.data.custom.monthly || defaultSummaryPrompt;
-      }
-    } catch (err) {
-      console.warn('获取提示词失败:', err);
-      Toast.error('获取提示词失败');
-    }
+  // 顶栏「提示词」按钮：直接打开设置面板并定位到「提示词」分组
+  document.getElementById('promptSettingsBtn').addEventListener('click', () => {
+    loadSettings();
+    document.getElementById('settingsModal').classList.add('active');
+    checkServiceStatus();
+    if (window.settingsUI) window.settingsUI.showGroup('p-prompt');
   });
 
-  document.getElementById('closePromptModal').addEventListener('click', () => {
-    document.getElementById('promptModal').classList.remove('active');
-  });
-
-  document.getElementById('promptModal').addEventListener('click', (e) => {
-    if (e.target.id === 'promptModal') {
-      document.getElementById('promptModal').classList.remove('active');
-    }
-  });
-
-  document.getElementById('resetAddTaskPromptBtn').addEventListener('click', () => {
-    document.getElementById('promptAddTask').value = defaultAddTaskPrompt;
-  });
-  document.getElementById('resetDailyPromptBtn').addEventListener('click', () => {
-    document.getElementById('promptDaily').value = defaultSummaryPrompt;
-  });
-  document.getElementById('resetWeeklyPromptBtn').addEventListener('click', () => {
-    document.getElementById('promptWeekly').value = defaultSummaryPrompt;
-  });
-  document.getElementById('resetMonthlyPromptBtn').addEventListener('click', () => {
-    document.getElementById('promptMonthly').value = defaultSummaryPrompt;
-  });
-
-  document.getElementById('savePromptBtn').addEventListener('click', async () => {
-    const btn = document.getElementById('savePromptBtn');
-    const originalText = btn.textContent;
-    btn.textContent = '保存中...';
-    btn.disabled = true;
-
-    try {
-      let addTaskVal = document.getElementById('promptAddTask').value.trim();
-      let dailyVal = document.getElementById('promptDaily').value.trim();
-      let weeklyVal = document.getElementById('promptWeekly').value.trim();
-      let monthlyVal = document.getElementById('promptMonthly').value.trim();
-
-      // 如果和默认一样，则传递空字符串让其使用默认
-      if (addTaskVal === defaultAddTaskPrompt) addTaskVal = '';
-      if (dailyVal === defaultSummaryPrompt) dailyVal = '';
-      if (weeklyVal === defaultSummaryPrompt) weeklyVal = '';
-      if (monthlyVal === defaultSummaryPrompt) monthlyVal = '';
-
-      const response = await fetch(`${API_BASE_URL}/api/prompts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ addTask: addTaskVal, daily: dailyVal, weekly: weeklyVal, monthly: monthlyVal })
-      });
-      const result = await response.json();
-      if (result.success) {
-        Toast.success('提示词已保存');
-        document.getElementById('promptModal').classList.remove('active');
-      } else {
-        Toast.error(`保存失败: ${result.error}`);
-      }
-    } catch (err) {
-      console.warn('保存提示词失败:', err);
-      Toast.error('保存提示词失败');
-    } finally {
-      btn.textContent = originalText;
-      btn.disabled = false;
-    }
+  // 「恢复默认」= 清空输入框（空即使用系统默认提示词）
+  const promptResetMap = {
+    resetAddTaskPromptBtn: 'promptAddTask',
+    resetDailyPromptBtn: 'promptDaily',
+    resetWeeklyPromptBtn: 'promptWeekly',
+    resetMonthlyPromptBtn: 'promptMonthly'
+  };
+  Object.keys(promptResetMap).forEach((btnId) => {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const input = document.getElementById(promptResetMap[btnId]);
+      if (!input) return;
+      input.value = '';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      Toast.success('已恢复默认，保存配置后生效');
+    });
   });
   // ====================================
 
@@ -1723,8 +1679,11 @@ async function importAllConfig(file) {
     }
   });
 
-  // 保存配置
+  // 保存配置（配置与提示词一起提交——设置面板只有一个保存入口）
   document.getElementById('saveSettings').addEventListener('click', async () => {
+    const saveBtn = document.getElementById('saveSettings');
+    setBtnLoading(saveBtn, '保存中…');
+
     const config = {
       apiKey: document.getElementById('apiKey').value.trim(),
       apiBaseUrl: document.getElementById('apiBaseUrl').value.trim(),
@@ -1744,81 +1703,98 @@ async function importAllConfig(file) {
       backendUrl: 'http://localhost:3721'
     };
 
-    // 保存到localStorage
-    localStorage.setItem('workAssistantConfig', JSON.stringify(config));
+    let savedOk = false;
 
-    // 同步所有配置到后端（会持久化到 .env 文件）
     try {
-      const response = await fetch(`${API_BASE_URL}/api/config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          apiKey: config.apiKey || '',
-          apiBaseUrl: config.apiBaseUrl || '',
-          aiModel: config.aiModel || '',
-          morningHour: config.morningHour || '9',
-          eveningHour: config.eveningHour || '21',
-          webhookUrl: config.webhookUrl || '',
-          webhookType: config.webhookType || 'generic'
-        })
-      });
+      // 保存到localStorage
+      localStorage.setItem('workAssistantConfig', JSON.stringify(config));
 
-      const result = await response.json();
-      if (result.success) {
-        console.log('[前端] 配置已保存到后端 .env 文件');
-      } else {
-        console.warn('[前端] 保存配置失败:', result.error);
+      // 同步所有配置到后端（会持久化到 .env 文件）
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/config`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            apiKey: config.apiKey || '',
+            apiBaseUrl: config.apiBaseUrl || '',
+            aiModel: config.aiModel || '',
+            morningHour: config.morningHour || '9',
+            eveningHour: config.eveningHour || '21',
+            webhookUrl: config.webhookUrl || '',
+            webhookType: config.webhookType || 'generic'
+          })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+          console.log('[前端] 配置已保存到后端 .env 文件');
+        } else {
+          console.warn('[前端] 保存配置失败:', result.error);
+        }
+      } catch (err) {
+        console.warn('同步配置失败:', err);
       }
-    } catch (err) {
-      console.warn('同步配置失败:', err);
-    }
 
-    // 同步禅道配置到后端
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/zentao/config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          enabled: config.zentaoEnabled,
-          url: config.zentaoUrl,
-          username: config.zentaoUsername,
-          password: config.zentaoPassword,
-          createTaskUrl: config.zentaoCreateTaskUrl
-        })
-      });
+      // 同步禅道配置到后端
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/zentao/config`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            enabled: config.zentaoEnabled,
+            url: config.zentaoUrl,
+            username: config.zentaoUsername,
+            password: config.zentaoPassword,
+            createTaskUrl: config.zentaoCreateTaskUrl
+          })
+        });
 
-      const result = await response.json();
-      if (result.success) {
-        console.log('[前端] 禅道配置已保存');
-      } else {
-        console.warn('[前端] 禅道配置保存失败:', result.error);
+        const result = await response.json();
+        if (result.success) {
+          console.log('[前端] 禅道配置已保存');
+        } else {
+          console.warn('[前端] 禅道配置保存失败:', result.error);
+        }
+      } catch (err) {
+        console.warn('同步禅道配置失败:', err);
       }
+
+      // 提示词与配置同属「设置」，一次保存一起写盘
+      try {
+        await savePrompts();
+      } catch (promptErr) {
+        console.warn('保存提示词失败:', promptErr);
+        Toast.error('提示词保存失败：' + promptErr.message);
+      }
+
+      // 更新后端服务地址
+      API_BASE_URL = config.backendUrl || 'http://localhost:3721';
+
+      // 保存备份配置
+      if (window.backupUI) {
+        window.backupUI.saveBackupSettingsFromSettings();
+      }
+
+      // 与旧版不同：保存后不再自动关闭面板，用户可继续改其它分组。
+      // 底部状态条会变为「所有更改已保存」，需要关闭时点右上角 ×。
+      Toast.success('配置已保存');
+      savedOk = true;
     } catch (err) {
-      console.warn('同步禅道配置失败:', err);
+      console.warn('[前端] 保存配置异常:', err);
+      Toast.error('保存失败：' + err.message);
+    } finally {
+      // 先还原按钮，再刷新基线：refreshBaseline 会按「是否仍有改动」决定
+      // 保存按钮的禁用态，顺序反了会把它的结果覆盖掉。
+      setBtnLoading(saveBtn, null);
     }
 
-    // 更新后端服务地址
-    API_BASE_URL = config.backendUrl || 'http://localhost:3721';
-
-    // 保存备份配置
-    if (window.backupUI) {
-      window.backupUI.saveBackupSettingsFromSettings();
-    }
-
-    document.getElementById('settingsModal').classList.remove('active');
+    if (savedOk && window.settingsUI) window.settingsUI.refreshBaseline();
     loadTasks();
     loadCalendar();
   });
 
-  // 重置配置
-  document.getElementById('resetSettings').addEventListener('click', async () => {
-    const confirmed = await showConfirm('重置配置', '确定要重置为默认配置吗？此操作无法撤销。');
-    if (confirmed) {
-      localStorage.removeItem('workAssistantConfig');
-      loadSettings();
-      Toast.success('配置已重置');
-    }
-  });
+  // 重置配置：由设置页 UI 层（settings-ui.js）实现「二次确认」交互，
+  // 这里不再重复绑定，避免一次点击触发两套逻辑。
 
   // 关闭任务详情弹窗
   document.getElementById('closeModal').addEventListener('click', () => {
@@ -3018,30 +2994,91 @@ function hideTaskModal() {
 }
 
 /**
+ * 执行列表缓存
+ *
+ * 本函数在每次打开「添加任务」弹窗时都会跑，不加缓存就会反复打后端。
+ * 缓存只活在这一页里，刷新即失效；TTL 兜住「刚在禅道建了执行」的场景。
+ */
+let executionOptionsCache = { list: null, at: 0 };
+const EXECUTION_CACHE_TTL = 3 * 60 * 1000;
+
+/**
+ * 带超时的 JSON 请求
+ *
+ * 执行列表有两个数据源，其中「实时拉禅道」要先连内网再解析 HTML，
+ * 内网不通时能挂住好几秒 —— 而 loadExecutionOptions() 是在弹窗显示前
+ * 被 await 的，一挂住用户就会觉得「点了没反应」。这里统一加个上限。
+ */
+async function fetchJsonWithTimeout(url, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, { signal: controller.signal });
+    return await resp.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * 加载执行选项列表
+ *
+ * 数据源是「后端用配置里的禅道账号拉到的全部执行」，不再依赖用户收藏 ——
+ * 旧实现只读 /api/executions/favorites，收藏一空下拉就只剩「自动选择」，
+ * 等于把这个功能关掉了。
+ *
+ * 取数顺序按「快 → 慢」排：
+ *   1. 内存缓存（3 分钟）—— 弹窗反复开关时不重复请求
+ *   2. /api/executions —— 后端已同步的全量执行清单，本地命中，毫秒级
+ *   3. /api/zentao/executions —— 内网实时拉取，仅当本地清单为空时兜底
+ * 实时接口在禅道不可达时会静默返回空数组（success 仍为 true），
+ * 所以不能把它放在首选，否则每次打开弹窗都要白等一轮超时。
  */
 async function loadExecutionOptions() {
   const select = document.getElementById('taskExecution');
   if (!select) return;
 
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/executions/favorites`);
-    const result = await response.json();
+  let executions = [];
 
-    if (result.success && result.data) {
-      // 保留第一个选项（自动选择）
-      select.innerHTML = '<option value="">自动选择 (AI分析)</option>';
-
-      result.data.forEach(exec => {
-        const option = document.createElement('option');
-        option.value = exec.id;
-        option.textContent = `${exec.name}${exec.projectName ? ' (' + exec.projectName + ')' : ''}`;
-        select.appendChild(option);
-      });
+  if (executionOptionsCache.list && Date.now() - executionOptionsCache.at < EXECUTION_CACHE_TTL) {
+    executions = executionOptionsCache.list;
+  } else {
+    // 2) 本地全量执行清单（后端从禅道同步而来）
+    try {
+      const result = await fetchJsonWithTimeout(`${API_BASE_URL}/api/executions`, 4000);
+      if (result.success && Array.isArray(result.data)) executions = result.data;
+    } catch (err) {
+      console.warn('[TaskModal] 读取本地执行清单失败:', err.message);
     }
-  } catch (err) {
-    console.error('[TaskModal] 加载执行列表失败:', err);
+
+    // 3) 本地清单为空时才去实时拉禅道（需要内网可达，慢）
+    if (executions.length === 0) {
+      try {
+        const result = await fetchJsonWithTimeout(`${API_BASE_URL}/api/zentao/executions`, 8000);
+        if (result.success && Array.isArray(result.data)) executions = result.data;
+      } catch (err) {
+        console.error('[TaskModal] 实时拉取禅道执行列表失败:', err.message);
+      }
+    }
+
+    if (executions.length > 0) {
+      executionOptionsCache = { list: executions, at: Date.now() };
+    }
   }
+
+  select.innerHTML = '<option value="">自动选择 (AI分析)</option>';
+
+  executions.forEach(exec => {
+    const option = document.createElement('option');
+    option.value = exec.id;
+    // 全部执行里必然混着已关闭的，标出来免得选错
+    const project = exec.projectName ? ` (${exec.projectName})` : '';
+    const closed = exec.status === 'closed' ? '（已关闭）' : '';
+    option.textContent = `${exec.name}${project}${closed}`;
+    select.appendChild(option);
+  });
+
+  console.log('[TaskModal] 执行候选数量:', executions.length);
 }
 
 /**
@@ -3398,6 +3435,11 @@ async function submitTaskFromModal() {
               } else {
                 // 创建失败
                 console.warn('[TaskModal] ⚠ 浏览器端创建禅道任务失败:', zentaoTaskId.reason || zentaoTaskId.message || '未知错误');
+                // 执行 ID 是选填项：用户没填、弹窗里也没选、AI 又没匹配上时，
+                // 禅道这边就没有落点。不能静默吞掉 —— 否则用户以为同步成功了。
+                if (zentaoTaskId.reason === 'invalid_execution_id') {
+                  Toast.warning('本地任务已创建，但未同步到禅道：请选择「所属执行」', 6000);
+                }
                 // 不更新 zentaoId，保持为 null
               }
             } else if (typeof zentaoTaskId === 'number') {
@@ -3771,11 +3813,37 @@ function removeBackendOfflineBanner() {
 // ============================================================================
 
 /**
+ * 统一切换按钮的加载态。
+ *
+ * 不能直接改 textContent —— 新版按钮是「图标 + 文字」结构，
+ * 覆写 textContent 会把 SVG 图标一起抹掉，所以这里保存/还原整段 innerHTML。
+ */
+function setBtnLoading(btn, loadingLabel) {
+  if (!btn) return;
+  if (loadingLabel) {
+    if (!btn.dataset.origHtml) btn.dataset.origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    btn.innerHTML = '<span class="btn-spinner"></span><span class="btn-label">' + loadingLabel + '</span>';
+  } else {
+    btn.disabled = false;
+    btn.removeAttribute('aria-busy');
+    if (btn.dataset.origHtml) {
+      btn.innerHTML = btn.dataset.origHtml;
+      delete btn.dataset.origHtml;
+    }
+  }
+}
+
+/**
  * 刷新「本地服务」状态卡
  *
  * 状态如实展示：是否在跑、由谁启动、是否装了开机自启。
  * 特别是「装了开机自启」这一项 —— 直接决定点「停止」能不能真停住，
  * 不提前告知的话用户会看到服务秒回，误以为按钮坏了。
+ *
+ * 四格元数据（PID / 监听地址 / 来源 / 开机自启）用等宽字体呈现，
+ * 让「谁拉起的、连在哪、能不能自启」这三个排障高频问题一眼可答。
  */
 async function checkServiceStatus() {
   const dot = document.getElementById('serviceStatusDot');
@@ -3783,9 +3851,17 @@ async function checkServiceStatus() {
   const detail = document.getElementById('serviceStatusDetail');
   const startBtn = document.getElementById('serviceStartBtn');
   const stopBtn = document.getElementById('serviceStopBtn');
+  const restartBtn = document.getElementById('serviceRestartBtn');
+  const metaPid = document.getElementById('serviceMetaPid');
+  const metaPort = document.getElementById('serviceMetaPort');
+  const metaSource = document.getElementById('serviceMetaSource');
+  const metaAuto = document.getElementById('serviceMetaAuto');
   if (!dot || !text) return;
 
+  const setMeta = (el, val) => { if (el) el.textContent = val; };
+
   text.textContent = '检测中…';
+  if (detail) detail.textContent = '';
 
   let resp = null;
   try {
@@ -3794,7 +3870,9 @@ async function checkServiceStatus() {
     resp = { success: false, reason: e.message };
   }
 
-  if (resp && resp.success && resp.alive && resp.data) {
+  const alive = !!(resp && resp.success && resp.alive && resp.data);
+
+  if (alive) {
     const d = resp.data;
     // 复用已有的 status-dot 样式类，不另起内联样式，保持与主题一致
     dot.className = 'status-dot online';
@@ -3811,24 +3889,158 @@ async function checkServiceStatus() {
       manual: '手动启动'
     };
 
-    text.textContent = `运行中 · PID ${d.pid}`;
+    text.textContent = `运行中 · 已运行 ${uptime}`;
+    setMeta(metaPid, String(d.pid || '—'));
+    setMeta(metaPort, d.port ? `127.0.0.1:${d.port}` : '127.0.0.1:3721');
+    setMeta(metaSource, sourceMap[d.launchedBy] || d.launchedBy || '未知');
+    // 「已安装」只说明 plist 文件在；launchd 是否真的加载了它要另说。
+    // 分开显示，用户才有可核对的东西。
+    setMeta(metaAuto, d.launchAgentInstalled
+      ? (d.launchAgentLoaded ? '已加载' : '待下次登录')
+      : '未安装');
+    syncAutoStartToggle(!!d.launchAgentInstalled, {
+      alive: true,
+      loaded: d.launchAgentLoaded
+    });
 
-    let info = `已运行 ${uptime} · ${sourceMap[d.launchedBy] || d.launchedBy}`;
-    if (d.launchAgentInstalled) {
-      info += ' · 已安装开机自启（停止时会一并停用）';
+    if (detail && d.launchAgentInstalled) {
+      detail.textContent = d.launchAgentLoaded
+        ? '开机自启已生效：点「停止服务」时会一并停用，否则服务会被系统立刻拉回。'
+        : '已注册登录项，将在下次登录时生效；点「停止服务」时会一并停用。';
     }
-    detail.textContent = info;
   } else {
     dot.className = 'status-dot offline';
     dot.title = '本地服务未运行';
     text.textContent = '未运行';
-    detail.textContent = resp && resp.reason
-      ? `原因：${resp.reason}`
-      : '点击「启动服务」拉起（需已执行 npm run setup:auto-start）';
+    setMeta(metaPid, '—');
+    setMeta(metaPort, '—');
+    setMeta(metaSource, '—');
+    setMeta(metaAuto, '—');
+    // 服务没跑就没法改自启（配置要由后端落盘），
+    // 这里只禁用开关、不改勾选态 —— 未知状态不该伪装成「未开启」。
+    syncAutoStartToggle(undefined, { alive: false });
+    if (detail) {
+      detail.textContent = resp && resp.reason
+        ? `原因：${resp.reason}`
+        : '点击「启动服务」拉起（需已执行 npm run setup:auto-start）';
+    }
   }
 
-  if (startBtn) startBtn.style.opacity = (resp && resp.alive) ? '0.5' : '1';
-  if (stopBtn) stopBtn.disabled = !(resp && resp.alive);
+  // 运行中才给「重启 / 停止」，未运行只给「启动」
+  if (startBtn) startBtn.style.display = alive ? 'none' : '';
+  if (stopBtn) stopBtn.style.display = alive ? '' : 'none';
+  if (restartBtn) restartBtn.style.display = alive ? '' : 'none';
+  if (startBtn) startBtn.disabled = false;
+  if (stopBtn) stopBtn.disabled = false;
+  if (restartBtn) restartBtn.disabled = false;
+}
+
+/** 把服务动作结果写到卡片内的结果区 */
+function setServiceResult(resultEl, ok, text) {
+  if (!resultEl) return;
+  resultEl.className = 'test-result ' + (ok ? 'success' : 'error');
+  resultEl.textContent = (ok ? '✓ ' : '✗ ') + text;
+}
+
+/**
+ * 同步「开机自启」开关的显示
+ *
+ * @param {boolean|undefined} installed true/false 表示已确认的状态；
+ *        传 undefined 表示状态未知（服务未运行），此时只禁用、不改勾选。
+ * @param {{alive?: boolean, busy?: boolean, loaded?: boolean}} [opts]
+ *        loaded 表示 launchd 是否已加载该 job（后端 /api/admin/status 返回），
+ *        用来区分「已生效」与「已注册，下次登录生效」。
+ */
+function syncAutoStartToggle(installed, opts) {
+  const toggle = document.getElementById('autoStartToggle');
+  const text = document.getElementById('autoStartToggleText');
+  const wrap = document.getElementById('autoStartSwitch');
+  const hint = document.getElementById('autoStartHint');
+  if (!toggle) return;
+
+  opts = opts || {};
+  const alive = opts.alive !== false;
+  const busy = !!opts.busy;
+  const loaded = opts.loaded;
+
+  if (typeof installed === 'boolean') toggle.checked = installed;
+  toggle.disabled = !alive || busy;
+  if (wrap) wrap.classList.toggle('is-busy', busy);
+
+  if (text) {
+    if (!alive) text.textContent = '服务未运行';
+    else if (busy) text.textContent = toggle.checked ? '开启中…' : '关闭中…';
+    else if (toggle.checked && loaded === false) text.textContent = '已开启（待下次登录生效）';
+    else text.textContent = toggle.checked ? '已开启' : '未开启';
+  }
+  if (hint) {
+    if (!alive) {
+      hint.textContent = '后端未运行，无法修改。请先点上方「启动服务」。';
+    } else if (toggle.checked) {
+      // macOS 对 LaunchAgent 不会弹任何「要添加开机自启项吗」的确认框，
+      // 系统设置里的列表也只在 job 真正被 launchd 加载后才出现 ——
+      // 不写清楚，用户只能得出「这个开关是假的」。
+      hint.textContent = '已注册为 macOS 登录项（LaunchAgent）。系统不会弹窗确认；'
+        + '可执行 launchctl print gui/$(id -u)/com.workassistant.backend 核对。';
+    } else {
+      hint.textContent = '开启后无需打开浏览器，早间提醒与晚间日报也会准时生成';
+    }
+  }
+}
+
+/**
+ * 开关开机自启
+ *
+ * 实际写文件与 launchctl 由后端代劳（扩展沙箱做不到），
+ * 后端返回什么状态就以什么状态回填，不假装成功。
+ */
+async function setAutoStart(enabled) {
+  const toggle = document.getElementById('autoStartToggle');
+  const resultEl = document.getElementById('autoStartResult');
+  if (!toggle) return;
+
+  if (!enabled && !confirm(
+    '确定关闭开机自启吗？\n\n' +
+    '关闭后：下次登录 macOS 不会再自动启动后端，\n' +
+    '早间提醒与晚间日报需要后端在运行才能触发。\n\n' +
+    '当前正在运行的服务不会受影响。'
+  )) {
+    toggle.checked = true; // 撤销这次勾选
+    return;
+  }
+
+  if (resultEl) { resultEl.textContent = ''; resultEl.className = 'test-result'; resultEl.title = ''; }
+  syncAutoStartToggle(undefined, { alive: true, busy: true });
+
+  let resp = null;
+  try {
+    resp = await chrome.runtime.sendMessage({ action: 'setAutoStart', enabled });
+  } catch (e) {
+    resp = { success: false, reason: e.message };
+  }
+
+  if (resp && resp.success) {
+    setServiceResult(resultEl, true, resp.message || (enabled ? '已开启开机自启' : '已关闭开机自启'));
+  } else {
+    // resp 为空 = 后台脚本没应答。最常见的成因是只刷新了新标签页、
+    // 没有在 chrome://extensions 里重新加载扩展 ——
+    // 页面脚本会从磁盘读新版，但 background 的 Service Worker 仍是旧代码，
+    // 于是新消息无人处理。这里必须点明，否则只有一句「未知错误」。
+    const reason = !resp
+      ? '扩展后台未响应。请在 chrome://extensions 重新加载扩展后重试'
+      : ((resp.reason || resp.message) || '未知错误');
+    setServiceResult(resultEl, false, reason);
+    // 脚本原始输出放 title 里，鼠标悬停可看，避免正文过长
+    if (resultEl && resp && resp.output) resultEl.title = resp.output;
+  }
+
+  // 先自己解除 busy 再交给 checkServiceStatus 校正。
+  // 不依赖后者收尾：它在状态节点缺失时会提前 return，
+  // 那样开关会永久停在「未运行」的禁用态，用户再也点不动。
+  syncAutoStartToggle(undefined, { alive: true });
+
+  // 以后端回报的真实状态为准重新同步，失败时开关会自动弹回原位
+  await checkServiceStatus();
 }
 
 /**
@@ -3845,8 +4057,8 @@ async function stopBackendService() {
     '（日报定时任务依赖后端常驻，请确认现在不需要。）'
   )) return;
 
-  if (btn) { btn.disabled = true; btn.textContent = '停止中…'; }
-  if (resultEl) { resultEl.textContent = ''; resultEl.style.color = 'var(--text-secondary)'; }
+  setBtnLoading(btn, '停止中…');
+  if (resultEl) { resultEl.textContent = ''; resultEl.className = 'test-result'; }
 
   try {
     const resp = await chrome.runtime.sendMessage({
@@ -3856,29 +4068,20 @@ async function stopBackendService() {
 
     if (resp && resp.success) {
       const notes = (resp.notes && resp.notes.length) ? `（${resp.notes.join('；')}）` : '';
-      if (resultEl) {
-        resultEl.textContent = '✓ 已停止' + notes;
-        resultEl.style.color = '#16a34a';
-      }
+      setServiceResult(resultEl, true, '已停止' + notes);
       Toast.success('本地服务已停止');
       // 服务已停，隐藏离线提示条由后台判断，这里直接移除避免重复提示
       removeBackendOfflineBanner();
     } else {
       const why = (resp && (resp.reason || resp.message)) || '未知原因';
-      if (resultEl) {
-        resultEl.textContent = '✗ 停止失败：' + why;
-        resultEl.style.color = '#dc2626';
-      }
+      setServiceResult(resultEl, false, '停止失败：' + why);
       Toast.error('停止失败：' + why);
     }
   } catch (e) {
-    if (resultEl) {
-      resultEl.textContent = '✗ 停止异常：' + e.message;
-      resultEl.style.color = '#dc2626';
-    }
+    setServiceResult(resultEl, false, '停止异常：' + e.message);
     Toast.error('停止异常：' + e.message);
   } finally {
-    if (btn) { btn.textContent = '⏹️ 停止服务'; }
+    setBtnLoading(btn, null);
     await checkServiceStatus();
   }
 }
@@ -3890,17 +4093,14 @@ async function startBackendService() {
   const btn = document.getElementById('serviceStartBtn');
   const resultEl = document.getElementById('serviceActionResult');
 
-  if (btn) { btn.disabled = true; btn.textContent = '启动中…'; }
-  if (resultEl) { resultEl.textContent = ''; resultEl.style.color = 'var(--text-secondary)'; }
+  setBtnLoading(btn, '启动中…');
+  if (resultEl) { resultEl.textContent = ''; resultEl.className = 'test-result'; }
 
   try {
     const resp = await chrome.runtime.sendMessage({ action: 'startBackend' });
 
     if (resp && resp.success) {
-      if (resultEl) {
-        resultEl.textContent = '✓ 已启动';
-        resultEl.style.color = '#16a34a';
-      }
+      setServiceResult(resultEl, true, '已启动');
       Toast.success('本地服务已启动');
     } else {
       // 优先展示 background 归类好的中文指引；没有 help 时退回原始报错。
@@ -3909,8 +4109,8 @@ async function startBackendService() {
       const why = (resp && resp.help) || (resp && resp.reason) || '未知原因';
       const code = (resp && resp.code) || '';
       if (resultEl) {
+        resultEl.className = 'test-result error';
         resultEl.innerHTML = '';
-        resultEl.style.color = '#dc2626';
         const head = document.createElement('div');
         head.textContent = '✗ 启动失败' + (code ? `（${code}）` : '');
         head.style.fontWeight = '600';
@@ -3939,13 +4139,52 @@ async function startBackendService() {
       Toast.error('启动失败，请看下方提示');
     }
   } catch (e) {
-    if (resultEl) {
-      resultEl.textContent = '✗ 启动异常：' + e.message;
-      resultEl.style.color = '#dc2626';
-    }
+    setServiceResult(resultEl, false, '启动异常：' + e.message);
     Toast.error('启动异常：' + e.message);
   } finally {
-    if (btn) { btn.textContent = '▶️ 启动服务'; }
+    setBtnLoading(btn, null);
+    await checkServiceStatus();
+  }
+}
+
+/**
+ * 重启本地服务
+ *
+ * 先停再启。后端收到 shutdown 后会延迟退出，所以中间留一小段等待，
+ * 否则「启动」会撞上还占着端口的旧进程。
+ */
+async function restartBackendService() {
+  const btn = document.getElementById('serviceRestartBtn');
+  const resultEl = document.getElementById('serviceActionResult');
+
+  setBtnLoading(btn, '重启中…');
+  if (resultEl) { resultEl.textContent = ''; resultEl.className = 'test-result'; }
+
+  try {
+    const stopResp = await chrome.runtime.sendMessage({ action: 'stopBackend', disableAutoStart: false });
+    await new Promise(r => setTimeout(r, 900));
+
+    if (stopResp && !stopResp.success) {
+      const why = stopResp.reason || stopResp.message || '停止阶段失败';
+      setServiceResult(resultEl, false, '重启失败：' + why);
+      Toast.error('重启失败：' + why);
+      return;
+    }
+
+    const startResp = await chrome.runtime.sendMessage({ action: 'startBackend' });
+    if (startResp && startResp.success) {
+      setServiceResult(resultEl, true, '已重启');
+      Toast.success('本地服务已重启');
+    } else {
+      const why = (startResp && (startResp.help || startResp.reason)) || '未知原因';
+      setServiceResult(resultEl, false, '重启失败：' + why);
+      Toast.error('重启失败：' + why);
+    }
+  } catch (e) {
+    setServiceResult(resultEl, false, '重启异常：' + e.message);
+    Toast.error('重启异常：' + e.message);
+  } finally {
+    setBtnLoading(btn, null);
     await checkServiceStatus();
   }
 }
@@ -3954,8 +4193,14 @@ async function startBackendService() {
 document.addEventListener('DOMContentLoaded', () => {
   const stopBtn = document.getElementById('serviceStopBtn');
   const startBtn = document.getElementById('serviceStartBtn');
+  const restartBtn = document.getElementById('serviceRestartBtn');
+  const autoStartToggle = document.getElementById('autoStartToggle');
   if (stopBtn) stopBtn.addEventListener('click', stopBackendService);
   if (startBtn) startBtn.addEventListener('click', startBackendService);
+  if (restartBtn) restartBtn.addEventListener('click', restartBackendService);
+  if (autoStartToggle) {
+    autoStartToggle.addEventListener('change', () => setAutoStart(autoStartToggle.checked));
+  }
 });
 
 async function checkAiAvailability(force = false) {
@@ -4919,6 +5164,71 @@ const CONFIG_PRESETS = {
 };
 
 // 加载设置
+// ============================================================================
+// 提示词（添加任务分析 / 日报 / 周报 / 月报）
+// 说明：提示词已并入设置面板，不再有独立弹窗；
+//      读写通过顶层 loadPrompts / savePrompts，与主配置共用「保存配置」入口。
+// ============================================================================
+let defaultSummaryPrompt = '';
+let defaultAddTaskPrompt = '';
+
+/**
+ * 拉取后端提示词：默认值 + 当前自定义值。
+ * 输入框展示「自定义值」，为空时回落到默认值（让用户能看到默认文案长什么样）。
+ */
+async function loadPrompts() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/prompts`);
+    const result = await response.json();
+    if (!result.success) return;
+    defaultSummaryPrompt = (result.data.default && result.data.default.summary) || '';
+    defaultAddTaskPrompt = (result.data.default && result.data.default.addTask) || '';
+    const custom = result.data.custom || {};
+    const setVal = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.value = val;
+    };
+    setVal('promptAddTask', custom.addTask || defaultAddTaskPrompt);
+    setVal('promptDaily', custom.daily || defaultSummaryPrompt);
+    setVal('promptWeekly', custom.weekly || defaultSummaryPrompt);
+    setVal('promptMonthly', custom.monthly || defaultSummaryPrompt);
+  } catch (err) {
+    console.warn('获取提示词失败:', err);
+  } finally {
+    // 提示词是异步回填的，填完必须重设基线，否则会被误判成「未保存的修改」
+    if (window.settingsUI) window.settingsUI.refreshBaseline();
+  }
+}
+
+/**
+ * 保存提示词。
+ * 与默认值完全相同的输入按「空字符串」提交，让后端继续使用默认提示词，
+ * 避免把整段默认文案固化进用户配置、日后无法随版本升级。
+ */
+async function savePrompts() {
+  const read = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  };
+  let addTaskVal = read('promptAddTask');
+  let dailyVal = read('promptDaily');
+  let weeklyVal = read('promptWeekly');
+  let monthlyVal = read('promptMonthly');
+
+  if (addTaskVal === defaultAddTaskPrompt) addTaskVal = '';
+  if (dailyVal === defaultSummaryPrompt) dailyVal = '';
+  if (weeklyVal === defaultSummaryPrompt) weeklyVal = '';
+  if (monthlyVal === defaultSummaryPrompt) monthlyVal = '';
+
+  const response = await fetch(`${API_BASE_URL}/api/prompts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ addTask: addTaskVal, daily: dailyVal, weekly: weeklyVal, monthly: monthlyVal })
+  });
+  const result = await response.json();
+  if (!result.success) throw new Error(result.error || '保存提示词失败');
+}
+
 function loadSettings() {
   const saved = localStorage.getItem('workAssistantConfig');
   const config = saved ? JSON.parse(saved) : { ...CONFIG_PRESETS.zhipu };
@@ -4954,15 +5264,27 @@ function loadSettings() {
     debugModeToggle.checked = debugMode;
   }
 
-  // 加载同步配置
-  if (window.syncUI) {
-    window.syncUI.loadCurrentSyncSettings();
+  // 提示词与主配置不在同一接口，单独拉取（完成后会刷新「已保存」基线）
+  loadPrompts();
+
+  // 数据备份功能已下线（设置页入口已移除），此处加存在性保护，
+  // 避免老版本 sync-ui.js 在元素缺失时抛异常、中断后续加载。
+  try {
+    if (window.syncUI && typeof window.syncUI.loadCurrentSyncSettings === 'function') {
+      window.syncUI.loadCurrentSyncSettings();
+    }
+  } catch (err) {
+    console.warn('[设置] 同步/备份配置加载跳过:', err.message);
   }
 
-  // 加载禅道配置状态
+  // 加载禅道配置状态（异步回填，完成后会刷新基线）
   loadZentaoConfigStatus();
+
+  // 交给设置页 UI 层：回到默认分组并记录「已保存」基线
+  if (window.settingsUI) window.settingsUI.onOpen();
 }
 
+// 加载禅道配置状态
 // 加载禅道配置状态
 async function loadZentaoConfigStatus() {
   try {
@@ -4972,9 +5294,10 @@ async function loadZentaoConfigStatus() {
       if (result.success && result.data) {
         console.log('[前端] 禅道配置状态:', result.data);
         // 如果后端有配置，可以使用后端的配置覆盖前端的
-        if (result.data.enabled && !document.getElementById('zentaoUrl').value) {
+        const zentaoUrlEl = document.getElementById('zentaoUrl');
+        if (result.data.enabled && zentaoUrlEl && !zentaoUrlEl.value) {
           document.getElementById('zentaoEnabled').checked = true;
-          document.getElementById('zentaoUrl').value = result.data.urlPrefix?.replace('...', '') || '';
+          zentaoUrlEl.value = result.data.urlPrefix?.replace('...', '') || '';
           document.getElementById('zentaoUsername').value = result.data.username || '';
           document.getElementById('zentaoPassword').value = result.data.password || '';
           document.getElementById('zentaoCreateTaskUrl').value = result.data.createTaskUrl || '';
@@ -4983,6 +5306,9 @@ async function loadZentaoConfigStatus() {
     }
   } catch (err) {
     console.log('[前端] 获取禅道配置状态失败（可能后端未启动）');
+  } finally {
+    // 异步回填完成后重设基线，避免刚打开设置就被判定为「未保存的修改」
+    if (window.settingsUI) window.settingsUI.refreshBaseline();
   }
 }
 

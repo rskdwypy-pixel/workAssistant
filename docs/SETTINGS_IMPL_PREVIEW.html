@@ -1,0 +1,3835 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>设置页改造效果预览 · 工作助手</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ============ 由 extension/newtab.css 内联（真实样式，未改动） ============ */
+/* ==================== 现代化样式 ==================== */
+
+:root {
+  --primary: #6366f1;
+  --primary-light: #818cf8;
+  --primary-dark: #4f46e5;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --bg-base: #f8fafc;
+  --bg-surface: #ffffff;
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --border: #e2e8f0;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.12);
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  min-height: 100vh;
+}
+
+/* ==================== Toast 容器 ==================== */
+.toast-container {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  background: var(--bg-surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  min-width: 300px;
+  max-width: 400px;
+  animation: toastIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  border-left: 4px solid var(--primary);
+}
+
+.toast.removing {
+  animation: toastOut 0.2s ease forwards;
+}
+
+.toast-success {
+  border-left-color: var(--success);
+}
+
+.toast-error {
+  border-left-color: var(--danger);
+}
+
+.toast-warning {
+  border-left-color: var(--warning);
+}
+
+.toast-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.toast-success .toast-icon {
+  color: var(--success);
+}
+
+.toast-error .toast-icon {
+  color: var(--danger);
+}
+
+.toast-warning .toast-icon {
+  color: var(--warning);
+}
+
+.toast-message {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.toast-close {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: color 0.2s;
+}
+
+.toast-close:hover {
+  color: var(--text-primary);
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateX(100px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes toastOut {
+  to {
+    opacity: 0;
+    transform: translateX(100px);
+  }
+}
+
+/* ==================== 确认对话框 ==================== */
+.confirm-dialog {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.2s ease;
+}
+
+.confirm-dialog.active {
+  display: flex;
+}
+
+.confirm-box {
+  background: var(--bg-surface);
+  border-radius: var(--radius-xl);
+  padding: 32px;
+  text-align: center;
+  max-width: 400px;
+  width: 90%;
+  animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: var(--shadow-lg);
+}
+
+.confirm-icon {
+  color: var(--warning);
+  margin-bottom: 16px;
+}
+
+.confirm-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.confirm-message {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin-bottom: 24px;
+  line-height: 1.5;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.btn-confirm-cancel,
+.btn-confirm-ok {
+  padding: 12px 24px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 100px;
+}
+
+.btn-confirm-cancel {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+
+.btn-confirm-cancel:hover {
+  background: var(--border);
+}
+
+.btn-confirm-ok {
+  background: var(--primary);
+  color: white;
+  border: none;
+}
+
+.btn-confirm-ok:hover {
+  background: var(--primary-dark);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ==================== 应用容器 ==================== */
+.app-container {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ==================== 侧边栏 ==================== */
+.sidebar {
+  width: 300px;
+  background: var(--bg-surface);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border-right: 1px solid var(--border);
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
+}
+
+.section-title svg {
+  color: var(--primary);
+}
+
+/* ==================== 日历 ==================== */
+.calendar-section {
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+}
+
+.calendar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.calendar-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.calendar-nav-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+}
+
+.calendar-nav-btn:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+  transform: scale(1.05);
+}
+
+.calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.calendar-weekday {
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 8px 0;
+}
+
+.calendar-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.calendar-day {
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  position: relative;
+  overflow: hidden;
+  padding: 2px;
+  box-sizing: border-box;
+}
+
+.calendar-day-number {
+  line-height: 1;
+}
+
+.calendar-day:hover {
+  transform: scale(1.1);
+  z-index: 1;
+}
+
+.calendar-day.empty {
+  background: transparent;
+  cursor: default;
+}
+
+.calendar-day.empty:hover {
+  transform: none;
+}
+
+.calendar-day.future {
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.calendar-day.future:hover {
+  transform: none;
+}
+
+.calendar-day.today {
+  border: 2px solid var(--primary);
+  font-weight: 700;
+}
+
+.calendar-day.selected {
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.3);
+}
+
+.calendar-day-tasks {
+  font-size: 10px;
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  margin-top: 2px;
+}
+
+/* GitHub Contribution Style */
+.level-0 {
+  background: #ebedf0 !important;
+  color: var(--text-secondary) !important;
+}
+
+.level-1 {
+  background: #9be9a8 !important;
+  color: #1f2328 !important;
+}
+
+.level-2 {
+  background: #40c463 !important;
+  color: #ffffff !important;
+}
+
+.level-3 {
+  background: #30a14e !important;
+  color: #ffffff !important;
+}
+
+.level-4 {
+  background: #216e39 !important;
+  color: #ffffff !important;
+}
+
+.calendar-legend {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.legend-text {
+  margin: 0 6px;
+}
+
+.legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+/* ==================== 侧边栏区域 ==================== */
+.sidebar-section {
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+}
+
+.add-task-title {
+  margin-bottom: 14px;
+  cursor: help;
+}
+
+.add-task-form textarea {
+  width: 100%;
+  padding: 14px 16px;
+  padding-right: 70px;
+  border: 2px solid transparent;
+  border-radius: var(--radius-lg);
+  font-family: inherit;
+  font-size: 14px;
+  resize: none;
+  transition: all 0.2s;
+  background: var(--bg-base);
+  line-height: 1.5;
+  min-height: 80px;
+}
+
+.add-task-form textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  background: var(--bg-surface);
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.08);
+}
+
+.add-task-form textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.task-input-wrapper {
+  position: relative;
+}
+
+.enter-hint {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.5;
+  pointer-events: none;
+  transition: all 0.2s;
+}
+
+.task-input-wrapper textarea:not(:placeholder-shown)~.enter-hint {
+  opacity: 1;
+  color: var(--primary);
+  border-color: var(--primary);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.add-task-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 8px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  height: 0;
+  overflow: hidden;
+}
+
+.add-task-title:hover~.add-task-form .add-task-hint,
+.add-task-form:hover .add-task-hint {
+  opacity: 0.7;
+  height: auto;
+}
+
+.btn-block {
+  width: 100%;
+}
+
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 20px 0;
+}
+
+.report-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.btn-report {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-primary);
+  transition: all 0.2s;
+}
+
+.btn-report:hover {
+  border-color: var(--primary);
+  background: rgba(99, 102, 241, 0.05);
+  transform: translateX(4px);
+}
+
+.report-icon {
+  font-size: 16px;
+}
+
+.test-buttons {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.btn-test {
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+/* ==================== 主内容区 ==================== */
+.main-content {
+  flex: 1;
+  padding: 20px;
+  overflow: hidden;
+}
+
+.task-board {
+  background: var(--bg-surface);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.task-board-header {
+  padding: 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.task-board-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1;
+}
+
+.task-board-left h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.task-board-stats {
+  display: flex;
+  gap: 16px;
+}
+
+.stat-item {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.task-board-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.header-search {
+  width: 280px;
+  padding: 10px 16px;
+  padding-left: 40px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  font-size: 14px;
+  color: var(--text-primary);
+  transition: all 0.2s;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 14px center;
+}
+
+.header-search:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+}
+
+.header-search::placeholder {
+  color: var(--text-muted);
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 12px;
+  transition: all 0.2s;
+  width: 240px;
+}
+
+.search-box:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.search-box svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.search-box input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 10px;
+  font-size: 14px;
+  outline: none;
+}
+
+.task-board-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.header-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  transform: translateY(-1px);
+}
+
+.icon-btn {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+}
+
+.icon-btn:hover {
+  background: var(--bg-base);
+  color: var(--primary);
+}
+
+/* ==================== 测试按钮区域 ==================== */
+.test-buttons {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  animation: slideDown 0.3s ease;
+}
+
+.test-buttons.visible {
+  display: flex;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.btn-test {
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-test:hover {
+  transform: translateX(4px);
+}
+
+.btn-test.test-morning {
+  background: var(--warning);
+}
+
+.btn-test.test-evening {
+  background: #8e44ad;
+}
+
+.btn-test.test-weekly {
+  background: #16a085;
+}
+
+.btn-test.test-monthly {
+  background: #d35400;
+}
+
+/* ==================== 任务列 ==================== */
+.task-columns {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  flex: 1;
+  overflow: hidden;
+  padding: 16px;
+}
+
+.task-column {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.column-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  margin-bottom: 8px;
+}
+
+.column-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.column-todo .status-indicator {
+  background: var(--danger);
+}
+
+.column-progress .status-indicator {
+  background: var(--warning);
+}
+
+.column-done .status-indicator {
+  background: var(--success);
+}
+
+.column-count {
+  background: var(--bg-base);
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.task-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ==================== 任务卡片 ==================== */
+.task-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+  overflow: visible;
+}
+
+.task-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--text-muted);
+}
+
+.task-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+  border-color: var(--primary-light);
+}
+
+.task-card.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-light), var(--shadow);
+  background: rgba(99, 102, 241, 0.03);
+}
+
+.task-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 1.5;
+  padding-right: 24px;
+}
+
+.task-checkbox {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: var(--primary);
+}
+
+.task-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.task-reminder-container {
+  display: flex;
+  align-items: center;
+}
+
+.task-reminder-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--bg-base);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.task-reminder-btn:hover {
+  color: var(--primary);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+/* 优先级相关样式 */
+.priority-toggle {
+  font-family: inherit;
+  user-select: none;
+}
+
+.priority-toggle:hover {
+  transform: scale(1.05);
+}
+
+.priority-toggle:active {
+  transform: scale(0.95);
+}
+
+.priority-option:hover {
+  background: #f1f5f9;
+}
+
+.task-progress {
+  margin-top: 12px;
+}
+
+.task-progress-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.task-progress-track {
+  flex: 1;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.task-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary), var(--success));
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.task-progress-input {
+  width: 58px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  text-align: center;
+}
+
+.task-progress-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+/* ==================== 模态框 ==================== */
+.modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.2s ease;
+}
+
+.modal.active {
+  display: flex;
+}
+
+.modal-content {
+  background: var(--bg-surface);
+  border-radius: var(--radius-xl);
+  width: 90%;
+  max-width: 540px;
+  max-height: 85vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: var(--shadow-lg);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.close-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-base);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: all 0.2s;
+}
+
+.close-btn:hover {
+  color: var(--text-primary);
+  background: var(--border);
+}
+
+.modal-body {
+  padding: 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+}
+
+.modal-footer-right {
+  display: flex;
+  gap: 8px;
+}
+
+/* ==================== 设置模态框 ==================== */
+.settings-modal-content {
+  /* 设置项较多（含 AI 供应商、禅道配置、定时任务等），
+     540px 会让所有内容挤成单列长条，可读性很差。
+     这里放宽到 960px，并把内部区块排成两列，充分利用横向空间。 */
+  max-width: 960px;
+  width: 94%;
+  max-height: 88vh;
+}
+
+/* 双列栅格：窄屏自动回落为单列 */
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 0 28px;
+  align-items: start;
+}
+
+/* 需要整行占用的区块（服务状态、提示词等）不参与分栏 */
+.settings-section-full {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 760px) {
+  .settings-modal-content {
+    width: 96%;
+    max-width: 100%;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.settings-section {
+  margin-bottom: 24px;
+}
+
+.settings-section h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 16px;
+}
+
+.settings-section h4 svg {
+  color: var(--primary);
+}
+
+.settings-item {
+  margin-bottom: 16px;
+}
+
+.settings-item label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.settings-item input,
+.settings-item select {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-family: inherit;
+  transition: all 0.2s;
+  background: var(--bg-base);
+}
+
+.settings-item input:focus,
+.settings-item select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.settings-item input:disabled,
+.settings-item select:disabled {
+  background-color: var(--bg-hover);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  border-color: var(--border);
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.required {
+  color: var(--danger);
+}
+
+.input-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #8b949e;
+}
+
+.test-result {
+  font-size: 13px;
+}
+
+.test-result.success {
+  color: var(--success);
+}
+
+.test-result.error {
+  color: var(--danger);
+}
+
+.service-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: var(--bg-base);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.status-dot.online {
+  background: var(--success);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+}
+
+.status-dot.offline {
+  background: var(--danger);
+}
+
+.status-dot.unknown {
+  background: var(--text-muted);
+}
+
+.service-actions {
+  padding: 16px;
+  background: var(--bg-base);
+  border-radius: var(--radius);
+}
+
+.service-actions p {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.service-actions code {
+  display: block;
+  background: #1e293b;
+  color: #a5b4fc;
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.hint {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.settings-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* ==================== 报告模态框 ==================== */
+.report-modal {
+  max-width: 600px;
+}
+
+/* ==================== 按钮 ==================== */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 24px;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-primary:hover {
+  background: var(--primary-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-secondary:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.btn-text {
+  padding: 10px 20px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.btn-text:hover {
+  color: var(--primary);
+}
+
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-danger:hover {
+  background: var(--danger);
+  color: white;
+}
+
+/* ==================== 空状态 ==================== */
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-muted);
+}
+
+.empty-state-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+
+/* ==================== 滚动条 ==================== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ==================== 动画 ==================== */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+/* ==================== 按钮加载状态 ==================== */
+.btn-primary:disabled,
+.btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* ==================== 历史报告列表 ==================== */
+.history-report-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 12px;
+  transition: all 0.2s;
+}
+
+.history-report-item:hover {
+  border-color: var(--primary-light);
+  box-shadow: var(--shadow);
+}
+
+.history-report-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.history-report-title {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.report-type-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--primary);
+  color: white;
+}
+
+.history-report-preview {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.history-report-stats {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.history-report-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.history-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.history-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* ==================== 响应式 ==================== */
+@media (max-width: 1024px) {
+  .app-container {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .task-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ==================== 执行选择器 ==================== */
+.execution-selector-wrapper {
+  margin-bottom: 12px;
+  padding: 8px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.execution-selector-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.execution-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.icon-btn-mini {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.icon-btn-mini:hover {
+  background: var(--bg-base);
+  color: var(--primary);
+}
+
+.execution-select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.execution-select:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.execution-select option {
+  padding: 8px;
+}
+
+.ai-indicator {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary), var(--primary-light));
+  border-radius: 4px;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* ==================== 执行标签 ==================== */
+.execution-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  margin: 2px 4px 2px 0;
+  font-size: 10px;
+  font-weight: 500;
+  border-radius: 4px;
+  background: var(--primary-light);
+  color: #fff;
+  white-space: nowrap;
+}
+
+/* ==================== Bug 模式样式 ==================== */
+.bug-card {
+  border-left: 3px solid var(--danger) !important;
+}
+
+.bug-severity {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.bug-severity-1 { background: #dc2626; color: #fff; }
+.bug-severity-2 { background: #f97316; color: #fff; }
+.bug-severity-3 { background: #fbbf24; color: #713f12; }
+.bug-severity-4 { background: #9ca3af; color: #fff; }
+
+.bug-type {
+  font-size: 10px;
+  color: var(--text-secondary);
+  background: var(--bg-base);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* ==================== 云标签 ==================== */
+.tag-cloud {
+  position: fixed;
+  top: 50%;
+  right: 20px;
+  transform: translateY(-50%);
+  z-index: 1000;
+  transition: right 0.3s ease;
+}
+
+.tag-cloud.collapsed {
+  right: calc(100% - 40px);
+}
+
+.tag-cloud-toggle {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  box-shadow: var(--shadow);
+  transition: transform 0.2s;
+}
+
+.tag-cloud-toggle:hover {
+  transform: scale(1.1);
+}
+
+.tag-cloud-content {
+  position: absolute;
+  right: 44px;
+  top: 0;
+  width: 200px;
+  background: var(--bg-surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 16px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.tag-cloud-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tag-cloud-header h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.refresh-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  font-size: 16px;
+}
+
+.refresh-btn:hover {
+  background: var(--bg-base);
+  color: var(--primary);
+}
+
+.tag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tag-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.tag-item:hover {
+  background: var(--bg-base);
+}
+
+.tag-item.active {
+  background: var(--primary-light);
+  color: #fff;
+}
+
+.tag-item-name {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.tag-item-count {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: var(--bg-base);
+  color: var(--text-secondary);
+}
+
+.tag-item.active .tag-item-count {
+  background: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+
+/* ==================== 翻转按钮已移除 ==================== */
+/* 旧的 flip-mode-btn 已被 Tab 切换替代 */
+
+/* ==================== 项目收藏列表 ==================== */
+.project-favorites-list {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+}
+
+.project-favorite-item {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.project-favorite-item:hover {
+  background: var(--bg-surface);
+}
+
+.project-favorite-item input[type="checkbox"] {
+  margin-right: 8px;
+  cursor: pointer;
+}
+
+.project-favorite-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.project-favorite-status {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--success);
+  color: white;
+}
+
+.project-favorite-status.closed {
+  background: var(--text-muted);
+}
+
+/* 已关闭执行项样式 */
+.project-favorite-item.item-closed {
+  opacity: 0.6;
+}
+
+.project-favorite-item.item-closed .project-favorite-name {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+/* 执行类型标签 */
+.execution-type-label {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  display: inline-block;
+  margin-left: 6px;
+}
+
+.execution-type-kanban {
+  background: #6366f1;
+  color: white;
+}
+
+.execution-type-sprint {
+  background: #10b981;
+  color: white;
+}
+
+.execution-type-stage {
+  background: #f59e0b;
+  color: white;
+}
+
+/* 执行收藏信息容器 */
+.execution-favorite-info {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+}
+
+.execution-project-name {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* 执行分组样式 */
+.execution-group {
+  margin-bottom: 12px;
+}
+
+.execution-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-sm);
+  margin-bottom: 4px;
+}
+
+.execution-group-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.execution-group-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-base);
+  padding: 2px 6px;
+  border-radius: 10px;
+}
+
+.execution-group-items {
+  padding-left: 8px;
+}
+
+/* ==================== Tab 切换 ==================== */
+.mode-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab-btn {
+  padding: 10px 20px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.tab-btn:hover {
+  color: var(--primary);
+}
+
+.tab-btn.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.mode-content {
+  display: none;
+}
+
+.mode-content.active {
+  display: block;
+}
+
+/* ==================== Bug 卡片快捷按钮 ==================== */
+.bug-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+  gap: 6px;
+}
+
+.bug-quick-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.bug-quick-btn:hover {
+  background: var(--bg-base);
+  color: var(--primary);
+  border-color: var(--primary-light);
+}
+
+.bug-activate-btn:hover {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.bug-resolve-btn:hover {
+  color: var(--success);
+  border-color: var(--success);
+}
+
+/* ==================== Bug 卡片元信息 ==================== */
+.bug-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.bug-assignee {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-base);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.bug-comment-preview {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.4;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ==================== Bug 详情弹窗 ==================== */
+.bug-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.bug-detail-actions .btn-primary {
+  padding: 8px 16px;
+  font-size: 14px;
+}
+
+.bug-detail-actions .btn-danger {
+  padding: 8px 16px;
+  font-size: 14px;
+}
+
+
+/* ==================== 多选组件样式 ==================== */
+.multi-select-container {
+  position: relative;
+  width: 100%;
+}
+
+.multi-select-display {
+  min-height: 42px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  transition: border-color 0.2s;
+}
+
+.multi-select-display:hover {
+  border-color: #999;
+}
+
+.multi-select-display.active {
+  border-color: #4CAF50;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.1);
+}
+
+.multi-select-placeholder {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.multi-select-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 16px;
+  font-size: 13px;
+  font-weight: 500;
+  animation: tagFadeIn 0.2s ease;
+}
+
+@keyframes tagFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.multi-select-tag-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multi-select-tag-remove {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  transition: background 0.2s;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.multi-select-tag-remove:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.multi-select-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  max-height: 300px;
+  overflow: hidden;
+  animation: dropdownFadeIn 0.2s ease;
+}
+
+@keyframes dropdownFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+
+.multi-select-options {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.multi-select-options::-webkit-scrollbar {
+  width: 6px;
+}
+
+.multi-select-options::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.multi-select-options::-webkit-scrollbar-thumb {
+  background: #ddd;
+  border-radius: 3px;
+}
+
+.multi-select-options::-webkit-scrollbar-thumb:hover {
+  background: #ccc;
+}
+
+.multi-select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  margin: 2px 0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.multi-select-option:hover {
+  background: rgba(76, 175, 80, 0.08);
+}
+
+.multi-select-option.selected {
+  background: rgba(76, 175, 80, 0.12);
+}
+
+.multi-select-option.selected .multi-select-option-check {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.multi-select-option-text {
+  flex: 1;
+}
+
+.multi-select-option-account {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: 8px;
+}
+
+.multi-select-option-check {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #4CAF50;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: scale(0.5);
+  transition: all 0.2s;
+  background: white;
+}
+
+.multi-select-option-check::after {
+  content: '✓';
+  color: #4CAF50;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.multi-select-no-result {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.multi-select-no-data {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* ==================== Bug ID 样式 ==================== */
+.bug-id-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.bug-id-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.bug-id-link {
+  font-size: 13px;
+  color: #4CAF50;
+  font-weight: 600;
+  text-decoration: none;
+  padding: 2px 8px;
+  background: rgba(76, 175, 80, 0.08);
+  border-radius: 4px;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.bug-id-link:hover {
+  background: rgba(76, 175, 80, 0.15);
+  transform: translateY(-1px);
+  text-decoration: none;
+}
+
+.bug-id-link:active {
+  transform: translateY(0);
+}
+
+/* ==================== Bug ID 内联样式 ==================== */
+.bug-id-link-inline {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: #4CAF50;
+  font-weight: 600;
+  text-decoration: none;
+  background: rgba(76, 175, 80, 0.08);
+  border-radius: 4px;
+  transition: all 0.2s;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.bug-id-link-inline:hover {
+  background: rgba(76, 175, 80, 0.15);
+  transform: translateY(-1px);
+  text-decoration: none;
+}
+
+.bug-id-link-inline:active {
+  transform: translateY(0);
+}
+
+.bug-add-id-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  opacity: 0.5;
+  line-height: 1.2;
+}
+
+.bug-add-id-btn:hover {
+  opacity: 1;
+  background: rgba(76, 175, 80, 0.1);
+  border-color: #4CAF50;
+  color: #4CAF50;
+  transform: scale(1.1);
+}
+
+.bug-add-id-btn:active {
+  transform: scale(1);
+}
+
+/* 同步到禅道按钮样式 */
+.bug-sync-to-zentao-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: white;
+  background: #10b981;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s;
+  line-height: 1.2;
+}
+
+.bug-sync-to-zentao-btn:hover {
+  background: #059669;
+  transform: scale(1.05);
+}
+
+.bug-sync-to-zentao-btn:active {
+  transform: scale(1);
+}
+
+.bug-sync-to-zentao-btn:disabled {
+  background: #6b7280;
+  cursor: wait;
+  opacity: 0.7;
+}
+
+/* 任务同步到禅道按钮样式 */
+.sync-to-zentao-btn {
+  background: #10b981;
+  color: white;
+  border: none;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.sync-to-zentao-btn:hover {
+  background: #059669;
+}
+
+.sync-to-zentao-btn:disabled {
+  background: #6b7280;
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.bug-detail-zentao-id {
+  font-weight: 600;
+  color: #4CAF50;
+  cursor: pointer;
+}
+
+.bug-detail-zentao-id:hover {
+  text-decoration: underline;
+}
+
+</style>
+<style>
+/* ============ 由 extension/sync.css 内联 ============ */
+/* ==================== 同步 UI 样式（集成到设置页面）==================== */
+
+/* 上次同步时间 */
+.sync-last-time {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #8b949e;
+}
+
+/* 服务商选择标签 */
+.sync-provider-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.sync-tab {
+  padding: 6px 12px;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #8b949e;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.sync-tab:hover {
+  background: #30363d;
+  color: #c9d1d9;
+}
+
+.sync-tab.active {
+  background: #1f6feb;
+  border-color: #1f6feb;
+  color: #ffffff;
+}
+
+/* 坚果云帮助信息 */
+.jianguoyun-help {
+  padding: 10px 12px;
+  background: #1f6feb22;
+  border: 1px solid #1f6feb44;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.jianguoyun-help p {
+  margin: 0 0 6px 0;
+  font-size: 13px;
+  color: #58a6ff;
+}
+
+.help-link {
+  color: #58a6ff;
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.help-link:hover {
+  text-decoration: underline;
+}
+
+/* 复选框样式 */
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* 设置面板中的同步按钮 */
+.settings-footer #syncNowBtn {
+  background: #238636;
+  border-color: #238636;
+}
+
+.settings-footer #syncNowBtn:hover:not(:disabled) {
+  background: #2ea043;
+  border-color: #2ea043;
+}
+
+.settings-footer #syncNowBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 设置页面内同步按钮样式 */
+.settings-section .btn-secondary {
+  margin-top: 8px;
+}
+
+.settings-section #syncNowBtn:disabled {
+  background: #6e7681;
+  border-color: #6e7681;
+}
+
+/* 测试结果 */
+.test-result {
+  margin-left: 12px;
+  font-size: 12px;
+}
+
+.test-result.success {
+  color: #238636;
+}
+
+.test-result.error {
+  color: #f85149;
+}
+
+</style>
+<style>
+/* ============ 由 extension/settings.css 内联（本次新增，真实样式，未改动） ============ */
+/* ============================================================================
+   工作助手 · 设置页设计系统 v1.0
+   ----------------------------------------------------------------------------
+   与 docs/SETTINGS_PROTOTYPE.html 同源。
+
+   作用域约定：
+   所有设计令牌都定义在 .settings-modal-content 上，只沿 DOM 向下继承，
+   不改动全局 :root，也不影响任务详情 / 报告 / 确认框等其它弹窗的既有视觉。
+   同时把旧令牌名（--primary/--text-primary/--border …）映射到新值，
+   这样弹窗内的历史组件（.btn-primary / .checkbox-label / .test-result）
+   会自动统一到新视觉，不需要逐个重写。
+
+   命名约定沿用 app 既有类，避免 JS 改动：
+     .test-result.success / .test-result.error  —— 连接测试结果
+     .status-dot.online / .offline / .unknown   —— 本地服务状态点
+   ============================================================================ */
+
+/* ---------------------------------------------------------------- 设计令牌 */
+.settings-modal-content {
+  /* —— 色彩 · 浅色「墨台」 —— */
+  --ink: #2A2724;
+  --text-2: #5C574E;
+  --text-muted-warm: #766F64;
+  --bg-base-warm: #FAF9F6;
+  --bg-surface-warm: #FFFFFF;
+  --bg-sunken-warm: #F3F1EC;
+  --border-warm: #E6E2D9;
+  --border-strong-warm: #8C877D;
+  --accent: #0F766E;
+  --accent-hover: #115E59;
+  --accent-on: #FFFFFF;
+  --accent-soft-bg: #E6F4F1;
+  --accent-soft-ink: #0F766E;
+  --st-success: #15803D;
+  --st-warning: #B45309;
+  --st-danger: #B91C1C;
+  --focus-ring: rgba(15, 118, 110, 0.35);
+
+  /* —— 间距（4px 基座）/ 圆角 / 动效 —— */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-8: 32px;
+  --r-control: 6px; --r-card: 10px; --r-modal: 14px;
+  --ease: cubic-bezier(0.25, 1, 0.5, 1);
+  --dur: 180ms;
+
+  /* —— 旧令牌映射：弹窗内历史组件一次性落到新视觉 —— */
+  --primary: var(--accent);
+  --primary-dark: var(--accent-hover);
+  --primary-light: #14B8A6;
+  --text-primary: var(--ink);
+  --text-secondary: var(--text-2);
+  --text-muted: var(--text-muted-warm);
+  --bg-base: var(--bg-base-warm);
+  --bg-surface: var(--bg-surface-warm);
+  --bg-secondary: var(--bg-sunken-warm);
+  --border: var(--border-warm);
+  --success: var(--st-success);
+  --warning: var(--st-warning);
+  --danger: var(--st-danger);
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --shadow-sm: 0 1px 2px rgba(42, 39, 36, 0.05);
+  --shadow: 0 4px 16px -4px rgba(42, 39, 36, 0.08), 0 1px 3px rgba(42, 39, 36, 0.04);
+  --shadow-lg: 0 24px 48px -12px rgba(42, 39, 36, 0.18), 0 2px 6px rgba(42, 39, 36, 0.05);
+}
+
+/* 设置弹窗：920px 面板 + 暖调遮罩 */
+#settingsModal { background: rgba(42, 39, 36, 0.32); }
+
+.settings-modal-content {
+  max-width: 920px;
+  width: 94%;
+  max-height: 88vh;
+  border: 1px solid var(--border-warm);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+/* ------------------------------------------------------------------ 弹窗头 */
+.settings-modal-content .settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;   /* 覆盖 .modal-header 的 space-between，头部三段靠左排列 */
+  gap: var(--sp-3);
+  padding: var(--sp-5) var(--sp-6);
+  border-bottom: 1px solid var(--border-warm);
+}
+
+.settings-head .sh-icon {
+  width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
+  background: var(--accent-soft-bg); color: var(--accent-soft-ink);
+  display: grid; place-items: center;
+}
+.settings-head .sh-icon svg { width: 17px; height: 17px; }
+.settings-head h3 { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.3; }
+.settings-head .sh-sub { font-size: 12px; color: var(--text-muted-warm); }
+.settings-head .sh-debug { margin-left: auto; display: flex; align-items: center; gap: var(--sp-3); }
+.settings-head .close-btn {
+  background: none;
+  color: var(--text-muted-warm);
+  width: 30px; height: 30px;
+  border-radius: 8px;
+  font-size: 20px;
+  line-height: 1;
+}
+.settings-head .close-btn:hover { background: var(--bg-sunken-warm); color: var(--ink); }
+
+/* ------------------------------------------------------------------ 主体布局 */
+.settings-modal-content .settings-layout {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 左侧分组导航 */
+.settings-modal-content .settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-4) var(--sp-3);
+  background: var(--bg-sunken-warm);
+  border-right: 1px solid var(--border-warm);
+  overflow-y: auto;
+}
+.settings-nav button {
+  display: flex; align-items: center; gap: var(--sp-3);
+  width: 100%; padding: 8px 10px;
+  border: none; border-radius: var(--r-control);
+  background: none; cursor: pointer; text-align: left;
+  font-family: inherit; font-size: 13px; font-weight: 500;
+  color: var(--text-2); white-space: nowrap;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.settings-nav button svg { width: 15px; height: 15px; flex-shrink: 0; }
+.settings-nav button:hover { background: var(--bg-surface-warm); color: var(--ink); }
+.settings-nav button.active {
+  background: var(--bg-surface-warm); color: var(--ink);
+  font-weight: 700; box-shadow: var(--shadow-sm);
+}
+.settings-nav button.active svg { color: var(--accent-soft-ink); }
+.settings-nav .nav-foot { margin-top: auto; padding-top: var(--sp-4); }
+
+/* 右侧内容区（独立滚动） */
+.settings-modal-content .settings-content {
+  padding: var(--sp-6);
+  overflow-y: auto;
+  min-height: 0;
+  scrollbar-width: thin;
+}
+
+/* 分组面板 */
+.set-panel { display: none; }
+.set-panel.active { display: block; animation: setPanelIn var(--dur) var(--ease); }
+@keyframes setPanelIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+.set-panel > h4 {
+  font-size: 16px; font-weight: 700; letter-spacing: -0.01em;
+  margin-bottom: 2px;
+}
+.set-panel > .set-desc {
+  font-size: 12px; color: var(--text-muted-warm);
+  margin-bottom: var(--sp-5); line-height: 1.6;
+}
+
+/* ------------------------------------------------------------------ 表单行 */
+.set-row {
+  display: grid;
+  grid-template-columns: 148px 1fr;
+  gap: var(--sp-4);
+  align-items: start;
+  padding: var(--sp-4) 0;
+  border-bottom: 1px solid var(--border-warm);
+}
+.set-row:last-child { border-bottom: none; }
+.set-row .sr-label { font-size: 13px; font-weight: 600; padding-top: 8px; }
+.set-row .sr-label .req { color: var(--st-danger); }
+.set-row .sr-label small { display: block; font-size: 11px; color: var(--text-muted-warm); font-weight: 400; margin-top: 2px; }
+.set-row .sr-control { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.set-row .sr-control .row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+
+/* 表单控件 */
+.settings-modal-content .set-input,
+.settings-modal-content .set-select,
+.settings-modal-content .set-textarea {
+  width: 100%;
+  font-family: inherit; font-size: 13px; color: var(--ink);
+  background: var(--bg-surface-warm);
+  border: 1px solid var(--border-strong-warm);
+  border-radius: var(--r-control);
+  padding: 8px 11px;
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.settings-modal-content .set-textarea { resize: vertical; line-height: 1.6; min-height: 76px; font-size: 12px; }
+.settings-modal-content .set-select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-2) 50%),
+                    linear-gradient(135deg, var(--text-2) 50%, transparent 50%);
+  background-position: calc(100% - 16px) 55%, calc(100% - 11px) 55%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 30px; cursor: pointer;
+}
+.settings-modal-content .set-input:focus,
+.settings-modal-content .set-select:focus,
+.settings-modal-content .set-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+  outline: none;
+}
+.settings-modal-content .set-input::placeholder,
+.settings-modal-content .set-textarea::placeholder { color: var(--text-muted-warm); }
+.settings-modal-content .set-input:disabled,
+.settings-modal-content .set-select:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* 说明文字 */
+.settings-modal-content .input-hint,
+.settings-modal-content .set-hint {
+  font-size: 11px; color: var(--text-muted-warm); line-height: 1.6;
+}
+.settings-modal-content .set-hint code,
+.settings-modal-content .input-hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; background: var(--bg-sunken-warm);
+  border: 1px solid var(--border-warm); border-radius: 4px;
+  padding: 1px 5px; color: var(--text-2);
+}
+
+/* 复选框 */
+.settings-modal-content .checkbox-label {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12px; color: var(--text-2); cursor: pointer; user-select: none;
+}
+.settings-modal-content .checkbox-label input {
+  appearance: none; width: 15px; height: 15px; flex-shrink: 0;
+  border: 1.5px solid var(--border-strong-warm); border-radius: 4px;
+  background: var(--bg-surface-warm); cursor: pointer; position: relative;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.settings-modal-content .checkbox-label input:checked { background: var(--accent); border-color: var(--accent); }
+.settings-modal-content .checkbox-label input:checked::after {
+  content: ""; position: absolute; left: 4px; top: 1px;
+  width: 4px; height: 8px;
+  border: solid #FFFFFF; border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* 开关（用于开机自启这类「立即生效」的系统级开关） */
+.set-switch {
+  display: inline-flex; align-items: center; gap: 10px;
+  cursor: pointer; user-select: none;
+}
+.set-switch input {
+  position: absolute; opacity: 0; width: 0; height: 0;
+}
+.set-switch-track {
+  position: relative; flex-shrink: 0;
+  width: 40px; height: 22px; border-radius: 999px;
+  background: var(--border-strong-warm);
+  transition: background var(--dur) var(--ease);
+}
+.set-switch-track::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: #FFFFFF;
+  transition: transform var(--dur) var(--ease);
+}
+.set-switch input:checked + .set-switch-track { background: var(--accent); }
+.set-switch input:checked + .set-switch-track::after { transform: translateX(18px); }
+.set-switch input:focus-visible + .set-switch-track {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.set-switch input:disabled + .set-switch-track { opacity: 0.45; }
+.set-switch:has(input:disabled) { cursor: not-allowed; }
+.set-switch-text { font-size: 12px; color: var(--text-2); }
+/* 请求进行中：整体降透明度并屏蔽点击，避免连点产生并发写配置 */
+.set-switch.is-busy { opacity: 0.6; pointer-events: none; }
+
+/* ------------------------------------------------------------------ 按钮 */
+.settings-modal-content .set-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  font-family: inherit; font-size: 13px; font-weight: 600;
+  border-radius: var(--r-control); padding: 8px 16px;
+  border: 1px solid transparent; cursor: pointer; white-space: nowrap;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease),
+              color var(--dur) var(--ease);
+}
+.settings-modal-content .set-btn svg { width: 15px; height: 15px; flex-shrink: 0; }
+.settings-modal-content .set-btn-sm { padding: 5px 11px; font-size: 12px; }
+.settings-modal-content .set-btn-primary { background: var(--accent); color: var(--accent-on); }
+.settings-modal-content .set-btn-primary:hover { background: var(--accent-hover); }
+.settings-modal-content .set-btn-secondary {
+  background: var(--bg-surface-warm); color: var(--ink);
+  border-color: var(--border-strong-warm);
+}
+.settings-modal-content .set-btn-secondary:hover {
+  border-color: var(--accent); color: var(--accent-soft-ink); background: var(--accent-soft-bg);
+}
+.settings-modal-content .set-btn-ghost { background: none; color: var(--text-2); }
+.settings-modal-content .set-btn-ghost:hover { background: var(--bg-sunken-warm); color: var(--ink); }
+.settings-modal-content .set-btn-danger {
+  background: none; color: var(--st-danger);
+  border-color: color-mix(in srgb, var(--st-danger) 40%, transparent);
+}
+.settings-modal-content .set-btn-danger:hover { background: rgba(185, 28, 28, 0.08); }
+.settings-modal-content .set-btn:disabled { opacity: 0.55; pointer-events: none; }
+
+/* 按钮内加载指示 */
+.settings-modal-content .btn-spinner {
+  width: 13px; height: 13px; flex-shrink: 0;
+  border: 2px solid currentColor; border-radius: 50%;
+  border-top-color: transparent;
+  animation: setSpin 0.7s linear infinite;
+}
+@keyframes setSpin { to { transform: rotate(360deg); } }
+
+/* ------------------------------------------------------------------ 连接测试结果 */
+.settings-modal-content .test-result { font-size: 12px; font-weight: 600; min-height: 18px; }
+.settings-modal-content .test-result.success { color: var(--st-success); }
+.settings-modal-content .test-result.error { color: var(--st-danger); }
+
+/* ------------------------------------------------------------------ 本地服务卡 */
+.set-service {
+  border: 1px solid var(--border-warm);
+  border-radius: var(--r-card);
+  background: var(--bg-surface-warm);
+  padding: var(--sp-5);
+  margin-bottom: var(--sp-4);
+}
+.set-service .svc-top { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; margin-bottom: var(--sp-4); }
+.set-service .svc-title { font-size: 14px; font-weight: 700; }
+.set-service .svc-status { font-size: 12px; font-weight: 600; color: var(--text-2); margin-left: auto; }
+
+/* 状态点：沿用 app 既有类名 online / offline / unknown */
+.settings-modal-content .status-dot {
+  width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+  position: relative; display: inline-block;
+}
+.settings-modal-content .status-dot.online { background: var(--st-success); }
+.settings-modal-content .status-dot.online::after {
+  content: ""; position: absolute; inset: -4px; border-radius: 50%;
+  border: 2px solid var(--st-success); opacity: 0.4;
+  animation: svcPulse 2s var(--ease) infinite;
+}
+@keyframes svcPulse {
+  0%   { transform: scale(0.6); opacity: 0.5; }
+  100% { transform: scale(1.15); opacity: 0; }
+}
+.settings-modal-content .status-dot.offline { background: var(--text-muted-warm); }
+.settings-modal-content .status-dot.unknown { background: var(--st-warning); }
+
+/* 四格元数据 */
+.svc-meta {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  background: var(--bg-sunken-warm);
+  border-radius: var(--r-control);
+  margin-bottom: var(--sp-4);
+}
+.svc-meta .sm-k {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
+  color: var(--text-muted-warm); margin-bottom: 3px;
+}
+.svc-meta .sm-v {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px; font-weight: 600; color: var(--ink);
+}
+.svc-actions { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.svc-detail { font-size: 12px; color: var(--text-muted-warm); line-height: 1.6; margin-top: var(--sp-3); }
+/* 服务动作结果：独占一行，位于按钮行与说明行之间 */
+.set-service > .test-result { display: block; margin-top: var(--sp-3); }
+/* 启动失败时可能带命令块，这里给内层 div 一点行距 */
+.set-service > .test-result > div { line-height: 1.6; }
+
+/* ------------------------------------------------------------------ 提示条 */
+.set-callout {
+  display: flex; gap: var(--sp-3);
+  padding: var(--sp-4);
+  border-radius: var(--r-control);
+  font-size: 12px; line-height: 1.7;
+  margin-bottom: var(--sp-5);
+}
+.set-callout svg { width: 15px; height: 15px; flex-shrink: 0; margin-top: 2px; }
+.set-callout.info { background: var(--accent-soft-bg); color: var(--text-2); }
+.set-callout.info svg { color: var(--accent-soft-ink); }
+.set-callout.info b { color: var(--accent-soft-ink); }
+.set-callout.warn { background: #FEF3C7; color: var(--text-2); }
+.set-callout.warn svg { color: var(--st-warning); }
+.set-callout.warn b { color: var(--st-warning); }
+.set-callout code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; background: var(--bg-surface-warm);
+  border: 1px solid var(--border-warm); border-radius: 5px;
+  padding: 1px 6px; color: var(--ink);
+}
+
+/* ------------------------------------------------------------------ 模型选型折叠 */
+.set-fold {
+  border: 1px solid var(--border-warm);
+  border-radius: var(--r-control);
+  background: var(--bg-sunken-warm);
+  margin: var(--sp-4) 0 0;
+  overflow: hidden;
+}
+.set-fold > summary {
+  cursor: pointer; list-style: none;
+  display: flex; align-items: center; gap: 7px;
+  padding: 10px var(--sp-4);
+  font-size: 12px; font-weight: 700; color: var(--text-2);
+  user-select: none;
+}
+.set-fold > summary::-webkit-details-marker { display: none; }
+.set-fold > summary svg { width: 13px; height: 13px; color: var(--accent-soft-ink); transition: transform var(--dur) var(--ease); }
+.set-fold[open] > summary svg { transform: rotate(180deg); }
+.set-fold .fold-body {
+  padding: 0 var(--sp-4) var(--sp-4);
+  font-size: 12px; color: var(--text-2); line-height: 1.75;
+}
+.set-fold .fold-body ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; }
+
+/* ------------------------------------------------------------------ 提示词面板 */
+.set-prompt-item { padding: var(--sp-4) 0; border-bottom: 1px solid var(--border-warm); }
+.set-prompt-item:last-child { border-bottom: none; }
+.set-prompt-item .pi-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); margin-bottom: var(--sp-2);
+}
+.set-prompt-item .pi-head label { font-size: 13px; font-weight: 600; }
+
+/* ------------------------------------------------------------------ 数据迁移 */
+.set-transfer { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
+.set-transfer-card {
+  border: 1px solid var(--border-warm);
+  border-radius: var(--r-card);
+  background: var(--bg-surface-warm);
+  padding: var(--sp-5);
+}
+.set-transfer-card .tc-icon {
+  width: 34px; height: 34px; border-radius: 9px;
+  background: var(--bg-sunken-warm); color: var(--text-2);
+  display: grid; place-items: center; margin-bottom: var(--sp-3);
+}
+.set-transfer-card .tc-icon svg { width: 17px; height: 17px; }
+.set-transfer-card h5 { font-size: 13px; font-weight: 700; margin-bottom: var(--sp-2); }
+.set-transfer-card p { font-size: 12px; color: var(--text-2); line-height: 1.7; margin-bottom: var(--sp-4); }
+
+/* ------------------------------------------------------------------ 底部保存栏 */
+.settings-modal-content .settings-footer {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-6);
+  border-top: 1px solid var(--border-warm);
+  background: var(--bg-sunken-warm);
+}
+.settings-footer .draft {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 600; color: var(--text-muted-warm);
+}
+.settings-footer .draft svg { width: 13px; height: 13px; color: var(--st-success); flex-shrink: 0; }
+.settings-footer .draft .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--st-warning); flex-shrink: 0; display: none;
+}
+.settings-footer .draft.is-dirty { color: var(--st-warning); }
+.settings-footer .draft.is-dirty .dot { display: block; }
+.settings-footer .draft.is-dirty svg { display: none; }
+.settings-footer .settings-footer-right {
+  margin-left: auto; display: flex; gap: var(--sp-2); align-items: center;
+}
+
+/* ------------------------------------------------------------------ 分组内禁用态 */
+.set-row.is-off { opacity: 0.55; }
+
+/* ------------------------------------------------------------------ 调试模式收纳 */
+/* 放在按钮样式之后，保证同权重下能覆盖 .set-btn 的 display */
+.debug-only { display: none; }
+body.debug-on .debug-only { display: inline-flex; }
+body.debug-on .debug-only.block { display: block; }
+
+/* ------------------------------------------------------------------ 响应式 */
+@media (max-width: 760px) {
+  .settings-modal-content { width: 96%; max-width: 100%; max-height: 92vh; }
+  .settings-modal-content .settings-layout { grid-template-columns: 1fr; }
+  .settings-modal-content .settings-nav {
+    flex-direction: row;
+    overflow-x: auto; overflow-y: hidden;
+    border-right: none;
+    border-bottom: 1px solid var(--border-warm);
+    padding: var(--sp-3);
+  }
+  .settings-nav .nav-foot { margin-top: 0; padding-top: 0; }
+  .set-row { grid-template-columns: 1fr; gap: 6px; }
+  .set-row .sr-label { padding-top: 0; }
+  .svc-meta { grid-template-columns: repeat(2, 1fr); }
+  .set-transfer { grid-template-columns: 1fr; }
+  .settings-modal-content .settings-content { padding: var(--sp-4); }
+  .settings-modal-content .settings-footer { flex-direction: column; align-items: stretch; }
+  .settings-footer .settings-footer-right { margin-left: 0; }
+  .settings-footer .settings-footer-right .set-btn { flex: 1; }
+}
+
+/* 尊重降低动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .set-panel.active { animation: none; }
+  .settings-modal-content .status-dot.online::after { animation: none; }
+  .settings-modal-content .btn-spinner { animation-duration: 1.6s; }
+}
+
+</style>
+<style>
+/* ============ 预览页专用：把弹窗常显，并加一条说明横幅 ============ */
+.modal { display: flex !important; }
+.preview-banner {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100000;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 16px; background: #1f2937; color: #f9fafb;
+  font: 12px/1.5 "Inter", -apple-system, sans-serif;
+}
+.preview-banner b { color: #5eead4; }
+.preview-banner span { opacity: .78; }
+.preview-banner .hint { margin-left: auto; opacity: .6; }
+</style>
+</head>
+<body>
+<div class="preview-banner">
+  <b>设置页改造效果预览</b>
+  <span>以下为 <code>extension/newtab.html</code> 中设置弹窗的真实标记，样式取自真实的 <code>newtab.css</code> + <code>settings.css</code>，交互由 <code>settings-ui.js</code> 驱动。</span>
+  <span class="hint">切换左侧分组 · 改动任意字段看底部状态 · 试试「重置默认」二次确认</span>
+</div>
+
+  <!-- 设置弹窗 -->
+  <!-- 图标 sprite：仅设置页使用，si- 前缀避免与其它区域冲突 -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="si-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 7h8M17 7h3"/><circle cx="14.5" cy="7" r="2.2"/><path d="M4 17h3M12 17h8"/><circle cx="9.5" cy="17" r="2.2"/></symbol>
+    <symbol id="si-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 5.5v13l10-6.5-10-6.5Z"/></symbol>
+    <symbol id="si-stop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><rect x="6.5" y="6.5" width="11" height="11" rx="2"/></symbol>
+    <symbol id="si-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 3c.6 3.8 2.4 5.9 5.5 6.6-3.1.7-4.9 2.8-5.5 6.6-.6-3.8-2.4-5.9-5.5-6.6C9.6 8.9 11.4 6.8 12 3Z"/><path d="M19 15c.3 1.7 1.1 2.6 2.5 3-1.4.3-2.2 1.2-2.5 3-.3-1.8-1.1-2.7-2.5-3 1.4-.4 2.2-1.3 2.5-3Z"/></symbol>
+    <symbol id="si-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9.5a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16s-2-1.5-2-6.5"/><path d="M10 19a2.2 2.2 0 0 0 4 0"/></symbol>
+    <symbol id="si-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M10 14a4 4 0 0 0 5.7 0l2.6-2.6a4 4 0 0 0-5.7-5.7l-1.2 1.2"/><path d="M14 10a4 4 0 0 0-5.7 0L5.7 12.6a4 4 0 0 0 5.7 5.7l1.2-1.2"/></symbol>
+    <symbol id="si-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 21V3Z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 16h6"/></symbol>
+    <symbol id="si-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0 4-4m-4 4-4-4"/><path d="M4.5 19h15"/></symbol>
+    <symbol id="si-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4m0 0 4 4m-4-4-4 4"/><path d="M4.5 19h15"/></symbol>
+    <symbol id="si-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 7.8h.01"/></symbol>
+    <symbol id="si-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 2.8 19.5h18.4L12 4Z"/><path d="M12 10v4.5M12 17.2h.01"/></symbol>
+    <symbol id="si-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="si-check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 5-5.5"/></symbol>
+    <symbol id="si-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11A8 8 0 0 0 6.3 6.3L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M4 13a8 8 0 0 0 13.7 4.7L20 15.5"/><path d="M20 20v-4.5h-4.5"/></symbol>
+    <symbol id="si-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.8"/></symbol>
+    <symbol id="si-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></symbol>
+    <symbol id="si-chev-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9.5 6 6 6-6"/></symbol>
+  </svg>
+
+  <div id="settingsModal" class="modal">
+    <div class="modal-content settings-modal-content">
+      <div class="modal-header settings-head">
+        <span class="sh-icon"><svg><use href="#si-sliders"/></svg></span>
+        <div>
+          <h3>设置</h3>
+          <div class="sh-sub">配置保存在本机，API Key 与禅道密码不会离开此设备</div>
+        </div>
+        <div class="sh-debug">
+          <label class="checkbox-label" title="显示开发调试用的维护操作">
+            <input type="checkbox" id="debugModeToggle">
+            <span>调试模式</span>
+          </label>
+          <button class="close-btn" id="closeSettings" aria-label="关闭">&times;</button>
+        </div>
+      </div>
+
+      <div class="settings-layout">
+        <!-- 左侧分组导航 -->
+        <nav class="settings-nav" id="settingsNav" role="tablist" aria-label="设置分组">
+          <button type="button" role="tab" class="active" data-panel="p-service" aria-controls="p-service" aria-selected="true" tabindex="0"><svg><use href="#si-play"/></svg>本地服务</button>
+          <button type="button" role="tab" data-panel="p-ai" aria-controls="p-ai" aria-selected="false" tabindex="-1"><svg><use href="#si-spark"/></svg>AI 配置</button>
+          <button type="button" role="tab" data-panel="p-notify" aria-controls="p-notify" aria-selected="false" tabindex="-1"><svg><use href="#si-bell"/></svg>通知推送</button>
+          <button type="button" role="tab" data-panel="p-zentao" aria-controls="p-zentao" aria-selected="false" tabindex="-1"><svg><use href="#si-link"/></svg>禅道集成</button>
+          <button type="button" role="tab" data-panel="p-prompt" aria-controls="p-prompt" aria-selected="false" tabindex="-1"><svg><use href="#si-file"/></svg>提示词</button>
+          <button type="button" role="tab" data-panel="p-data" aria-controls="p-data" aria-selected="false" tabindex="-1"><svg><use href="#si-download"/></svg>数据迁移</button>
+          <div class="nav-foot">
+            <button type="button" role="tab" data-panel="p-about" aria-controls="p-about" aria-selected="false" tabindex="-1"><svg><use href="#si-info"/></svg>关于</button>
+          </div>
+        </nav>
+
+        <!-- 右侧内容 -->
+        <div class="settings-content" id="settingsContent">
+
+          <!-- ========== 本地服务 ========== -->
+          <section class="set-panel active" id="p-service" role="tabpanel" aria-label="本地服务">
+            <h4>本地服务</h4>
+            <p class="set-desc">任务解析、日报生成、禅道同步都在本机后端运行，由插件自动管理，无需手动执行脚本。</p>
+
+            <div class="set-service">
+              <div class="svc-top">
+                <span class="status-dot unknown" id="serviceStatusDot" title="检测中…"></span>
+                <span class="svc-title">工作助手后端</span>
+                <span class="svc-status" id="serviceStatusText">检测中…</span>
+              </div>
+              <div class="svc-meta">
+                <div><div class="sm-k">PID</div><div class="sm-v" id="serviceMetaPid">—</div></div>
+                <div><div class="sm-k">监听地址</div><div class="sm-v" id="serviceMetaPort">—</div></div>
+                <div><div class="sm-k">来源</div><div class="sm-v" id="serviceMetaSource">—</div></div>
+                <div><div class="sm-k">开机自启</div><div class="sm-v" id="serviceMetaAuto">—</div></div>
+              </div>
+              <div class="svc-actions">
+                <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="serviceRestartBtn" style="display:none">
+                  <svg><use href="#si-refresh"/></svg><span class="btn-label">重启</span>
+                </button>
+                <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="serviceStartBtn">
+                  <svg><use href="#si-play"/></svg><span class="btn-label">启动服务</span>
+                </button>
+                <button type="button" class="set-btn set-btn-danger set-btn-sm" id="serviceStopBtn" style="display:none">
+                  <svg><use href="#si-stop"/></svg><span class="btn-label">停止服务</span>
+                </button>
+                <label class="checkbox-label">
+                  <input type="checkbox" id="serviceDisableAutoStart" data-no-track>
+                  <span>同时停用开机自启</span>
+                </label>
+              </div>
+              <div id="serviceActionResult" class="test-result"></div>
+              <div class="svc-detail" id="serviceStatusDetail"></div>
+            </div>
+
+            <div class="set-row" id="autoStartRow">
+              <div class="sr-label">开机自启<small>登录 macOS 时自动启动</small></div>
+              <div class="sr-control">
+                <div class="row">
+                  <label class="set-switch" id="autoStartSwitch">
+                    <input type="checkbox" id="autoStartToggle" data-no-track>
+                    <span class="set-switch-track"></span>
+                    <span class="set-switch-text" id="autoStartToggleText">检测中…</span>
+                  </label>
+                </div>
+                <span class="input-hint" id="autoStartHint">开启后无需打开浏览器，早间提醒与晚间日报也会准时生成</span>
+                <div id="autoStartResult" class="test-result"></div>
+              </div>
+            </div>
+
+            <div class="set-callout info">
+              <svg><use href="#si-info"/></svg>
+              <div>如果浏览器无法自动拉起后端，可在终端执行一次 <code>npm run setup:auto-start</code> 注册 Native Messaging 宿主并安装开机自启——此后后端由系统直接管理，与浏览器和加载位置是否变化无关。</div>
+            </div>
+          </section>
+
+          <!-- ========== AI 配置 ========== -->
+          <section class="set-panel" id="p-ai" role="tabpanel" aria-label="AI 配置">
+            <h4>AI 配置</h4>
+            <p class="set-desc">支持 14 家 OpenAI 兼容服务商，切换后自动填入推荐接口地址与模型，可直接修改。</p>
+
+            <div class="set-row">
+              <div class="sr-label">API 服务<small>按延迟与成本推荐</small></div>
+              <div class="sr-control">
+                <select class="set-select" id="aiProvider" style="max-width:340px">
+                  <optgroup label="── 国内主流 ──">
+                    <option value="zhipu">智谱 GLM（推荐）</option>
+                    <option value="deepseek">DeepSeek 深度求索</option>
+                    <option value="moonshot">月之暗面 Kimi</option>
+                    <option value="qwen">阿里通义千问 DashScope</option>
+                    <option value="doubao">字节豆包（火山方舟）</option>
+                    <option value="ernie">百度文心一言</option>
+                    <option value="minimax">MiniMax</option>
+                    <option value="siliconflow">硅基流动 SiliconFlow</option>
+                    <option value="together">Together AI（聚合）</option>
+                  </optgroup>
+                  <optgroup label="── 海外 / 其他 ──">
+                    <option value="openai">OpenAI 官方</option>
+                    <option value="anthropic">Anthropic Claude</option>
+                    <option value="openrouter">OpenRouter（聚合）</option>
+                    <option value="ollama">Ollama 本地部署</option>
+                    <option value="custom">自定义（OpenAI 兼容）</option>
+                  </optgroup>
+                </select>
+                <span class="input-hint" id="aiProviderHint">选择后会自动填入推荐接口地址与模型，可直接修改</span>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">API Key <span class="req">*</span></div>
+              <div class="sr-control">
+                <div class="row">
+                  <input type="password" class="set-input" id="apiKey" placeholder="请输入 API Key" autocomplete="off" style="max-width:340px">
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm" data-pw-toggle="apiKey">
+                    <svg><use href="#si-eye"/></svg><span class="btn-label">显示</span>
+                  </button>
+                </div>
+                <span class="input-hint" id="apiKeyHint"><svg style="width:11px;height:11px;vertical-align:-1px"><use href="#si-lock"/></svg> 仅保存在本机 <code>.env</code>，不同步、不上传</span>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">接口地址</div>
+              <div class="sr-control">
+                <input type="text" class="set-input" id="apiBaseUrl" placeholder="https://open.bigmodel.cn/api/paas/v4/" spellcheck="false" style="max-width:340px">
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">模型</div>
+              <div class="sr-control">
+                <input type="text" class="set-input" id="aiModel" placeholder="glm-4-flash" spellcheck="false" style="max-width:340px">
+                <span class="input-hint" id="aiModelHint"></span>
+              </div>
+            </div>
+
+            <details class="set-fold">
+              <summary><svg><use href="#si-chev-down"/></svg>模型怎么选？</summary>
+              <div class="fold-body">
+                <ul>
+                  <li><strong>任务解析 / 分类</strong>（本插件主力场景）：选<strong>轻量快速模型</strong>即可，如 glm-4-flash、deepseek-chat、qwen-turbo —— 响应快、成本低、JSON 遵循度高</li>
+                  <li><strong>日报 / 周报生成</strong>：可选更强的推理模型，如 glm-4-plus、deepseek-reasoner，文字组织更好</li>
+                  <li><strong>本地隐私</strong>：选 Ollama + <code>qwen3:8b</code> 或 <code>llama3.1</code>，数据不出本机（接口地址填 <code>http://127.0.0.1:11434/v1</code>，Key 随便填）</li>
+                  <li>所有国内供应商均兼容 OpenAI 协议，切换服务商通常只需换 Key</li>
+                </ul>
+              </div>
+            </details>
+
+            <div class="set-row">
+              <div class="sr-label">连接测试</div>
+              <div class="sr-control">
+                <div class="row">
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="testAi">
+                    <svg><use href="#si-check-circle"/></svg><span class="btn-label">测试连接</span>
+                  </button>
+                  <span id="aiTestResult" class="test-result"></span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ========== 通知推送 ========== -->
+          <section class="set-panel" id="p-notify" role="tabpanel" aria-label="通知推送">
+            <h4>通知推送</h4>
+            <p class="set-desc">定时生成日报周报，并推送到系统通知或群机器人。</p>
+
+            <div class="set-row">
+              <div class="sr-label">早间提醒</div>
+              <div class="sr-control">
+                <div class="row">
+                  <input type="number" class="set-input" id="morningHour" min="0" max="23" value="9" style="width:80px">
+                  <span class="input-hint">点，提醒查看今日任务</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">晚间日报</div>
+              <div class="sr-control">
+                <div class="row">
+                  <input type="number" class="set-input" id="eveningHour" min="0" max="23" value="21" style="width:80px">
+                  <span class="input-hint">点，生成本日工作总结</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">Webhook<small>可选</small></div>
+              <div class="sr-control">
+                <input type="text" class="set-input" id="webhookUrl" placeholder="飞书 / 钉钉 / 企业微信 Webhook 地址" style="max-width:340px">
+                <div class="row">
+                  <select class="set-select" id="webhookType" style="max-width:150px">
+                    <option value="generic">通用</option>
+                    <option value="feishu">飞书</option>
+                    <option value="dingtalk">钉钉</option>
+                    <option value="wecom">企业微信</option>
+                  </select>
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="testWebhook">
+                    <span class="btn-label">测试推送</span>
+                  </button>
+                  <span id="webhookTestResult" class="test-result"></span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ========== 禅道集成 ========== -->
+          <section class="set-panel" id="p-zentao" role="tabpanel" aria-label="禅道集成">
+            <h4>禅道集成</h4>
+
+            <div class="set-row">
+              <div class="sr-label">启用同步</div>
+              <div class="sr-control">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="zentaoEnabled">
+                  <span>任务与 Bug 状态变更时同步到禅道</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">API 地址 <span class="req">*</span></div>
+              <div class="sr-control">
+                <input type="text" class="set-input" id="zentaoUrl" placeholder="http://your-zentao.com" spellcheck="false" style="max-width:340px">
+                <span class="input-hint">从浏览器地址栏复制，如 http://your-zentao-host:port</span>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">账号 <span class="req">*</span></div>
+              <div class="sr-control">
+                <input type="text" class="set-input" id="zentaoUsername" placeholder="your-account" style="max-width:340px">
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">密码 <span class="req">*</span></div>
+              <div class="sr-control">
+                <div class="row">
+                  <input type="password" class="set-input" id="zentaoPassword" placeholder="your-password" autocomplete="off" style="max-width:340px">
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm" data-pw-toggle="zentaoPassword">
+                    <svg><use href="#si-eye"/></svg><span class="btn-label">显示</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">执行 ID<small>选填</small></div>
+              <div class="sr-control">
+                <input type="text" class="set-input" id="zentaoCreateTaskUrl" placeholder="留空即可" style="max-width:340px">
+                <span class="input-hint">默认执行，可留空。留空时在「添加任务」弹窗里选择所属执行，列表会自动拉取禅道账号下的全部执行。</span>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">操作</div>
+              <div class="sr-control">
+                <div class="row">
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="testZentao">
+                    <span class="btn-label">测试连接</span>
+                  </button>
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm debug-only" id="updateZentaoUsers">
+                    <span class="btn-label">更新用户列表</span>
+                  </button>
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="manualSyncButton">
+                    <svg><use href="#si-refresh"/></svg><span class="btn-label">立即同步</span>
+                  </button>
+                </div>
+                <span id="zentaoTestResult" class="test-result"></span>
+                <span id="zentaoUsersResult" class="test-result"></span>
+              </div>
+            </div>
+          </section>
+
+          <!-- ========== 提示词 ========== -->
+          <section class="set-panel" id="p-prompt" role="tabpanel" aria-label="提示词">
+            <h4>提示词</h4>
+            <p class="set-desc">自定义 AI 的思考方式，与上方配置一起随「保存配置」写入。留空则使用系统默认提示词。</p>
+
+            <div class="set-callout info">
+              <svg><use href="#si-info"/></svg>
+              <div>修改时请保留「要求 JSON 返回格式」的说明，否则可能导致任务解析或报告生成失败。「恢复默认」会把该输入框清空，即回到系统默认。</div>
+            </div>
+
+            <div class="set-prompt-item">
+              <div class="pi-head">
+                <label for="promptAddTask">添加任务分析提示词</label>
+                <button type="button" class="set-btn set-btn-ghost set-btn-sm" id="resetAddTaskPromptBtn">
+                  <span class="btn-label">恢复默认</span>
+                </button>
+              </div>
+              <textarea class="set-textarea" id="promptAddTask" rows="4" placeholder="正在加载…"></textarea>
+            </div>
+
+            <div class="set-prompt-item">
+              <div class="pi-head">
+                <label for="promptDaily">日报提示词</label>
+                <button type="button" class="set-btn set-btn-ghost set-btn-sm" id="resetDailyPromptBtn">
+                  <span class="btn-label">恢复默认</span>
+                </button>
+              </div>
+              <textarea class="set-textarea" id="promptDaily" rows="4" placeholder="正在加载…"></textarea>
+            </div>
+
+            <div class="set-prompt-item">
+              <div class="pi-head">
+                <label for="promptWeekly">周报提示词</label>
+                <button type="button" class="set-btn set-btn-ghost set-btn-sm" id="resetWeeklyPromptBtn">
+                  <span class="btn-label">恢复默认</span>
+                </button>
+              </div>
+              <textarea class="set-textarea" id="promptWeekly" rows="4" placeholder="正在加载…"></textarea>
+            </div>
+
+            <div class="set-prompt-item">
+              <div class="pi-head">
+                <label for="promptMonthly">月报提示词</label>
+                <button type="button" class="set-btn set-btn-ghost set-btn-sm" id="resetMonthlyPromptBtn">
+                  <span class="btn-label">恢复默认</span>
+                </button>
+              </div>
+              <textarea class="set-textarea" id="promptMonthly" rows="4" placeholder="正在加载…"></textarea>
+            </div>
+          </section>
+
+          <!-- ========== 数据迁移 ========== -->
+          <section class="set-panel" id="p-data" role="tabpanel" aria-label="数据迁移">
+            <h4>数据迁移</h4>
+            <p class="set-desc">导出全部配置用于换机或备份，导入后即可在新设备恢复工作环境。</p>
+
+            <div class="set-callout warn">
+              <svg><use href="#si-alert"/></svg>
+              <div>出于安全考虑，导出的文件<b>不包含</b> API Key 与禅道密码——换机后需要重新填写这两项。</div>
+            </div>
+
+            <div class="set-transfer">
+              <div class="set-transfer-card">
+                <div class="tc-icon"><svg><use href="#si-download"/></svg></div>
+                <h5>导出配置</h5>
+                <p>保存 AI、通知、禅道、提示词等全部设置为一个 JSON 文件。</p>
+                <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="exportConfigBtn">
+                  <svg><use href="#si-download"/></svg><span class="btn-label">导出配置文件</span>
+                </button>
+              </div>
+              <div class="set-transfer-card">
+                <div class="tc-icon"><svg><use href="#si-upload"/></svg></div>
+                <h5>导入配置</h5>
+                <p>选择此前导出的 JSON 文件，覆盖当前设置（Key 与密码保留为空待填）。</p>
+                <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="importConfigBtn">
+                  <svg><use href="#si-upload"/></svg><span class="btn-label">选择文件导入</span>
+                </button>
+              </div>
+            </div>
+            <input type="file" id="importConfigFile" accept="application/json,.json" style="display:none">
+            <span id="configTransferResult" class="test-result"></span>
+          </section>
+
+          <!-- ========== 关于 ========== -->
+          <section class="set-panel" id="p-about" role="tabpanel" aria-label="关于">
+            <h4>关于</h4>
+            <p class="set-desc">工作助手 v1.0.0 · 界面设计方案 v1.0</p>
+
+            <div class="set-row">
+              <div class="sr-label">本地服务</div>
+              <div class="sr-control"><span class="input-hint">127.0.0.1:3721 · Node 后端 · 数据全部留在本机</span></div>
+            </div>
+            <div class="set-row">
+              <div class="sr-label">浏览器扩展</div>
+              <div class="sr-control"><span class="input-hint">Manifest V3 · unpacked 开发模式</span></div>
+            </div>
+            <div class="set-row">
+              <div class="sr-label">界面</div>
+              <div class="sr-control"><span class="input-hint">设计令牌 v1.0 · WCAG AA 对比度 · 全键盘可达</span></div>
+            </div>
+            <div class="set-row">
+              <div class="sr-label">反馈</div>
+              <div class="sr-control"><span class="input-hint">GitHub · rskdwypy-pixel/workAssistant</span></div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="settings-footer">
+        <span class="draft" id="draftIndicator">
+          <svg><use href="#si-check-circle"/></svg><span class="dot"></span><span id="draftText">所有更改已保存</span>
+        </span>
+        <div class="settings-footer-right">
+          <button type="button" class="set-btn set-btn-ghost" id="resetSettings">
+            <svg><use href="#si-refresh"/></svg><span class="btn-label">重置默认</span>
+          </button>
+          <button type="button" class="set-btn set-btn-primary" id="saveSettings">
+            <svg><use href="#si-check"/></svg><span class="btn-label">保存配置</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ---------- 环境桩：本页不加载 newtab.js，只补 settings-ui.js 所需接口 ---------- */
+window.chrome = { runtime: { sendMessage: function () {
+  return Promise.resolve({ success: false, alive: false, reason: '预览环境：未连接本地后端' });
+} } };
+window.Toast = {
+  success: function (m) { previewToast(m, 'success'); },
+  error:   function (m) { previewToast(m, 'error'); },
+  info:    function (m) { previewToast(m, 'info'); },
+  warning: function (m) { previewToast(m, 'warning'); }
+};
+function previewToast(msg, type) {
+  var box = document.getElementById('toastContainer') || (function () {
+    var d = document.createElement('div'); d.id = 'toastContainer'; d.className = 'toast-container';
+    document.body.appendChild(d); return d;
+  })();
+  var el = document.createElement('div');
+  el.className = 'toast toast-' + (type === 'info' ? 'warning' : type);
+  el.textContent = msg;
+  box.appendChild(el);
+  setTimeout(function () { el.classList.add('removing'); setTimeout(function () { el.remove(); }, 220); }, 2400);
+}
+window.loadSettings = function () { /* 预览：保留当前值，不重置 */ };
+window.checkServiceStatus = function () { return Promise.resolve(); };
+window.__previewErrors = [];
+window.addEventListener('error', function (e) { window.__previewErrors.push(String(e.message)); });
+</script>
+<script>
+/* ============ 由 extension/settings-ui.js 内联（本次新增，真实逻辑，未改动） ============ */
+/* ============================================================================
+   工作助手 · 设置页 UI 层
+   ----------------------------------------------------------------------------
+   职责边界：只负责「展示与交互」
+     · 左侧分组导航（含 ↑↓ 方向键、roving tabindex、aria-selected）
+     · 底部保存栏的脏状态跟踪（有 N 项未保存的修改 / 保存按钮启用态）
+     · 密码字段显示切换
+     · 调试模式对 body 类的同步（决定 .debug-only 元素是否可见）
+     · 「重置默认」二次确认（防误触丢配置）
+
+   数据读写仍由 newtab.js 负责（loadSettings / saveSettings / 校验逻辑）。
+   协作方式：newtab.js 在合适的时机调用 window.settingsUI 上的钩子。
+     · onOpen()          打开设置后调用 → 回到默认分组并记录「已保存」基线
+     · refreshBaseline() 配置加载 / 保存 / 重置完成后调用 → 重设基线
+     · showGroup(id)     由外部指定要打开的分组（顶栏「提示词」按钮用）
+   ============================================================================ */
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  var modal = $('settingsModal');
+  var nav = $('settingsNav');
+  var content = $('settingsContent');
+  var draftBox = $('draftIndicator');
+  var draftText = $('draftText');
+  var resetBtn = $('resetSettings');
+  var saveBtn = $('saveSettings');
+  var debugToggle = $('debugModeToggle');
+
+  if (!modal || !nav || !content) return;   // 设置弹窗不存在时静默退出
+
+  var navButtons = Array.prototype.slice.call(nav.querySelectorAll('button[data-panel]'));
+  var panels = Array.prototype.slice.call(content.querySelectorAll('.set-panel'));
+  var baseline = [];
+
+  /* ============================================================
+     分组切换
+     ============================================================ */
+  function setBtnLabel(btn, text) {
+    if (!btn) return;
+    var label = btn.querySelector('.btn-label');
+    if (label) label.textContent = text;
+    else btn.textContent = text;
+  }
+
+  function showGroup(panelId, shouldFocus) {
+    var target = null;
+    navButtons.forEach(function (b) {
+      var active = b.getAttribute('data-panel') === panelId;
+      if (active) target = b;
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-selected', active ? 'true' : 'false');
+      b.setAttribute('tabindex', active ? '0' : '-1');
+    });
+    if (!target) return;
+    panels.forEach(function (p) {
+      p.classList.toggle('active', p.id === panelId);
+    });
+    if (shouldFocus) target.focus();
+    // 切换分组后内容区回到顶部，避免继承上一组的滚动位置
+    content.scrollTop = 0;
+  }
+
+  navButtons.forEach(function (b) {
+    b.addEventListener('click', function () {
+      showGroup(b.getAttribute('data-panel'));
+    });
+  });
+
+  // 键盘导航：↑↓ 在分组间移动，Home/End 跳到首尾
+  nav.addEventListener('keydown', function (e) {
+    var idx = navButtons.indexOf(document.activeElement);
+    if (idx < 0) return;
+    var next = -1;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = (idx + 1) % navButtons.length;
+    else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = (idx - 1 + navButtons.length) % navButtons.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = navButtons.length - 1;
+    if (next >= 0) {
+      e.preventDefault();
+      showGroup(navButtons[next].getAttribute('data-panel'), true);
+    }
+  });
+
+  /* ============================================================
+     脏状态跟踪 —— 底部保存栏
+     ============================================================ */
+  function fields() {
+    // 排除两类控件：
+    //  · 文件选择框：值不是「配置内容」，且选过文件后无法回到空值
+    //  · data-no-track：动作开关（如「同时停用开机自启」），不随保存写入配置
+    return Array.prototype.slice.call(
+      content.querySelectorAll('input:not([type="file"]):not([data-no-track]), select, textarea')
+    );
+  }
+
+  function valueOf(el) {
+    return el.type === 'checkbox' ? el.checked : el.value;
+  }
+
+  function labelOf(el) {
+    var row = el.closest('.set-row') || el.closest('.set-prompt-item');
+    if (!row) return el.id || '未命名字段';
+    var label = row.querySelector('.sr-label') || row.querySelector('.pi-head label');
+    if (!label) return el.id || '未命名字段';
+    // 去掉必填星号与副标题，只留主标签
+    var clone = label.cloneNode(true);
+    Array.prototype.forEach.call(clone.querySelectorAll('small, .req'), function (n) { n.remove(); });
+    return clone.textContent.trim();
+  }
+
+  function refreshBaseline() {
+    baseline = fields().map(valueOf);
+    renderFooter();
+  }
+
+  function renderFooter() {
+    var items = fields();
+    var changed = [];
+    items.forEach(function (el, i) {
+      if (valueOf(el) !== baseline[i]) changed.push(labelOf(el));
+    });
+
+    if (changed.length) {
+      draftBox.classList.add('is-dirty');
+      draftText.textContent = '有 ' + changed.length + ' 项未保存的修改';
+      draftBox.title = '未保存：' + changed.join('、');
+      saveBtn.disabled = false;
+    } else {
+      draftBox.classList.remove('is-dirty');
+      draftText.textContent = '所有更改已保存';
+      draftBox.title = '';
+      saveBtn.disabled = true;
+    }
+  }
+
+  fields().forEach(function (el) {
+    el.addEventListener('input', renderFooter);
+    el.addEventListener('change', renderFooter);
+  });
+
+  /* ============================================================
+     密码字段显示切换
+     ============================================================ */
+  Array.prototype.forEach.call(
+    modal.querySelectorAll('[data-pw-toggle]'),
+    function (btn) {
+      btn.addEventListener('click', function () {
+        var input = $(btn.getAttribute('data-pw-toggle'));
+        if (!input) return;
+        var show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        setBtnLabel(btn, show ? '隐藏' : '显示');
+        input.focus();
+      });
+    }
+  );
+
+  /* ============================================================
+     调试模式对 body 类的影响（.debug-only 元素是否可见）
+     状态本身由 newtab.js 维护，这里只在打开面板时做一次同步，
+     避免两边各写一份造成的状态漂移。
+     ============================================================ */
+  function syncDebugClass() {
+    var on = !!(debugToggle && debugToggle.checked);
+    document.body.classList.toggle('debug-on', on);
+  }
+
+  /* ============================================================
+     「重置默认」二次确认
+     ============================================================ */
+  var resetArmed = false;
+  var resetTimer = null;
+
+  function disarmReset() {
+    resetArmed = false;
+    if (resetTimer) { clearTimeout(resetTimer); resetTimer = null; }
+    setBtnLabel(resetBtn, '重置默认');
+    resetBtn.classList.remove('set-btn-danger');
+    resetBtn.classList.add('set-btn-ghost');
+    resetBtn.removeAttribute('aria-pressed');
+  }
+
+  resetBtn.addEventListener('click', function () {
+    if (!resetArmed) {
+      resetArmed = true;
+      setBtnLabel(resetBtn, '确认重置？');
+      resetBtn.classList.remove('set-btn-ghost');
+      resetBtn.classList.add('set-btn-danger');
+      resetBtn.setAttribute('aria-pressed', 'true');
+      resetTimer = setTimeout(disarmReset, 3000);
+      return;
+    }
+    disarmReset();
+    var ok = false;
+    try {
+      localStorage.removeItem('workAssistantConfig');
+      ok = true;
+    } catch (err) {
+      console.warn('[设置] 重置本地配置失败:', err);
+    }
+    if (typeof loadSettings === 'function') loadSettings();
+    refreshBaseline();
+    if (typeof Toast !== 'undefined') {
+      ok ? Toast.success('已恢复默认设置') : Toast.error('重置失败，请重试');
+    }
+  });
+
+  // 点到别处自动取消「确认重置」状态，避免长时间停留在危险态
+  document.addEventListener('click', function (e) {
+    if (resetArmed && !resetBtn.contains(e.target)) disarmReset();
+  });
+
+  /* ============================================================
+     对外钩子
+     ============================================================ */
+  function onOpen() {
+    showGroup('p-service');
+    disarmReset();
+    syncDebugClass();
+    refreshBaseline();
+  }
+
+  // 服务动作的结果展示在服务卡内，样式收敛到一处
+  var serviceResult = $('serviceActionResult');
+  if (serviceResult) serviceResult.classList.add('test-result');
+
+  window.settingsUI = {
+    onOpen: onOpen,
+    refreshBaseline: refreshBaseline,
+    showGroup: showGroup
+  };
+})();
+
+</script>
+<script>
+/* ============================================================================
+   预览驱动（仅用于本预览页，不属于扩展代码）
+   目的：在浏览器里模拟一次「后端状态已返回」之后的渲染，
+        让设置页看起来处于真实使用状态，方便肉眼验收视觉与交互。
+   ============================================================================ */
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+
+  /* 本地服务卡：按「运行中」渲染一次，展示四格元数据的排版 */
+  function renderServiceCard() {
+    var dot = $('serviceStatusDot');
+    if (dot) { dot.className = 'status-dot online'; dot.title = '本地服务运行中'; }
+    var st = $('serviceStatusText');
+    if (st) st.textContent = '运行中 · 已运行 2 小时 14 分';
+    var v;
+    v = $('serviceMetaPid');    if (v) v.textContent = '49532';
+    v = $('serviceMetaPort');   if (v) v.textContent = '127.0.0.1:3721';
+    v = $('serviceMetaSource'); if (v) v.textContent = '手动启动';
+    // 「已注册」与「launchd 已加载」是两件事，这里按本机真实状态显示后者
+    v = $('serviceMetaAuto');   if (v) v.textContent = '待下次登录';
+    v = $('serviceRestartBtn'); if (v) v.style.display = '';
+    v = $('serviceStopBtn');    if (v) v.style.display = '';
+    v = $('serviceStartBtn');   if (v) v.style.display = 'none';
+    var d = $('serviceStatusDetail');
+    if (d) d.textContent = '已注册登录项，将在下次登录时生效；点「停止服务」时会一并停用。';
+
+    // 开机自启开关：按「已注册但 launchd 尚未加载」渲染 ——
+    // 这正是用户反馈「看不到系统里的开机自启项」时的真实状态。
+    var tg = $('autoStartToggle');
+    if (tg) { tg.checked = true; tg.disabled = false; }
+    var tt = $('autoStartToggleText');
+    if (tt) tt.textContent = '已开启（待下次登录生效）';
+    var th = $('autoStartHint');
+    if (th) th.textContent = '已注册为 macOS 登录项（LaunchAgent）。系统不会弹窗确认；'
+      + '可执行 launchctl print gui/$(id -u)/com.workassistant.backend 核对。';
+  }
+
+  var DEMO = {
+    apiKey: 'sk-************************',
+    apiBaseUrl: 'https://open.bigmodel.cn/api/paas/v4/',
+    aiModel: 'glm-4-flash',
+    morningHour: '9',
+    eveningHour: '21',
+    zentaoUrl: 'http://zentao.company.com',
+    zentaoUsername: 'lichen',
+    zentaoPassword: 'zentao-pwd-2026',
+    zentaoCreateTaskUrl: '',
+    promptAddTask: '分析下面这段工作记录，提取任务标题、类型（任务/Bug）、优先级、估时与负责人。要求严格返回 JSON 格式，字段缺失时填 null。',
+    promptDaily: '根据今日完成的任务与工时记录，生成结构化日报：概述 / 完成项 / 进行中 / 风险与阻塞 / 明日计划。',
+    promptWeekly: '汇总本周任务，按项目归类，突出产出与关键数据，简述下周重点。',
+    promptMonthly: '生成本月工作总结：整体进展、趋势分析（完成量 / Bug 率 / 工时分布）、下月重点计划。'
+  };
+
+  function applyDemoValues() {
+    Object.keys(DEMO).forEach(function (id) {
+      var el = $(id);
+      if (el) el.value = DEMO[id];
+    });
+    var z = $('zentaoEnabled');
+    if (z) z.checked = true;
+    renderServiceCard();
+  }
+
+  applyDemoValues();
+  // 预览里的「重置默认」回到示例默认值，方便观察按钮与底部状态条的联动
+  window.loadSettings = applyDemoValues;
+
+  if (window.settingsUI) window.settingsUI.onOpen();
+})();
+</script>
+</body>
+</html>

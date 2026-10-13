@@ -10,6 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="newtab.css">
   <link rel="stylesheet" href="sync.css">
+  <link rel="stylesheet" href="settings.css">
   <style>
     .today-work-time {
       margin-left: 12px;
@@ -713,237 +714,436 @@
   </div>
 
   <!-- 设置弹窗 -->
+  <!-- 图标 sprite：仅设置页使用，si- 前缀避免与其它区域冲突 -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="si-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 7h8M17 7h3"/><circle cx="14.5" cy="7" r="2.2"/><path d="M4 17h3M12 17h8"/><circle cx="9.5" cy="17" r="2.2"/></symbol>
+    <symbol id="si-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 5.5v13l10-6.5-10-6.5Z"/></symbol>
+    <symbol id="si-stop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><rect x="6.5" y="6.5" width="11" height="11" rx="2"/></symbol>
+    <symbol id="si-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 3c.6 3.8 2.4 5.9 5.5 6.6-3.1.7-4.9 2.8-5.5 6.6-.6-3.8-2.4-5.9-5.5-6.6C9.6 8.9 11.4 6.8 12 3Z"/><path d="M19 15c.3 1.7 1.1 2.6 2.5 3-1.4.3-2.2 1.2-2.5 3-.3-1.8-1.1-2.7-2.5-3 1.4-.4 2.2-1.3 2.5-3Z"/></symbol>
+    <symbol id="si-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9.5a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16s-2-1.5-2-6.5"/><path d="M10 19a2.2 2.2 0 0 0 4 0"/></symbol>
+    <symbol id="si-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M10 14a4 4 0 0 0 5.7 0l2.6-2.6a4 4 0 0 0-5.7-5.7l-1.2 1.2"/><path d="M14 10a4 4 0 0 0-5.7 0L5.7 12.6a4 4 0 0 0 5.7 5.7l1.2-1.2"/></symbol>
+    <symbol id="si-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 21V3Z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 16h6"/></symbol>
+    <symbol id="si-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0 4-4m-4 4-4-4"/><path d="M4.5 19h15"/></symbol>
+    <symbol id="si-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4m0 0 4 4m-4-4-4 4"/><path d="M4.5 19h15"/></symbol>
+    <symbol id="si-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 7.8h.01"/></symbol>
+    <symbol id="si-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 2.8 19.5h18.4L12 4Z"/><path d="M12 10v4.5M12 17.2h.01"/></symbol>
+    <symbol id="si-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="si-check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 5-5.5"/></symbol>
+    <symbol id="si-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11A8 8 0 0 0 6.3 6.3L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M4 13a8 8 0 0 0 13.7 4.7L20 15.5"/><path d="M20 20v-4.5h-4.5"/></symbol>
+    <symbol id="si-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.8"/></symbol>
+    <symbol id="si-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></symbol>
+    <symbol id="si-chev-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9.5 6 6 6-6"/></symbol>
+  </svg>
+
   <div id="settingsModal" class="modal">
     <div class="modal-content settings-modal-content">
-      <div class="modal-header">
-        <div style="display: flex; align-items: center; gap: 12px;">
-          <h3>⚙️ 设置</h3>
-          <label class="checkbox-label" style="font-size: 12px; color: #8b949e;">
+      <div class="modal-header settings-head">
+        <span class="sh-icon"><svg><use href="#si-sliders"/></svg></span>
+        <div>
+          <h3>设置</h3>
+          <div class="sh-sub">配置保存在本机，API Key 与禅道密码不会离开此设备</div>
+        </div>
+        <div class="sh-debug">
+          <label class="checkbox-label" title="显示开发调试用的维护操作">
             <input type="checkbox" id="debugModeToggle">
             <span>调试模式</span>
           </label>
-        </div>
-        <button class="close-btn" id="closeSettings">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="settings-grid">
-        <!-- 本地服务管理（由插件直接控制，无需手动跑 start.sh/stop.sh） -->
-        <div class="settings-section settings-section-full" style="margin-bottom: 24px;">
-          <h4 style="display: flex; align-items: center; gap: 8px;">🖥️ 本地服务
-            <span id="serviceStatusDot" class="status-dot unknown" title="检测中..."></span>
-          </h4>
-          <div style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary,#f9fafb);">
-            <div style="font-size:13px;color:var(--text-secondary);" id="serviceStatusText">检测中…</div>
-            <div id="serviceStatusDetail"
-              style="font-size:12px;color:var(--text-tertiary,#9ca3af);margin-top:6px;line-height:1.6;"></div>
-            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center;">
-              <button id="serviceStartBtn" class="btn-secondary" style="padding:5px 12px;font-size:12px;">▶️ 启动服务</button>
-              <button id="serviceStopBtn" class="btn-secondary"
-                style="padding:5px 12px;font-size:12px;border-color:#fca5a5;color:#dc2626;">⏹️ 停止服务</button>
-              <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-secondary);cursor:pointer;">
-                <input type="checkbox" id="serviceDisableAutoStart" style="cursor:pointer;">
-                同时停用开机自启
-              </label>
-            </div>
-            <div id="serviceActionResult" class="test-result"></div>
-          </div>
-        </div>
-
-        <div class="settings-section">
-          <h4>🤖 AI 配置</h4>
-          <div class="settings-item">
-            <label>API 服务</label>
-            <select id="aiProvider">
-              <optgroup label="── 国内主流 ──">
-                <option value="zhipu">智谱 GLM（推荐）</option>
-                <option value="deepseek">DeepSeek 深度求索</option>
-                <option value="moonshot">月之暗面 Kimi</option>
-                <option value="qwen">阿里通义千问 DashScope</option>
-                <option value="doubao">字节豆包（火山方舟）</option>
-                <option value="ernie">百度文心一言</option>
-                <option value="minimax">MiniMax</option>
-                <option value="siliconflow">硅基流动 SiliconFlow</option>
-                <option value="together">Together AI（聚合）</option>
-              </optgroup>
-              <optgroup label="── 海外 / 其他 ──">
-                <option value="openai">OpenAI 官方</option>
-                <option value="anthropic">Anthropic Claude</option>
-                <option value="openrouter">OpenRouter（聚合）</option>
-                <option value="ollama">Ollama 本地部署</option>
-                <option value="custom">自定义（OpenAI 兼容）</option>
-              </optgroup>
-            </select>
-            <span class="input-hint" id="aiProviderHint">选择后会自动填入推荐接口地址与模型，可直接修改</span>
-          </div>
-          <div class="settings-item">
-            <label>API Key <span class="required">*</span></label>
-            <input type="password" id="apiKey" placeholder="请输入 API Key" autocomplete="off">
-            <span class="input-hint" id="apiKeyHint">🔒 密钥仅保存在本机 <code>.env</code>，不会同步或上传</span>
-          </div>
-          <div class="settings-item">
-            <label>API 地址</label>
-            <input type="text" id="apiBaseUrl" placeholder="https://open.bigmodel.cn/api/paas/v4/" spellcheck="false">
-          </div>
-          <div class="settings-item">
-            <label>模型</label>
-            <input type="text" id="aiModel" placeholder="glm-4-flash" spellcheck="false">
-            <span class="input-hint" id="aiModelHint"></span>
-          </div>
-          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-            <button id="testAi" class="btn-secondary">🧪 测试连接</button>
-            <button id="aiModelHelpBtn" class="btn-secondary">📖 模型怎么选？</button>
-          </div>
-          <span id="aiTestResult" class="test-result"></span>
-          <div id="aiModelHelp" class="backup-info" style="display:none; margin-top: 12px; padding: 12px; background: rgba(56,139,253,.08); border-radius: 6px; font-size: 12px; color: var(--text-muted); line-height: 1.7;">
-            <p style="margin:0 0 6px;"><strong>选型建议</strong></p>
-            <ul style="margin:0; padding-left:18px;">
-              <li><strong>任务解析 / 分类</strong>（本插件主力场景）：选<strong>轻量快速模型</strong>即可，如 glm-4-flash、deepseek-chat、qwen-turbo —— 响应快、成本低、JSON 遵循度高</li>
-              <li><strong>日报 / 周报生成</strong>：可选更强的推理模型，如 glm-4-plus、deepseek-reasoner，文字组织更好</li>
-              <li><strong>本地隐私</strong>：选 Ollama + <code>qwen3:8b</code> 或 <code>llama3.1</code>，数据不出本机（接口地址填 <code>http://127.0.0.1:11434/v1</code>，Key 随便填）</li>
-              <li>所有国内供应商均兼容 OpenAI 协议，切换服务商通常只需换 Key</li>
-            </ul>
-          </div>
-        </div>
-
-        <div class="settings-section">
-          <h4>🔔 通知配置</h4>
-          <div class="settings-item">
-            <label>早间提醒时间</label>
-            <input type="number" id="morningHour" min="0" max="23" value="9">
-          </div>
-          <div class="settings-item">
-            <label>晚间日报时间</label>
-            <input type="number" id="eveningHour" min="0" max="23" value="21">
-          </div>
-          <div class="settings-item">
-            <label>Webhook URL (可选)</label>
-            <input type="text" id="webhookUrl" placeholder="飞书/钉钉/企业微信 Webhook 地址">
-          </div>
-          <div class="settings-item">
-            <label>Webhook 类型</label>
-            <select id="webhookType">
-              <option value="generic">通用</option>
-              <option value="feishu">飞书</option>
-              <option value="dingtalk">钉钉</option>
-              <option value="wecom">企业微信</option>
-            </select>
-          </div>
-          <button id="testWebhook" class="btn-secondary">🧪 测试推送</button>
-          <span id="webhookTestResult" class="test-result"></span>
-        </div>
-
-        <!-- 禅道集成配置 -->
-        <div class="settings-section">
-          <h4>🐉 禅道集成</h4>
-          <div class="settings-item">
-            <label class="checkbox-label">
-              <input type="checkbox" id="zentaoEnabled">
-              <span>启用禅道同步</span>
-            </label>
-          </div>
-          <div class="settings-item">
-            <label>禅道 API 地址 <span class="required">*</span></label>
-            <input type="text" id="zentaoUrl" placeholder="http://your-zentao.com">
-            <span class="input-hint">💡 如: http://your-zentao-host:port</span>
-          </div>
-          <div class="settings-item">
-            <label>禅道账号 <span class="required">*</span></label>
-            <input type="text" id="zentaoUsername" placeholder="your-account">
-          </div>
-          <div class="settings-item">
-            <label>禅道密码 <span class="required">*</span></label>
-            <input type="password" id="zentaoPassword" placeholder="your-password">
-          </div>
-          <div class="settings-item">
-            <label>执行 ID (execution) <span class="required">*</span></label>
-            <input type="text" id="zentaoCreateTaskUrl"
-              placeholder="如：167">
-            <span class="input-hint">💡 从禅道任务创建页面的 URL 中获取，如 task-create-<strong>167</strong>-0-0.html</span>
-          </div>
-          <div style="display: flex; gap: 8px; margin-top: 12px;">
-            <button id="testZentao" class="btn-secondary">🧪 测试连接</button>
-            <button id="updateZentaoUsers" class="btn-secondary">🔄 更新用户列表</button>
-            <button id="manualSyncButton" class="btn-secondary">📥 立即同步</button>
-          </div>
-          <span id="zentaoTestResult" class="test-result"></span>
-          <span id="zentaoUsersResult" class="test-result"></span>
-        </div>
-
-
-        <!-- 配置导出 / 导入（换机迁移用） -->
-        <div class="settings-section settings-section-full">
-          <h4>📦 配置导出 / 导入</h4>
-          <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 12px; line-height: 1.6;">
-            导出全部配置（AI、通知、禅道、提示词），用于<strong>换机迁移或备份</strong>。
-            出于安全考虑，<strong>不包含</strong> API Key 与禅道密码 —— 换机后需重新填写这两项。
-          </p>
-          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-            <button id="exportConfigBtn" class="btn-secondary">📤 导出配置文件</button>
-            <button id="importConfigBtn" class="btn-secondary">📥 导入配置文件</button>
-            <input type="file" id="importConfigFile" accept="application/json,.json" style="display: none;">
-          </div>
-          <span id="configTransferResult" class="test-result"></span>
-        </div>
-
-        <div class="settings-footer">
-          <button id="saveSettings" class="btn-primary">💾 保存配置</button>
-          <button id="resetSettings" class="btn-secondary">🔄 重置默认</button>
-        </div>
+          <button class="close-btn" id="closeSettings" aria-label="关闭">&times;</button>
         </div>
       </div>
-    </div>
-  </div>
 
-  <!-- 提示词设置弹窗 -->
-  <div id="promptModal" class="modal">
-    <div class="modal-content" style="max-width: 600px;">
-      <div class="modal-header">
-        <h3>🤖 提示词设置</h3>
-        <button class="close-btn" id="closePromptModal">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="settings-section" style="margin-bottom: 12px;">
-          <p class="hint" style="margin-bottom: 12px; font-size: 13px;">
-            可以在这里修改每日、每周、每月工作报告的生成提示词，以及添加任务的分析提示词。留空则使用系统默认提示词。注意保持要求JSON返回格式说明，否则可能导致报告或任务生成失败。</p>
-          <div class="settings-item" style="flex-direction: column; align-items: flex-start; margin-bottom: 16px;">
-            <div style="display: flex; justify-content: space-between; width: 100%; margin-bottom: 8px;">
-              <label>📝 添加任务分析提示词</label>
-              <button id="resetAddTaskPromptBtn" class="btn-secondary"
-                style="padding: 2px 8px; font-size: 12px;">恢复默认</button>
-            </div>
-            <textarea id="promptAddTask" rows="6" placeholder="正在加载..."
-              style="width: 100%; resize: vertical; padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-family: monospace; font-size: 12px;"></textarea>
+      <div class="settings-layout">
+        <!-- 左侧分组导航 -->
+        <nav class="settings-nav" id="settingsNav" role="tablist" aria-label="设置分组">
+          <button type="button" role="tab" class="active" data-panel="p-service" aria-controls="p-service" aria-selected="true" tabindex="0"><svg><use href="#si-play"/></svg>本地服务</button>
+          <button type="button" role="tab" data-panel="p-ai" aria-controls="p-ai" aria-selected="false" tabindex="-1"><svg><use href="#si-spark"/></svg>AI 配置</button>
+          <button type="button" role="tab" data-panel="p-notify" aria-controls="p-notify" aria-selected="false" tabindex="-1"><svg><use href="#si-bell"/></svg>通知推送</button>
+          <button type="button" role="tab" data-panel="p-zentao" aria-controls="p-zentao" aria-selected="false" tabindex="-1"><svg><use href="#si-link"/></svg>禅道集成</button>
+          <button type="button" role="tab" data-panel="p-prompt" aria-controls="p-prompt" aria-selected="false" tabindex="-1"><svg><use href="#si-file"/></svg>提示词</button>
+          <button type="button" role="tab" data-panel="p-data" aria-controls="p-data" aria-selected="false" tabindex="-1"><svg><use href="#si-download"/></svg>数据迁移</button>
+          <div class="nav-foot">
+            <button type="button" role="tab" data-panel="p-about" aria-controls="p-about" aria-selected="false" tabindex="-1"><svg><use href="#si-info"/></svg>关于</button>
           </div>
-          <div class="settings-item" style="flex-direction: column; align-items: flex-start;">
-            <div style="display: flex; justify-content: space-between; width: 100%; margin-bottom: 8px;">
-              <label>📝 日报提示词</label>
-              <button id="resetDailyPromptBtn" class="btn-secondary"
-                style="padding: 2px 8px; font-size: 12px;">恢复默认</button>
+        </nav>
+
+        <!-- 右侧内容 -->
+        <div class="settings-content" id="settingsContent">
+
+          <!-- ========== 本地服务 ========== -->
+          <section class="set-panel active" id="p-service" role="tabpanel" aria-label="本地服务">
+            <h4>本地服务</h4>
+            <p class="set-desc">任务解析、日报生成、禅道同步都在本机后端运行，由插件自动管理，无需手动执行脚本。</p>
+
+            <div class="set-service">
+              <div class="svc-top">
+                <span class="status-dot unknown" id="serviceStatusDot" title="检测中…"></span>
+                <span class="svc-title">工作助手后端</span>
+                <span class="svc-status" id="serviceStatusText">检测中…</span>
+              </div>
+              <div class="svc-meta">
+                <div><div class="sm-k">PID</div><div class="sm-v" id="serviceMetaPid">—</div></div>
+                <div><div class="sm-k">监听地址</div><div class="sm-v" id="serviceMetaPort">—</div></div>
+                <div><div class="sm-k">来源</div><div class="sm-v" id="serviceMetaSource">—</div></div>
+                <div><div class="sm-k">开机自启</div><div class="sm-v" id="serviceMetaAuto">—</div></div>
+              </div>
+              <div class="svc-actions">
+                <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="serviceRestartBtn" style="display:none">
+                  <svg><use href="#si-refresh"/></svg><span class="btn-label">重启</span>
+                </button>
+                <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="serviceStartBtn">
+                  <svg><use href="#si-play"/></svg><span class="btn-label">启动服务</span>
+                </button>
+                <button type="button" class="set-btn set-btn-danger set-btn-sm" id="serviceStopBtn" style="display:none">
+                  <svg><use href="#si-stop"/></svg><span class="btn-label">停止服务</span>
+                </button>
+                <label class="checkbox-label">
+                  <input type="checkbox" id="serviceDisableAutoStart" data-no-track>
+                  <span>同时停用开机自启</span>
+                </label>
+              </div>
+              <div id="serviceActionResult" class="test-result"></div>
+              <div class="svc-detail" id="serviceStatusDetail"></div>
             </div>
-            <textarea id="promptDaily" rows="6" placeholder="正在加载..."
-              style="width: 100%; resize: vertical; padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-family: monospace; font-size: 12px;"></textarea>
-          </div>
-          <div class="settings-item" style="flex-direction: column; align-items: flex-start; margin-top: 16px;">
-            <div style="display: flex; justify-content: space-between; width: 100%; margin-bottom: 8px;">
-              <label>📊 周报提示词</label>
-              <button id="resetWeeklyPromptBtn" class="btn-secondary"
-                style="padding: 2px 8px; font-size: 12px;">恢复默认</button>
+
+            <div class="set-row" id="autoStartRow">
+              <div class="sr-label">开机自启<small>登录 macOS 时自动启动</small></div>
+              <div class="sr-control">
+                <div class="row">
+                  <label class="set-switch" id="autoStartSwitch">
+                    <input type="checkbox" id="autoStartToggle" data-no-track>
+                    <span class="set-switch-track"></span>
+                    <span class="set-switch-text" id="autoStartToggleText">检测中…</span>
+                  </label>
+                </div>
+                <span class="input-hint" id="autoStartHint">开启后无需打开浏览器，早间提醒与晚间日报也会准时生成</span>
+                <div id="autoStartResult" class="test-result"></div>
+              </div>
             </div>
-            <textarea id="promptWeekly" rows="6" placeholder="正在加载..."
-              style="width: 100%; resize: vertical; padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-family: monospace; font-size: 12px;"></textarea>
-          </div>
-          <div class="settings-item" style="flex-direction: column; align-items: flex-start; margin-top: 16px;">
-            <div style="display: flex; justify-content: space-between; width: 100%; margin-bottom: 8px;">
-              <label>📈 月报提示词</label>
-              <button id="resetMonthlyPromptBtn" class="btn-secondary"
-                style="padding: 2px 8px; font-size: 12px;">恢复默认</button>
+
+            <div class="set-callout info">
+              <svg><use href="#si-info"/></svg>
+              <div>如果浏览器无法自动拉起后端，可在终端执行一次 <code>npm run setup:auto-start</code> 注册 Native Messaging 宿主并安装开机自启——此后后端由系统直接管理，与浏览器和加载位置是否变化无关。</div>
             </div>
-            <textarea id="promptMonthly" rows="6" placeholder="正在加载..."
-              style="width: 100%; resize: vertical; padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-family: monospace; font-size: 12px;"></textarea>
-          </div>
+          </section>
+
+          <!-- ========== AI 配置 ========== -->
+          <section class="set-panel" id="p-ai" role="tabpanel" aria-label="AI 配置">
+            <h4>AI 配置</h4>
+            <p class="set-desc">支持 14 家 OpenAI 兼容服务商，切换后自动填入推荐接口地址与模型，可直接修改。</p>
+
+            <div class="set-row">
+              <div class="sr-label">API 服务<small>按延迟与成本推荐</small></div>
+              <div class="sr-control">
+                <select class="set-select" id="aiProvider" style="max-width:340px">
+                  <optgroup label="── 国内主流 ──">
+                    <option value="zhipu">智谱 GLM（推荐）</option>
+                    <option value="deepseek">DeepSeek 深度求索</option>
+                    <option value="moonshot">月之暗面 Kimi</option>
+                    <option value="qwen">阿里通义千问 DashScope</option>
+                    <option value="doubao">字节豆包（火山方舟）</option>
+                    <option value="ernie">百度文心一言</option>
+                    <option value="minimax">MiniMax</option>
+                    <option value="siliconflow">硅基流动 SiliconFlow</option>
+                    <option value="together">Together AI（聚合）</option>
+                  </optgroup>
+                  <optgroup label="── 海外 / 其他 ──">
+                    <option value="openai">OpenAI 官方</option>
+                    <option value="anthropic">Anthropic Claude</option>
+                    <option value="openrouter">OpenRouter（聚合）</option>
+                    <option value="ollama">Ollama 本地部署</option>
+                    <option value="custom">自定义（OpenAI 兼容）</option>
+                  </optgroup>
+                </select>
+                <span class="input-hint" id="aiProviderHint">选择后会自动填入推荐接口地址与模型，可直接修改</span>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">API Key <span class="req">*</span></div>
+              <div class="sr-control">
+                <div class="row">
+                  <input type="password" class="set-input" id="apiKey" placeholder="请输入 API Key" autocomplete="off" style="max-width:340px">
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm" data-pw-toggle="apiKey">
+                    <svg><use href="#si-eye"/></svg><span class="btn-label">显示</span>
+                  </button>
+                </div>
+                <span class="input-hint" id="apiKeyHint"><svg style="width:11px;height:11px;vertical-align:-1px"><use href="#si-lock"/></svg> 仅保存在本机 <code>.env</code>，不同步、不上传</span>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">接口地址</div>
+              <div class="sr-control">
+                <input type="text" class="set-input" id="apiBaseUrl" placeholder="https://open.bigmodel.cn/api/paas/v4/" spellcheck="false" style="max-width:340px">
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">模型</div>
+              <div class="sr-control">
+                <input type="text" class="set-input" id="aiModel" placeholder="glm-4-flash" spellcheck="false" style="max-width:340px">
+                <span class="input-hint" id="aiModelHint"></span>
+              </div>
+            </div>
+
+            <details class="set-fold">
+              <summary><svg><use href="#si-chev-down"/></svg>模型怎么选？</summary>
+              <div class="fold-body">
+                <ul>
+                  <li><strong>任务解析 / 分类</strong>（本插件主力场景）：选<strong>轻量快速模型</strong>即可，如 glm-4-flash、deepseek-chat、qwen-turbo —— 响应快、成本低、JSON 遵循度高</li>
+                  <li><strong>日报 / 周报生成</strong>：可选更强的推理模型，如 glm-4-plus、deepseek-reasoner，文字组织更好</li>
+                  <li><strong>本地隐私</strong>：选 Ollama + <code>qwen3:8b</code> 或 <code>llama3.1</code>，数据不出本机（接口地址填 <code>http://127.0.0.1:11434/v1</code>，Key 随便填）</li>
+                  <li>所有国内供应商均兼容 OpenAI 协议，切换服务商通常只需换 Key</li>
+                </ul>
+              </div>
+            </details>
+
+            <div class="set-row">
+              <div class="sr-label">连接测试</div>
+              <div class="sr-control">
+                <div class="row">
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="testAi">
+                    <svg><use href="#si-check-circle"/></svg><span class="btn-label">测试连接</span>
+                  </button>
+                  <span id="aiTestResult" class="test-result"></span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ========== 通知推送 ========== -->
+          <section class="set-panel" id="p-notify" role="tabpanel" aria-label="通知推送">
+            <h4>通知推送</h4>
+            <p class="set-desc">定时生成日报周报，并推送到系统通知或群机器人。</p>
+
+            <div class="set-row">
+              <div class="sr-label">早间提醒</div>
+              <div class="sr-control">
+                <div class="row">
+                  <input type="number" class="set-input" id="morningHour" min="0" max="23" value="9" style="width:80px">
+                  <span class="input-hint">点，提醒查看今日任务</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">晚间日报</div>
+              <div class="sr-control">
+                <div class="row">
+                  <input type="number" class="set-input" id="eveningHour" min="0" max="23" value="21" style="width:80px">
+                  <span class="input-hint">点，生成本日工作总结</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">Webhook<small>可选</small></div>
+              <div class="sr-control">
+                <input type="text" class="set-input" id="webhookUrl" placeholder="飞书 / 钉钉 / 企业微信 Webhook 地址" style="max-width:340px">
+                <div class="row">
+                  <select class="set-select" id="webhookType" style="max-width:150px">
+                    <option value="generic">通用</option>
+                    <option value="feishu">飞书</option>
+                    <option value="dingtalk">钉钉</option>
+                    <option value="wecom">企业微信</option>
+                  </select>
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="testWebhook">
+                    <span class="btn-label">测试推送</span>
+                  </button>
+                  <span id="webhookTestResult" class="test-result"></span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ========== 禅道集成 ========== -->
+          <section class="set-panel" id="p-zentao" role="tabpanel" aria-label="禅道集成">
+            <h4>禅道集成</h4>
+
+            <div class="set-row">
+              <div class="sr-label">启用同步</div>
+              <div class="sr-control">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="zentaoEnabled">
+                  <span>任务与 Bug 状态变更时同步到禅道</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">API 地址 <span class="req">*</span></div>
+              <div class="sr-control">
+                <input type="text" class="set-input" id="zentaoUrl" placeholder="http://your-zentao.com" spellcheck="false" style="max-width:340px">
+                <span class="input-hint">从浏览器地址栏复制，如 http://your-zentao-host:port</span>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">账号 <span class="req">*</span></div>
+              <div class="sr-control">
+                <input type="text" class="set-input" id="zentaoUsername" placeholder="your-account" style="max-width:340px">
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">密码 <span class="req">*</span></div>
+              <div class="sr-control">
+                <div class="row">
+                  <input type="password" class="set-input" id="zentaoPassword" placeholder="your-password" autocomplete="off" style="max-width:340px">
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm" data-pw-toggle="zentaoPassword">
+                    <svg><use href="#si-eye"/></svg><span class="btn-label">显示</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">执行 ID<small>选填</small></div>
+              <div class="sr-control">
+                <input type="text" class="set-input" id="zentaoCreateTaskUrl" placeholder="留空即可" style="max-width:340px">
+                <span class="input-hint">默认执行，可留空。留空时在「添加任务」弹窗里选择所属执行，列表会自动拉取禅道账号下的全部执行。</span>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">操作</div>
+              <div class="sr-control">
+                <div class="row">
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="testZentao">
+                    <span class="btn-label">测试连接</span>
+                  </button>
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm debug-only" id="updateZentaoUsers">
+                    <span class="btn-label">更新用户列表</span>
+                  </button>
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="manualSyncButton">
+                    <svg><use href="#si-refresh"/></svg><span class="btn-label">立即同步</span>
+                  </button>
+                </div>
+                <span id="zentaoTestResult" class="test-result"></span>
+                <span id="zentaoUsersResult" class="test-result"></span>
+              </div>
+            </div>
+          </section>
+
+          <!-- ========== 提示词 ========== -->
+          <section class="set-panel" id="p-prompt" role="tabpanel" aria-label="提示词">
+            <h4>提示词</h4>
+            <p class="set-desc">自定义 AI 的思考方式，与上方配置一起随「保存配置」写入。留空则使用系统默认提示词。</p>
+
+            <div class="set-callout info">
+              <svg><use href="#si-info"/></svg>
+              <div>修改时请保留「要求 JSON 返回格式」的说明，否则可能导致任务解析或报告生成失败。「恢复默认」会把该输入框清空，即回到系统默认。</div>
+            </div>
+
+            <div class="set-prompt-item">
+              <div class="pi-head">
+                <label for="promptAddTask">添加任务分析提示词</label>
+                <button type="button" class="set-btn set-btn-ghost set-btn-sm" id="resetAddTaskPromptBtn">
+                  <span class="btn-label">恢复默认</span>
+                </button>
+              </div>
+              <textarea class="set-textarea" id="promptAddTask" rows="4" placeholder="正在加载…"></textarea>
+            </div>
+
+            <div class="set-prompt-item">
+              <div class="pi-head">
+                <label for="promptDaily">日报提示词</label>
+                <button type="button" class="set-btn set-btn-ghost set-btn-sm" id="resetDailyPromptBtn">
+                  <span class="btn-label">恢复默认</span>
+                </button>
+              </div>
+              <textarea class="set-textarea" id="promptDaily" rows="4" placeholder="正在加载…"></textarea>
+            </div>
+
+            <div class="set-prompt-item">
+              <div class="pi-head">
+                <label for="promptWeekly">周报提示词</label>
+                <button type="button" class="set-btn set-btn-ghost set-btn-sm" id="resetWeeklyPromptBtn">
+                  <span class="btn-label">恢复默认</span>
+                </button>
+              </div>
+              <textarea class="set-textarea" id="promptWeekly" rows="4" placeholder="正在加载…"></textarea>
+            </div>
+
+            <div class="set-prompt-item">
+              <div class="pi-head">
+                <label for="promptMonthly">月报提示词</label>
+                <button type="button" class="set-btn set-btn-ghost set-btn-sm" id="resetMonthlyPromptBtn">
+                  <span class="btn-label">恢复默认</span>
+                </button>
+              </div>
+              <textarea class="set-textarea" id="promptMonthly" rows="4" placeholder="正在加载…"></textarea>
+            </div>
+          </section>
+
+          <!-- ========== 数据迁移 ========== -->
+          <section class="set-panel" id="p-data" role="tabpanel" aria-label="数据迁移">
+            <h4>数据迁移</h4>
+            <p class="set-desc">导出全部配置用于换机或备份，导入后即可在新设备恢复工作环境。</p>
+
+            <div class="set-callout warn">
+              <svg><use href="#si-alert"/></svg>
+              <div>出于安全考虑，导出的文件<b>不包含</b> API Key 与禅道密码——换机后需要重新填写这两项。</div>
+            </div>
+
+            <div class="set-transfer">
+              <div class="set-transfer-card">
+                <div class="tc-icon"><svg><use href="#si-download"/></svg></div>
+                <h5>导出配置</h5>
+                <p>保存 AI、通知、禅道、提示词等全部设置为一个 JSON 文件。</p>
+                <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="exportConfigBtn">
+                  <svg><use href="#si-download"/></svg><span class="btn-label">导出配置文件</span>
+                </button>
+              </div>
+              <div class="set-transfer-card">
+                <div class="tc-icon"><svg><use href="#si-upload"/></svg></div>
+                <h5>导入配置</h5>
+                <p>选择此前导出的 JSON 文件，覆盖当前设置（Key 与密码保留为空待填）。</p>
+                <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="importConfigBtn">
+                  <svg><use href="#si-upload"/></svg><span class="btn-label">选择文件导入</span>
+                </button>
+              </div>
+            </div>
+            <input type="file" id="importConfigFile" accept="application/json,.json" style="display:none">
+            <span id="configTransferResult" class="test-result"></span>
+          </section>
+
+          <!-- ========== 关于 ========== -->
+          <section class="set-panel" id="p-about" role="tabpanel" aria-label="关于">
+            <h4>关于</h4>
+            <p class="set-desc">工作助手 v1.0.0 · 界面设计方案 v1.0</p>
+
+            <div class="set-row">
+              <div class="sr-label">本地服务</div>
+              <div class="sr-control"><span class="input-hint">127.0.0.1:3721 · Node 后端 · 数据全部留在本机</span></div>
+            </div>
+            <div class="set-row">
+              <div class="sr-label">浏览器扩展</div>
+              <div class="sr-control"><span class="input-hint">Manifest V3 · unpacked 开发模式</span></div>
+            </div>
+            <div class="set-row">
+              <div class="sr-label">界面</div>
+              <div class="sr-control"><span class="input-hint">设计令牌 v1.0 · WCAG AA 对比度 · 全键盘可达</span></div>
+            </div>
+            <div class="set-row">
+              <div class="sr-label">反馈</div>
+              <div class="sr-control"><span class="input-hint">GitHub · rskdwypy-pixel/workAssistant</span></div>
+            </div>
+          </section>
         </div>
-        <div class="settings-footer">
-          <button id="savePromptBtn" class="btn-primary">💾 保存并同步</button>
+      </div>
+
+      <div class="settings-footer">
+        <span class="draft" id="draftIndicator">
+          <svg><use href="#si-check-circle"/></svg><span class="dot"></span><span id="draftText">所有更改已保存</span>
+        </span>
+        <div class="settings-footer-right">
+          <button type="button" class="set-btn set-btn-ghost" id="resetSettings">
+            <svg><use href="#si-refresh"/></svg><span class="btn-label">重置默认</span>
+          </button>
+          <button type="button" class="set-btn set-btn-primary" id="saveSettings">
+            <svg><use href="#si-check"/></svg><span class="btn-label">保存配置</span>
+          </button>
         </div>
       </div>
     </div>
@@ -1005,6 +1205,7 @@
   <!-- 旧的 BugMode 翻转按钮已移除，现在使用 Tab 切换 -->
 
   <script src="newtab.js"></script>
+  <script src="settings-ui.js"></script>
 </body>
 
 </html>
