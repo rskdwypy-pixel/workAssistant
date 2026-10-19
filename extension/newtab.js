@@ -569,6 +569,26 @@ const ProgressInputDialog = {
   }
 };
 
+// ==================== 乐观 UI 依赖注册 ====================
+// 必须在任何乐观操作（改进度 / 改优先级 / 建任务）发生前执行，
+// 否则 OptimisticUI 拿不到任务列表，会抛
+// 「Cannot read properties of undefined (reading 'find')」。
+//
+// 为什么要显式注册：allTasks 是 `let`、Toast 是 `const`，
+// 全局脚本里的 let/const 只是脚本级绑定，**不会**挂到 window 上
+// （只有 var 和函数声明才会），所以 optimistic.js 里读 window.allTasks
+// 拿到的永远是 undefined。
+//
+// allTasks 必须传函数而不是数组本身 —— 它会被整体重新赋值
+// （loadTasks / loadTasksByDate / searchTasks），存引用会拿到过期数组。
+if (window.OptimisticUI) {
+  window.OptimisticUI.register({
+    allTasks: () => allTasks,
+    Toast: Toast,
+    renderTasks: () => renderTasks()
+  });
+}
+
 // 快捷函数
 function showToast(message, type = 'info', duration = 3000) {
   return Toast.show(message, type, duration);
@@ -828,20 +848,17 @@ function setupProgressDragEvents() {
       draggingProgressElement = null;
       draggingProgressOriginalValue = null;
 
-      // 提交进度更新
+      // 提交进度更新（updateTaskProgress 内部已做乐观渲染，成功后无需再整表刷新）
       updateTaskProgress(taskId, clampedPercent).then((result) => {
         console.log('[Progress Drag] updateTaskProgress 返回:', result);
 
-        // 如果用户取消，立即恢复UI到原始值
+        // 用户取消时，本地数据没变，需要从后端重新拉一次把界面刷回去
         if (result === false) {
           console.log('[Progress Drag] 用户取消，恢复UI到原始值:', originalValue);
           if (progressFill) progressFill.style.width = `${originalValue}%`;
           if (progressInput) progressInput.value = originalValue;
+          loadTasks().catch(err => console.warn('[Progress Drag] 刷新任务失败:', err));
         }
-
-        // 无论成功还是取消，都刷新任务列表以同步 UI
-        console.log('[Progress Drag] 刷新任务列表');
-        loadTasks().catch(err => console.warn('[Progress Drag] 刷新任务失败:', err));
 
         // 重置光标
         document.body.style.cursor = '';
@@ -2340,13 +2357,33 @@ function renderCalendar(data) {
 }
 
 // 加载任务
+/**
+ * 后端返回的任务列表里没有 __sync（它只是前端 UI 状态）。
+ * 整表替换 allTasks 之前先把本地同步状态按 taskId 捞回来，
+ * 否则切日期 / 刷新后，正在同步或同步失败的角标会凭空消失。
+ */
+function carryOverSyncState(freshTasks) {
+  if (!Array.isArray(freshTasks)) return freshTasks;
+  const prev = new Map();
+  for (const t of allTasks || []) {
+    if (t && t.id !== undefined && t.__sync) prev.set(String(t.id), t.__sync);
+  }
+  for (const t of freshTasks) {
+    if (!t || t.id === undefined) continue;
+    const s = prev.get(String(t.id));
+    if (s) t.__sync = s;
+    else delete t.__sync;
+  }
+  return freshTasks;
+}
+
 async function loadTasks() {
   try {
     const response = await fetch(`${API_BASE_URL}/api/tasks?date=${selectedDate}`);
     const result = await response.json();
 
     if (result.success) {
-      allTasks = result.data;
+      allTasks = carryOverSyncState(result.data);
       renderTasks();
     }
     await updateTaskStats();
@@ -2367,7 +2404,7 @@ async function loadTasksByDate(dateStr) {
     const result = await response.json();
 
     if (result.success) {
-      allTasks = result.data;
+      allTasks = carryOverSyncState(result.data);
       renderTasks();
     }
   } catch (err) {
@@ -2508,6 +2545,15 @@ function createTaskCard(task) {
     </div>
   ` : '';
 
+  // 同步状态角标：禅道同步中/ 失败未同步。状态存在 task.__sync 上，
+  // 这样整表重渲染后角标不会丢（详见 optimistic.js）。
+  const syncState = task.__sync;
+  const syncBadgeHTML = syncState
+    ? (syncState.state === 'syncing'
+      ? `<span class="sync-state-badge syncing" title="${syncState.reason || '正在与禅道同步'}">同步中</span>`
+      : `<span class="sync-state-badge failed" title="${escapeHtml(syncState.reason || '同步到禅道失败，点击「同步」重试')}">未同步</span>`)
+    : '';
+
   card.innerHTML = `
     <div class="task-title" style="display: flex; align-items: flex-start; gap: 8px; width:100%;">
       <input type="checkbox" class="task-checkbox" data-task-id="${task.id}" ${task.status === 'done' ? 'checked' : ''} style="margin-top: 4px; cursor: pointer;">
@@ -2521,6 +2567,7 @@ function createTaskCard(task) {
             ? `<span class="zentao-task-link" data-task-id="${task.zentaoId}" style="color: #3b82f6; text-decoration: none; font-size: 12px; cursor: pointer;">#${task.zentaoId}</span>`
             : `<button class="sync-to-zentao-btn" data-task-id="${task.id}" style="background: #10b981; color: white; border: none; padding: 2px 6px; border-radius: 3px; font-size: 11px; cursor: pointer; transition: background 0.2s;" title="同步到禅道">同步</button>`
           }
+          ${syncBadgeHTML}
         </div>
         ${task.executionName ? `<span class="execution-tag" style="margin-top: 4px;">${escapeHtml(task.executionName)}</span>` : ''}
       </div>
@@ -2752,83 +2799,75 @@ function createTaskCard(task) {
  * @param {string} taskId - 任务 ID
  * @param {HTMLElement} syncBtn - 同步按钮元素
  */
+/**
+ * 恢复「同步」按钮的可点击状态
+ *
+ * 禅道操作失败时必须调用：按钮要回到「同步」可点状态，
+ * 用户才能在处理完问题（配好禅道、选好执行）后一键重试。
+ *
+ * @param {HTMLButtonElement} syncBtn
+ * @param {string} [label='同步']
+ */
+function restoreSyncBtn(syncBtn, label = '同步') {
+  if (!syncBtn) return;
+  syncBtn.disabled = false;
+  syncBtn.textContent = label;
+  syncBtn.style.background = '#10b981';
+  syncBtn.style.cursor = 'pointer';
+}
+
+/**
+ * 把本地任务同步到禅道（手动点「同步」按钮时调用）
+ *
+ * 行为约定：
+ *   - 点击后立刻打「同步中」角标，按钮不再重复响应
+ *   - 成功 → 角标消失，标题旁出现禅道 ID，Toast 报出该 ID
+ *   - 失败 → 角标变「未同步」，按钮恢复可点，Toast 说明原因
+ */
 async function syncTaskToZentao(taskId, syncBtn) {
-  try {
-    // 查找任务
-    const task = allTasks.find(t => t.id === taskId);
-    if (!task) {
-      Toast.error('任务不存在');
-      return;
-    }
+  const task = allTasks.find(t => String(t.id) === String(taskId));
+  if (!task) {
+    Toast.error('任务不存在');
+    return;
+  }
 
-    // 禁用按钮，显示加载状态
-    syncBtn.disabled = true;
-    syncBtn.textContent = '同步中...';
-    syncBtn.style.background = '#6b7280';
-    syncBtn.style.cursor = 'wait';
+  console.log('[SyncToZentao] 开始同步任务到禅道:', task);
 
-    console.log('[SyncToZentao] 开始同步任务到禅道:', task);
-
-    // 调用 ZentaoBrowserClient 创建任务
-    const result = await ZentaoBrowserClient.createTask({
-      title: task.title,
-      executionId: task.executionId,
-      executionType: task.executionType,
-      desc: task.content || task.title
-    });
-
-    // 判断是否成功（支持 taskId 和 zentaoId 两种字段）
-    const zentaoId = result.zentaoId || result.taskId;
-    if (result.success && zentaoId) {
-      console.log('[SyncToZentao] 任务创建成功，zentaoId:', zentaoId);
-
-      // 更新本地任务的 zentaoId
-      task.zentaoId = zentaoId;
-      task.zentaoExecution = task.executionId;
+  await OptimisticUI.trackSync({
+    taskId: taskId,
+    successMessage: () => `已同步到禅道，任务ID: #${task.zentaoId}`,
+    failureMessage: (res) => `同步失败：${OptimisticUI.explainFailure(res)}`,
+    syncFn: async () => {
+      // 调用 ZentaoBrowserClient 创建任务
+      const result = await ZentaoBrowserClient.createTask({
+        title: task.title,
+        executionId: task.executionId,
+        executionType: task.executionType,
+        desc: task.content || task.title
+      });
+      // 兼容 taskId / zentaoId 两种字段
+      const zentaoId = result && (result.zentaoId || result.taskId);
+      return (result && result.success && zentaoId)
+        ? { success: true, zentaoId }
+        : { success: false, reason: result && result.reason, message: result && result.message };
+    },
+    onSuccess: async (result) => {
+      const zentaoId = result.zentaoId;
 
       // 保存到后端
       await fetch(`${API_BASE_URL}/api/task/${taskId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ zentaoId: zentaoId })
+        body: JSON.stringify({ zentaoId })
       });
 
-      Toast.success('已同步到禅道，任务ID: #' + zentaoId);
-
-      // 刷新任务卡片显示
-      await loadTasks();
-    } else {
-      console.error('[SyncToZentao] 任务创建失败:', result);
-
-      // 恢复按钮状态
-      syncBtn.disabled = false;
-      syncBtn.textContent = '同步';
-      syncBtn.style.background = '#10b981';
-      syncBtn.style.cursor = 'pointer';
-
-      // 根据失败原因显示错误提示
-      let errorMsg = '同步失败';
-      if (result.reason === 'not_configured') {
-        errorMsg = '禅道未配置，请先在设置中配置禅道';
-      } else if (result.reason === 'invalid_execution_id') {
-        errorMsg = '未配置执行ID，请先选择执行';
-      } else if (result.message) {
-        errorMsg = '同步失败: ' + result.message;
-      }
-
-      Toast.error(errorMsg);
+      // 更新本地任务并重渲染：角标在 trackSync 的 onSuccess 之后已清理
+      OptimisticUI.patchTask(taskId, {
+        zentaoId: zentaoId,
+        zentaoExecution: task.executionId
+      });
     }
-  } catch (err) {
-    console.error('[SyncToZentao] 同步任务异常:', err);
-
-    // 恢复按钮状态
-    syncBtn.disabled = false;
-    syncBtn.textContent = '同步';
-    syncBtn.style.background = '#10b981';
-    syncBtn.style.cursor = 'pointer';
-
-    Toast.error('同步失败: ' + err.message);
-  }
+  });
 }
 
 // 更新计数
@@ -3399,75 +3438,25 @@ async function submitTaskFromModal() {
     if (result.success) {
       const task = result.data;
 
-      // 如果需要，创建禅道任务
-      let browserZentaoId = null;
-      try {
-        await ZentaoBrowserClient.initConfig();
-        if (ZentaoBrowserClient.isConfigured()) {
-          console.log('[TaskModal] 尝试使用浏览器端创建禅道任务...');
-          console.log('[TaskModal] 用户选择的执行ID:', executionId);
-
-          const zentaoTaskId = await ZentaoBrowserClient.createTask({
-            executionId: executionId || task.executionId,  // 优先使用用户选择的执行ID
-            title: task.title,
-            desc: task.content,
-            priority: priority,
-            assignedTo: assignees.length > 0 ? assignees[0] : undefined,  // 主指派人（禅道只支持单个）
-            cc: ccUsers.length > 0 ? ccUsers : undefined,  // 抄送人列表
-            dueDate: dueDate || undefined  // 截止日期
-          });
-
-          if (zentaoTaskId) {
-            // zentaoTaskId 可能是对象 {success: true, taskId: xxx} 或直接的数字
-            // 只有在成功的情况下才提取 ID
-            if (typeof zentaoTaskId === 'object') {
-              if (zentaoTaskId.success && zentaoTaskId.taskId) {
-                // 成功创建任务
-                browserZentaoId = zentaoTaskId.taskId;
-                console.log('[TaskModal] ✓ 浏览器端创建禅道任务成功，提取到的ID:', browserZentaoId);
-
-                // 更新本地任务的 zentaoId
-                const updateResponse = await fetch(`${API_BASE_URL}/api/task/${task.id}`, {
-                  method: 'PUT',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ zentaoId: browserZentaoId })
-                });
-              } else {
-                // 创建失败
-                console.warn('[TaskModal] ⚠ 浏览器端创建禅道任务失败:', zentaoTaskId.reason || zentaoTaskId.message || '未知错误');
-                // 执行 ID 是选填项：用户没填、弹窗里也没选、AI 又没匹配上时，
-                // 禅道这边就没有落点。不能静默吞掉 —— 否则用户以为同步成功了。
-                if (zentaoTaskId.reason === 'invalid_execution_id') {
-                  Toast.warning('本地任务已创建，但未同步到禅道：请选择「所属执行」', 6000);
-                }
-                // 不更新 zentaoId，保持为 null
-              }
-            } else if (typeof zentaoTaskId === 'number') {
-              browserZentaoId = zentaoTaskId;
-              console.log('[TaskModal] ✓ 浏览器端创建禅道任务成功，提取到的ID:', browserZentaoId);
-
-              // 更新本地任务的 zentaoId
-              const updateResponse = await fetch(`${API_BASE_URL}/api/task/${task.id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ zentaoId: browserZentaoId })
-              });
-            } else {
-              console.warn('[TaskModal] ⚠ 未知的 zentaoTaskId 类型:', typeof zentaoTaskId, zentaoTaskId);
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('[TaskModal] 浏览器端创建禅道任务失败:', err.message);
-      }
-
-      Toast.success('任务已创建');
+      // —— 乐观 UI：本地任务已落库，立刻上屏并关掉表单 ——
+      // 禅道同步是 1~3 秒级的慢操作，放在后台跑，不阻塞用户下一步动作。
+      allTasks.push(task);
+      renderTasks();
       clearTaskDraft();
       hideTaskModal();
+      Toast.success('任务已创建，正在同步到禅道…');
 
-      // 重新加载任务列表
-      await loadTasks();
-      await loadCalendar();
+      // 后台同步日历（同样不阻塞界面）
+      loadCalendar().catch(err => console.warn('[TaskModal] 日历刷新失败:', err));
+
+      // —— 后台同步禅道 ——
+      syncNewTaskToZentao(task, {
+        executionId,
+        priority,
+        dueDate,
+        assignees,
+        ccUsers
+      });
     } else {
       Toast.error(result.error || '创建任务失败');
     }
@@ -3475,7 +3464,78 @@ async function submitTaskFromModal() {
     console.error('[TaskModal] 创建任务失败:', err);
     Toast.error('创建任务失败: ' + err.message);
   } finally {
+    // 按钮一定恢复：本地保存完成后立刻恢复，禅道同步不再占用按钮
     restoreButton();
+  }
+}
+
+/**
+ * 后台把新建的本地任务同步到禅道
+ *
+ * 与用户界面的关系：
+ *   - 同步中：卡片显示「同步中」角标
+ *   - 成功：角标消失，标题旁出现禅道任务 ID（#1234），可点击跳转
+ *   - 失败：角标变「未同步」，卡片保留「同步」按钮 + Toast 说明原因
+ *
+ * @param {object} task 后端返回的本地任务对象
+ * @param {object} formData 表单里用户填的禅道相关字段
+ */
+async function syncNewTaskToZentao(task, formData = {}) {
+  const { executionId, priority, dueDate, assignees, ccUsers } = formData;
+
+  try {
+    await ZentaoBrowserClient.initConfig();
+    if (!ZentaoBrowserClient.isConfigured()) {
+      // 没配置禅道不是错误 —— 任务本地已建好，卡片保留「同步」按钮即可
+      OptimisticUI.patchTask(task.id, { __sync: null });
+      return;
+    }
+
+    console.log('[TaskModal] 后台同步禅道任务...');
+    console.log('[TaskModal] 用户选择的执行ID:', executionId);
+
+    const zentaoResult = await ZentaoBrowserClient.createTask({
+      executionId: executionId || task.executionId,
+      title: task.title,
+      desc: task.content,
+      priority: priority,
+      assignedTo: assignees && assignees.length > 0 ? assignees[0] : undefined,
+      cc: ccUsers && ccUsers.length > 0 ? ccUsers : undefined,
+      dueDate: dueDate || undefined
+    });
+
+    // 兼容两种返回形态：{ success, taskId } 或裸数字
+    const zentaoId = (zentaoResult && typeof zentaoResult === 'object')
+      ? zentaoResult.taskId
+      : zentaoResult;
+
+    if (!zentaoResult || !zentaoResult.success || !zentaoId) {
+      const reason = OptimisticUI.explainFailure(zentaoResult);
+      OptimisticUI.setCardSyncState(task.id, 'failed', reason);
+
+      let msg = `任务已创建，但同步禅道失败：${reason}`;
+      if (zentaoResult && zentaoResult.reason === 'invalid_execution_id') {
+        msg = '任务已创建，但未同步到禅道：请选择「所属执行」后点同步';
+      }
+      Toast.error(msg);
+      return;
+    }
+
+    // 成功：写回后端并更新界面
+    await fetch(`${API_BASE_URL}/api/task/${task.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ zentaoId })
+    });
+
+    OptimisticUI.setCardSyncState(task.id, 'idle');
+    OptimisticUI.patchTask(task.id, { zentaoId, zentaoExecution: executionId || task.executionId });
+    Toast.success(`已同步到禅道，任务 ID：#${zentaoId}`);
+    console.log('[TaskModal] ✓ 禅道同步成功，ID:', zentaoId);
+  } catch (err) {
+    console.warn('[TaskModal] 后台同步禅道失败:', err);
+    OptimisticUI.setCardSyncState(task.id, 'failed', err.message || '网络异常');
+    Toast.error(`任务已创建，但同步禅道失败：${err.message}`);
   }
 }
 
@@ -4264,19 +4324,54 @@ function removeAiUnavailableBanner() {
 }
 
 // 更新任务进度
+//
+// 交互约定（乐观 UI）：
+//   1. 用户拖动进度条 → 本地立即改状态/进度并重渲染（进度条不再「弹回去」）
+//   2. 后端持久化
+//   3. 禅道状态与工时在后台同步，期间卡片显示「同步中」角标
+//   4. 禅道失败 → 角标变「未同步」+ Toast 说明；禅道里那条仍停留在旧进度，
+//      本地不受影响，可稍后在禅道里改，或重新触发同步
+//
+// 回滚约定（重要）：
+//   无论失败发生在哪一步（后端拒绝 / fetch 抛异常 / JSON 解析失败），
+//   UI 都必须回到改动前的样子。否则界面显示 90%、库里还是 30%，
+//   用户和后端会永久错位。snapshot 因此必须声明在 try **外面** ——
+//   放try 里的话catch 分支根本拿不到它，回滚代码编译都过不了。
 async function updateTaskProgress(taskId, progress) {
+  // 快照必须在任何改动之前取。注意 task 是 allTasks 里的同一个对象引用，
+  // patchTask 会直接改它，所以回滚只能用这里的值，不能回头读 task.*
+  const target = allTasks.find(t => String(t.id) === String(taskId));
+  const snapshot = target
+    ? {
+      progress: target.progress,
+      status: target.status,
+      totalConsumedTime: target.totalConsumedTime
+    }
+    : null;
+
+  // 统一的失败回滚：把 UI 还原到 snapshot，并刷新统计
+  const rollback = () => {
+    if (!snapshot) return;
+    OptimisticUI.patchTask(taskId, {
+      progress: snapshot.progress,
+      status: snapshot.status,
+      totalConsumedTime: snapshot.totalConsumedTime
+    });
+    updateTaskStats().catch(() => { });
+  };
+
   try {
     // 获取任务信息，用于弹窗提示
-    const task = allTasks.find(t => t.id === taskId);
-    if (!task) return;
+    const task = target;
+    if (!task) return false;
 
-    console.log('[Progress] updateTaskProgress 调用:', { taskId, taskProgress: task.progress, newProgress: progress });
+    console.log('[Progress] updateTaskProgress 调用:', { taskId, taskProgress: snapshot.progress, newProgress: progress });
 
     let progressComment = '';
     let consumedTime = 0;
 
     // 如果进度有变化，弹出输入框让用户填写工作内容和消耗工时
-    if (task.progress !== progress) {
+    if (snapshot.progress !== progress) {
       const result = await ProgressInputDialog.show(
         '更新进度',
         `更新进度至 ${progress}%`,
@@ -4294,92 +4389,19 @@ async function updateTaskProgress(taskId, progress) {
 
       progressComment = result.work;
       consumedTime = result.consumed;
-
-      // 更新今日工时
-      if (consumedTime > 0) {
-        updateTodayWorkTime(consumedTime);
-        // 记录该任务今日工时，用于删除时减去
-        recordTaskWorkTime(taskId, consumedTime);
-      }
     }
 
-    // 第一步：尝试在浏览器端更新禅道任务状态（如果有 zentaoId）
-    if (task.zentaoId) {
-      try {
-        // 根据进度确定状态
-        let status = 'todo';
-        if (progress > 0 && progress < 100) status = 'in_progress';
-        else if (progress === 100) status = 'done';
+    // —— 第一步：乐观更新本地 UI，不等任何网络请求 ——
+    const nextStatus = OptimisticUI.statusOf(progress);
+    const previousTotal = snapshot.totalConsumedTime || 0;
+    OptimisticUI.patchTask(taskId, {
+      progress: progress,
+      status: nextStatus,
+      totalConsumedTime: consumedTime > 0 ? previousTotal + consumedTime : previousTotal
+    });
+    updateTaskStats().catch(() => { });
 
-        // 获取执行类型（判断是否为看板）
-        // 优先使用任务中已存储的 executionType，如果没有则查找
-        let executionType = task.executionType;
-        let kanbanId = null;
-
-        if (!executionType && task.executionId) {
-          // 从 ExecutionFavorites 获取执行类型
-          executionType = ExecutionFavorites.getExecutionType(task.executionId);
-          console.log('[Progress] 从缓存获取执行类型:', task.executionId, '=>', executionType);
-        }
-
-        // 对于看板类型，kanbanId 就是 executionId
-        if (executionType === 'kanban') {
-          kanbanId = task.executionId;
-        }
-
-        console.log('[Progress] 执行类型:', executionType, '看板ID:', kanbanId);
-
-        const zentaoResult = await ZentaoBrowserClient.updateTaskStatus(task.zentaoId, status, progress, {
-          executionType,
-          kanbanId
-        });
-        if (zentaoResult.success) {
-          console.log('[Progress] 浏览器端更新禅道状态成功');
-        } else {
-          console.log('[Progress] 浏览器端更新禅道状态失败:', zentaoResult.reason);
-        }
-
-        // 仅当用户输入了消耗时间或工作内容时才上传日志
-        if (consumedTime > 0 || progressComment) {
-          // 获取任务的历史累计消耗工时，加上本次消耗，得到总累计消耗工时
-          const previousTotalConsumed = task.totalConsumedTime || 0;
-          const totalConsumedTime = previousTotalConsumed + consumedTime;
-
-          // 根据公式自动计算剩余工时：剩余工时 = 总累计消耗工时 / 进度 - 总累计消耗工时
-          // 例如：累计消耗4小时，进度50% → 剩余 = 4/0.5 - 4 = 4小时
-          let leftTime = 0;
-          if (progress > 0 && progress < 100 && totalConsumedTime > 0) {
-            leftTime = Math.round((totalConsumedTime / (progress / 100) - totalConsumedTime) * 10) / 10; // 保留1位小数
-            // 确保剩余工时不为负数
-            if (leftTime < 0) leftTime = 0;
-          } else if (progress === 100) {
-            leftTime = 0;
-          } else if (totalConsumedTime > 0) {
-            // 进度为0但有消耗工时，暂设为累计消耗工时的2倍作为估算
-            leftTime = totalConsumedTime * 2;
-          }
-          console.log(`[Progress] 累计消耗: ${previousTotalConsumed}h + ${consumedTime}h = ${totalConsumedTime}h, 进度=${progress}%, 计算剩余=${leftTime}h`);
-          console.log('[Progress] 调用 recordEffort，参数:', { zentaoId: task.zentaoId, kanbanId, comment: progressComment });
-
-          const effortResult = await ZentaoBrowserClient.recordEffort(task.zentaoId, progressComment, consumedTime, leftTime, kanbanId, progress);
-          if (effortResult.success) {
-            console.log('[Progress] 浏览器端记录禅道工时成功');
-            // 更新本地任务的累计消耗工时
-            await fetch(`${API_BASE_URL}/api/task/${taskId}`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ totalConsumedTime })
-            });
-          } else {
-            console.log('[Progress] 浏览器端记录禅道工时失败:', effortResult.reason);
-          }
-        }
-      } catch (err) {
-        console.log('[Progress] 浏览器端更新禅道状态出错:', err.message);
-      }
-    }
-
-    // 第二步：调用服务端 API 更新进度
+    // —— 第二步：写后端（这个很快，失败要如实告知并回滚）——
     const response = await fetch(`${API_BASE_URL}/api/task/${taskId}/progress`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -4387,68 +4409,156 @@ async function updateTaskProgress(taskId, progress) {
     });
 
     const result = await response.json();
-
-    if (result.success) {
-      // 直接在本地更新任务状态和进度
-      const localTask = allTasks.find(t => t.id === taskId);
-      if (localTask) {
-        localTask.progress = progress;
-        // 根据进度更新状态
-        if (progress === 100) {
-          localTask.status = 'done';
-        } else if (progress > 0 && progress < 100) {
-          localTask.status = 'in_progress';
-        } else if (progress === 0) {
-          localTask.status = 'todo';
-        }
-        // 更新累计消耗工时
-        if (consumedTime > 0) {
-          localTask.totalConsumedTime = (localTask.totalConsumedTime || 0) + consumedTime;
-        }
-      }
-      // 重新渲染任务列表
-      renderTasks();
-      // 更新统计数据
-      await updateTaskStats();
-      console.log('[Progress] 进度更新成功，本地状态已更新');
-      return true;
-    } else {
+    if (!result.success) {
+      // 后端没存住 → 回滚，避免「界面显示 50%、后端还是 0%」的错位
+      rollback();
       Toast.error('更新进度失败');
       console.warn('更新进度失败:', result.error);
       return false;
     }
+
+    // —— 第三步：后端确认存住了，才结算工时 ——
+    // 放在这一步之前记工时的话，一旦进度写失败就会出现
+    // 「进度没更新、工时却加了」的账目错乱。
+    if (consumedTime > 0) {
+      updateTodayWorkTime(consumedTime);
+      // 记录该任务今日工时，用于删除时减去
+      recordTaskWorkTime(taskId, consumedTime);
+    }
+
+    // —— 第四步：禅道同步放到后台，不再阻塞界面 ——
+    if (task.zentaoId) {
+      syncProgressToZentao(
+        {
+          id: taskId,
+          zentaoId: task.zentaoId,
+          executionId: task.executionId,
+          executionType: task.executionType
+        },
+        {
+          progress,
+          progressComment,
+          consumedTime,
+          totalConsumedTime: previousTotal + consumedTime
+        }
+      );
+    }
+
+    console.log('[Progress] 进度更新成功，本地状态已更新');
+    return true;
   } catch (err) {
+    // fetch 失败（服务没起/被拦截）、响应不是合法 JSON 等都会走到这里。
+    // 之前这里只弹 Toast 不回滚，导致界面停留在新进度而后端还是旧值。
+    rollback();
     Toast.error('更新进度失败');
     console.warn('更新进度失败:', err);
     return false;
   }
 }
 
-// 更新任务优先级
-async function updateTaskPriority(taskId, priority) {
-  try {
-    // 获取任务信息，用于同步到禅道
-    const task = allTasks.find(t => t.id === taskId);
+/**
+ * 后台把进度/状态同步到禅道（并按需登记工时）
+ *
+ * 复用 OptimisticUI 的同步状态机：卡片显示「同步中」→「同步完成」或「未同步」。
+ *
+ * @param {object} task 本地任务快照（需带 zentaoId / executionId / executionType）
+ * @param {object} payload progress / progressComment / consumedTime / totalConsumedTime
+ */
+async function syncProgressToZentao(task, payload) {
+  const { progress, progressComment, consumedTime, totalConsumedTime } = payload;
+  const taskId = task.id;
 
-    // 如果有 zentaoId 和 zentaoExecution，先同步到禅道
-    if (task && task.zentaoId && task.zentaoExecution) {
-      try {
-        const zentaoResult = await ZentaoBrowserClient.editTask({
-          zentaoId: task.zentaoId,
-          execution: task.zentaoExecution,
-          name: task.title,  // 传入任务标题，用于 desc 字段
-          pri: priority
-        });
-        if (zentaoResult.success) {
-          console.log('[Priority] 禅道优先级已同步');
-        } else {
-          console.log('[Priority] 禅道优先级同步失败:', zentaoResult.reason);
+  // 根据进度确定禅道侧状态
+  const zentaoStatus = OptimisticUI.statusOf(progress);
+
+  // 执行类型（判断是否为看板），优先用任务上存的，其次查缓存
+  let executionType = task.executionType;
+  if (!executionType && task.executionId) {
+    try {
+      executionType = ExecutionFavorites.getExecutionType(task.executionId);
+      console.log('[Progress] 从缓存获取执行类型:', task.executionId, '=>', executionType);
+    } catch (e) {
+      console.warn('[Progress] 取执行类型失败:', e);
+    }
+  }
+  // 看板类型下 kanbanId 就是 executionId
+  const kanbanId = executionType === 'kanban' ? task.executionId : null;
+  console.log('[Progress] 执行类型:', executionType, '看板ID:', kanbanId);
+
+  // 剩余工时：总累计消耗 / 进度 - 总累计消耗（与原实现一致）
+  let leftTime = 0;
+  if (progress > 0 && progress < 100 && totalConsumedTime > 0) {
+    leftTime = Math.round((totalConsumedTime / (progress / 100) - totalConsumedTime) * 10) / 10;
+    if (leftTime < 0) leftTime = 0;
+  } else if (progress === 100) {
+    leftTime = 0;
+  } else if (totalConsumedTime > 0) {
+    leftTime = totalConsumedTime * 2;
+  }
+
+  await OptimisticUI.trackSync({
+    taskId: taskId,
+    // 静默：状态同步是每次拖动的常规动作，不该每拖一次就弹一个成功 Toast
+    quiet: true,
+    successMessage: () => `进度已同步到禅道（${progress}%）`,
+    failureMessage: (res) => `本地已更新，但同步禅道失败：${OptimisticUI.explainFailure(res)}`,
+    syncFn: async () => {
+      const statusRes = await ZentaoBrowserClient.updateTaskStatus(task.zentaoId, zentaoStatus, progress, {
+        executionType,
+        kanbanId
+      });
+      if (!statusRes || !statusRes.success) {
+        return { success: false, reason: statusRes && statusRes.reason, message: statusRes && statusRes.message };
+      }
+      console.log('[Progress] 浏览器端更新禅道状态成功');
+
+      // 仅当用户输入了消耗时间或工作内容时才上传日志
+      if (consumedTime > 0 || progressComment) {
+        console.log(`[Progress] 累计消耗 ${totalConsumedTime}h, 进度=${progress}%, 计算剩余=${leftTime}h`);
+        const effortRes = await ZentaoBrowserClient.recordEffort(
+          task.zentaoId, progressComment, consumedTime, leftTime, kanbanId, progress
+        );
+        if (!effortRes || !effortRes.success) {
+          return { success: false, reason: effortRes && effortRes.reason, message: effortRes && effortRes.message };
         }
-      } catch (err) {
-        console.log('[Priority] 同步禅道优先级出错:', err.message);
+        console.log('[Progress] 浏览器端记录禅道工时成功');
+      }
+      return { success: true };
+    },
+    onSuccess: async () => {
+      // 把累计工时落库（放在 onSuccess，避免每次拖动都多一次 PUT）
+      if (consumedTime > 0) {
+        await fetch(`${API_BASE_URL}/api/task/${taskId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ totalConsumedTime })
+        }).catch(e => console.warn('[Progress] 累计工时写库失败:', e));
       }
     }
+  });
+}
 
+// 更新任务优先级
+//
+// 同样采用乐观 UI：先改本地任务并整表重渲染（优先级按钮、边框色、
+// 排序位置都会立刻反映新值），再写后端，禅道放后台。
+//
+// 与 updateTaskProgress 同理：
+//   - 快照必须在改之前取（task 是 allTasks 里的引用）
+//   - fetch 抛异常时也要回滚，否则界面优先级与库里永久不一致
+//   - 禅道同步必须等后端确认成功后再发，否则后端没存住却已经把禅道改了
+async function updateTaskPriority(taskId, priority) {
+  const task = allTasks.find(t => String(t.id) === String(taskId));
+  if (!task) {
+    Toast.error('更新优先级失败');
+    return;
+  }
+  const prevPriority = task.priority;
+
+  // —— 乐观更新：界面立刻变 ——
+  OptimisticUI.patchTask(taskId, { priority: priority });
+
+  try {
     const response = await fetch(`${API_BASE_URL}/api/task/${taskId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -4457,87 +4567,40 @@ async function updateTaskPriority(taskId, priority) {
 
     const result = await response.json();
 
-    if (result.success) {
-      // 先重新加载任务数据
-      await loadTasks();
-
-      // 更新任务卡片的优先级显示
-      const taskCard = document.querySelector(`.task-card[data-task-id="${taskId}"]`);
-      if (taskCard) {
-        const updatedTask = allTasks.find(t => t.id === taskId);
-        if (updatedTask) {
-          // 重新生成优先级按钮和菜单
-          const priorityBtn = taskCard.querySelector('.priority-toggle');
-          const priorityMenu = document.querySelector(`.priority-menu-${taskId}`);
-
-          // 移除旧的菜单
-          if (priorityMenu) priorityMenu.remove();
-
-          // 更新优先级按钮样式
-          const priorityColors = { 1: '#ef4444', 2: '#f59e0b', 3: '#3b82f6', 4: '#9ca3af' };
-          priorityBtn.style.color = priorityColors[priority];
-          priorityBtn.textContent = `P${priority}`;
-
-          // 创建新的菜单（排除当前优先级）
-          const newMenu = document.createElement('div');
-          newMenu.className = `priority-menu priority-menu-${taskId}`;
-          newMenu.style.cssText = 'display:none; position:fixed; background:white; border:1px solid #e2e8f0; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:99999; min-width:60px; padding:4px 0;';
-          newMenu.innerHTML = `
-            ${priority !== 1 ? `<div class="priority-option" data-priority="1" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#ef4444; text-align:center;">P1</div>` : ''}
-            ${priority !== 2 ? `<div class="priority-option" data-priority="2" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#f59e0b; text-align:center;">P2</div>` : ''}
-            ${priority !== 3 ? `<div class="priority-option" data-priority="3" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#3b82f6; text-align:center;">P3</div>` : ''}
-            ${priority !== 4 ? `<div class="priority-option" data-priority="4" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#9ca3af; text-align:center;">P4</div>` : ''}
-          `;
-          document.body.appendChild(newMenu);
-
-          // 重新绑定菜单事件
-          const newPriorityMenu = document.querySelector(`.priority-menu-${taskId}`);
-          newPriorityMenu.querySelectorAll('.priority-option').forEach(option => {
-            option.addEventListener('click', (e) => {
-              e.stopPropagation();
-              const newPriority = parseInt(e.currentTarget.dataset.priority);
-              updateTaskPriority(taskId, newPriority);
-              newPriorityMenu.style.display = 'none';
-            });
-            option.addEventListener('mouseenter', () => {
-              option.style.background = '#f1f5f9';
-            });
-            option.addEventListener('mouseleave', () => {
-              option.style.background = 'transparent';
-            });
-          });
-
-          // 重新绑定按钮点击事件（使用新菜单）
-          priorityBtn.onclick = (e) => {
-            e.stopPropagation();
-            document.querySelectorAll('.priority-menu').forEach(m => {
-              if (!m.classList.contains(`priority-menu-${taskId}`)) {
-                m.style.display = 'none';
-              }
-            });
-            newPriorityMenu.style.display = newPriorityMenu.style.display === 'none' ? 'block' : 'none';
-            const rect = priorityBtn.getBoundingClientRect();
-            newPriorityMenu.style.top = (rect.bottom + 2) + 'px';
-            newPriorityMenu.style.left = rect.left + 'px';
-          };
-        }
-      }
-
-      // 如果详情弹窗打开，也要更新
-      const detailModal = document.querySelector('.task-detail-modal.active');
-      if (detailModal) {
-        const detailTaskId = detailModal.querySelector('.detail-priority-btn')?.closest('.task-detail-modal')?.querySelector('.detail-priority-btn')?.parentElement?.querySelector('[data-action="close"]')?.dataset?.taskId;
-        // 简单的做法：关闭弹窗
-        if (detailTaskId === taskId) {
-          detailModal.remove();
-        }
-      }
-    } else {
+    if (!result.success) {
+      // 后端没存住 → 回滚，避免界面显示的优先级与库里不一致
+      OptimisticUI.patchTask(taskId, { priority: prevPriority });
       Toast.error('更新优先级失败');
       console.warn('更新优先级失败:', result.error);
+      return;
     }
   } catch (err) {
+    OptimisticUI.patchTask(taskId, { priority: prevPriority });
+    Toast.error('更新优先级失败');
     console.warn('更新优先级失败:', err);
+    return;
+  }
+
+  // 后端确认存住了，此时才推送禅道
+  if (task.zentaoId && task.zentaoExecution) {
+    OptimisticUI.trackSync({
+      taskId: taskId,
+      quiet: true,
+      successMessage: () => '优先级已同步到禅道',
+      failureMessage: (res) => `本地已更新，但同步禅道失败：${OptimisticUI.explainFailure(res)}`,
+      syncFn: () => ZentaoBrowserClient.editTask({
+        zentaoId: task.zentaoId,
+        execution: task.zentaoExecution,
+        name: task.title,  // 传入任务标题，用于 desc 字段
+        pri: priority
+      })
+    });
+  }
+
+  // 详情弹窗若正开着，其内部的优先级展示可能已过期，关闭以免与卡片不一致
+  const detailModal = document.querySelector('.task-detail-modal.active');
+  if (detailModal && detailModal.dataset && detailModal.dataset.taskId === String(taskId)) {
+    detailModal.remove();
   }
 }
 
@@ -4857,7 +4920,7 @@ async function handleSearch() {
     const result = await response.json();
 
     if (result.success) {
-      allTasks = result.data;
+      allTasks = carryOverSyncState(result.data);
       renderTasks();
     }
   } catch (err) {
@@ -8555,11 +8618,8 @@ const BugManager = {
 
       if (!baseUrl) {
         Toast.error('禅道未配置，请先在设置中配置禅道');
-        // 恢复按钮状态
-        syncBtn.disabled = false;
-        syncBtn.textContent = '同步';
-        syncBtn.style.background = '#10b981';
-        syncBtn.style.cursor = 'pointer';
+        // 恢复按钮状态，让用户配好禅道后可再次点击
+        restoreSyncBtn(syncBtn);
         return;
       }
 
@@ -8761,31 +8821,18 @@ const BugManager = {
         } else {
         console.error('[SyncToZentao] Bug创建失败:', result);
 
-        // 恢复按钮状态
-        syncBtn.disabled = false;
-        syncBtn.textContent = '同步';
-        syncBtn.style.background = '#10b981';
-        syncBtn.style.cursor = 'pointer';
+        // 恢复按钮状态（用户可随时重试）
+        restoreSyncBtn(syncBtn);
 
-        // 根据失败原因显示错误提示
-        let errorMsg = '同步失败';
-        if (result.reason === 'not_configured') {
-          errorMsg = '禅道未配置，请先在设置中配置禅道';
-        } else if (result.message) {
-          errorMsg = '同步失败: ' + result.message;
-        }
-
-        Toast.error(errorMsg);
+        // 统一走OptimisticUI 的失败原因翻译
+        Toast.error('同步失败：' + OptimisticUI.explainFailure(result));
         }
       }
     } catch (err) {
       console.error('[SyncToZentao] 同步Bug异常:', err);
 
       // 恢复按钮状态
-      syncBtn.disabled = false;
-      syncBtn.textContent = '同步';
-      syncBtn.style.background = '#10b981';
-      syncBtn.style.cursor = 'pointer';
+      restoreSyncBtn(syncBtn);
 
       Toast.error('同步失败: ' + err.message);
     }

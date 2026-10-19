@@ -2389,3 +2389,52 @@ body {
 .bug-detail-zentao-id:hover {
   text-decoration: underline;
 }
+
+/* ============ 禅道同步状态角标（乐观 UI） ============ */
+/* 本地已更新、禅道还在后台同步时显示；失败后转为「未同步」提示，
+   配合卡片上的「同步」按钮让用户一键重试 */
+.sync-state-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* 同步中：灰色 + 小转圈 */
+.sync-state-badge.syncing {
+  color: #64748b;
+  background: rgba(100, 116, 139, 0.12);
+}
+
+.sync-state-badge.syncing::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid rgba(100, 116, 139, 0.35);
+  border-top-color: #64748b;
+  border-radius: 50%;
+  animation: syncBadgeSpin 0.7s linear infinite;
+}
+
+@keyframes syncBadgeSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* 同步失败：橙色警示，鼠标停留显示原因 */
+.sync-state-badge.failed {
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.16);
+  cursor: help;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sync-state-badge.syncing::before {
+    animation: none;
+  }
+}

@@ -602,7 +602,36 @@ function extractFormFields(html) {
   return fields;
 }
 
+/**
+ * 判断禅道动作表单/工时接口的响应是否代表「操作成功」。
+ *
+ * 背景（真实 bug，2026-10-14）：工时记录明明成功，却一直报「工时记录未生效」。
+ * 原因是禅道的收尾脚本不止一种形态，原先只认 selfClose / closeModal，
+ * 而 recordEstimate 接口实际返回的是：
+ *   <script>if(typeof(parent.parent.ajaxRefresh) == 'function') parent.parent.ajaxRefresh()</script>
+ * 这是禅道操作成功后的标准收尾脚本（ajaxRefresh 表示要刷新父页面），
+ * 被漏判成失败 —— 禅道里工时其实已经记上了。
+ *
+ * 判定原则：**宁可信任禅道的成功标志，也不要因为回读校验失败就报错**。
+ * 回读（readMyTaskStatus 等）只能查「我的任务」列表，任务一旦closed/done
+ * 就会从列表消失、读不到，任何依赖它的判定都会误报。
+ */
+function isZentaoSubmitSuccess(text) {
+  if (!text) return false;
+  const t = String(text);
+  // 禅道各类收尾脚本：刷新父页面 / 关闭弹窗 / 直接关窗
+  if (/parent\.parent\.ajaxRefresh/.test(t)) return true;
+  if (/selfClose|closeModal|window\.close\(\)/.test(t)) return true;
+  // 显式的成功文案（部分版本直接回显提示）
+  if (/alert-success|保存成功|记录成功|操作成功|更新成功/.test(t)) return true;
+  return false;
+}
+
 // 回读「我的任务」里某任务的状态（用于校验写操作是否真的生效）
+//
+// ⚠️ 这个回读**不可靠**：任务被 done/closed 后会从「我的任务」列表消失，
+// 此时返回 null。据此判定失败会产生大量假阴性（真如 943/884 已关闭却报
+// 「更新未生效」）。所以它现在只用于「补充状态信息」，不再决定成败。
 async function readMyTaskStatus(taskId, cookieHeader, base) {
   try {
     const resp = await fetch(`${base}/zentao/my-task.json`, { headers: { Cookie: cookieHeader } });
@@ -616,6 +645,7 @@ async function readMyTaskStatus(taskId, cookieHeader, base) {
 }
 
 // 回读某任务的累计消耗工时（用于校验工时记录是否生效）
+// 同样注意：任务不在「我的任务」里就返回 null，不能据此判定失败。
 async function readMyTaskConsumed(taskId, cookieHeader, base) {
   try {
     const resp = await fetch(`${base}/zentao/my-task.json`, { headers: { Cookie: cookieHeader } });
@@ -692,25 +722,33 @@ async function updateTaskStatus(taskId, status, options = {}) {
       redirect: 'manual'
     });
     const postText = await postResp.text();
-    // 禅道动作成功后返回含 selfClose 的收尾页；失败/校验不通过会退回表单
-    const submitted = /selfClose|closeModal/.test(postText);
+    // 禅道动作成功后返回收尾页/收尾脚本；失败或校验不通过会退回表单
+    const submitted = isZentaoSubmitSuccess(postText);
 
     // 4) 回读校验。注意：任务被 done/closed 后会从「我的任务」消失，
-    //    此时 observed 为 null，不能据此判失败，改以 selfClose 为准。
+    //    此时 observed 为 null，**不能据此判失败**。
+    //    所以主判据是禅道的提交标志，observed 只用于补充状态文案。
     const observed = await readMyTaskStatus(taskId, CH, base);
     const expected = expectedMap[status];
+
     let ok;
-    if (expected === 'done' || expected === 'closed') {
-      ok = submitted || observed === expected;
-    } else if (expected) {
-      ok = observed === expected;
+    if (submitted) {
+      // 禅道明确收尾了 —— 这是权威的成功信号，优先采信
+      ok = true;
+    } else if (observed != null) {
+      // 回读得到状态：与预期一致才算成功
+      ok = expected ? observed === expected : true;
     } else {
-      ok = submitted || !!observed;
+      // 既没拿到收尾标志、又回读不到状态（任务多半已从列表消失）：
+      // 没有证据说失败，不该报错让用户以为没同步
+      ok = false;
     }
+
+    const statusText = observed || expected || '未知';
     return {
       success: ok,
       message: ok
-        ? `状态已更新为 ${observed || expected}`
+        ? `状态已更新为 ${statusText}`
         : `更新未生效（当前仍为 ${observed || '未知'}）`,
       taskId: String(taskId),
       status: observed || (ok ? expected : null)
@@ -776,12 +814,17 @@ async function recordTaskEstimate(taskId, effortData) {
     const text = await resp.text();
     const consumedAfter = await readMyTaskConsumed(taskId, CH, base);
 
-    // 以「累计消耗是否增加」为准；若任务已不在「我的任务」（如已 done），改用 selfClose 收尾页判定
+    // 判定顺序：禅道收尾脚本 > 累计消耗增长 > 成功文案
+    // ⚠️ 不能只看「累计消耗是否增长」：任务已 closed/done 时不在「我的任务」里，
+    //    consumedBefore/After 都是 null，会把成功的操作判成失败（真实发生过多次）。
+    const submitted = isZentaoSubmitSuccess(text);
     const grew = consumedBefore != null && consumedAfter != null && consumedAfter > consumedBefore;
-    const submitted = /selfClose|closeModal/.test(text);
-    if (grew || submitted || text.includes('alert-success') || text.includes('保存成功') || text.includes('记录成功')) {
-      console.log('[ZentaoService] 工时记录成功:', taskId, `${consumedBefore} -> ${consumedAfter}`);
-      return { success: true, message: `工时已记录（累计消耗 ${consumedAfter != null ? consumedAfter : '?'} 小时）`, consumed: consumedAfter };
+
+    if (submitted || grew) {
+      const detail = consumedAfter != null ? `累计消耗 ${consumedAfter} 小时` : '禅道已确认';
+      console.log('[ZentaoService] 工时记录成功:', taskId,
+        `${consumedBefore} -> ${consumedAfter}`, submitted ? '(禅道收尾脚本确认)' : '(回读确认)');
+      return { success: true, message: `工时已记录（${detail}）`, consumed: consumedAfter };
     }
 
     console.error('[ZentaoService] 工时记录未生效:', taskId, 'resp:', text.substring(0, 160));
@@ -1524,7 +1567,8 @@ async function deleteTask(executionId, taskId) {
     console.log('[ZentaoService] 删除任务:', endpoint);
     const resp = await fetch(endpoint, { method: 'GET', headers: { Cookie: CH }, redirect: 'manual' });
     const text = await resp.text();
-    const successMark = /alert-success|删除成功|已删除|已经被删除/.test(text);
+    const successMark = /alert-success|删除成功|已删除|已经被删除/.test(text)
+      || isZentaoSubmitSuccess(text);   // 禅道删除成功也会走 ajaxRefresh 收尾脚本
     // 回查：任务仍在执行列表说明未删除
     const remaining = await getTasks({ executionId });
     const stillThere = (remaining || []).some((t) => String(t.id) === String(taskId));
@@ -1572,7 +1616,9 @@ async function editTask({ taskId, execution, name, pri, assignedTo }) {
       redirect: 'manual'
     });
     const text = await postResp.text();
-    const ok = /alert-success|保存成功|记录成功|selfClose|location/.test(text)
+    // 统一走isZentaoSubmitSuccess：原先只认 alert-success/保存成功，
+    // 漏掉禅道的 ajaxRefresh 收尾脚本，会把成功的编辑报成「编辑未生效」
+    const ok = isZentaoSubmitSuccess(text)
       || postResp.status === 301 || postResp.status === 302;
     if (ok) return { success: true, message: '任务已更新' };
     const errMatch = text.match(/alert-danger[^>]*>([^<]+)</);

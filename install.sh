@@ -5,13 +5,17 @@
 
 set -e
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
+# 颜色变量必须用 ANSI-C 引用 $'...' 定义（而不是 '\033[...'）：
+# 单引号里是「反斜杠+033」这几个普通字符，只有 `echo -e` 会把它还原成 ESC 序列；
+# 而 `read -p "..."` 和 `echo -n "..."` 都不做转义解释，会把 \033[0;36m 原样打印出来。
+# 用 $'...' 直接得到真正的 ESC 字节，上面三种写法就都能正常上色了。
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+BLUE=$'\033[0;34m'
+CYAN=$'\033[0;36m'
+BOLD=$'\033[1m'
+NC=$'\033[0m'
 
 # 获取脚本所在目录（项目目录）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -651,9 +655,9 @@ if [ ! -d "$EXTENSION_PATH" ]; then
 fi
 
 echo ""
-echo -e "${BLUE}📦 Chrome 扩展安装步骤：${NC}"
+echo -e "${BLUE}📦 浏览器扩展安装步骤：${NC}"
 echo ""
-echo "  1. 打开 Chrome 浏览器"
+echo "  1. 打开 Chromium 系浏览器（Chrome / Edge / Brave / Helium 等）"
 echo "  2. 在地址栏输入: chrome://extensions/"
 echo "  3. 开启右上角的「开发者模式」"
 echo "  4. 点击「加载已解压的扩展程序」"
@@ -673,14 +677,105 @@ if [[ $open_ext =~ ^[Yy]$ ]]; then
 
     # Mac 系统
     if [[ "$OS" == "Mac" ]]; then
-        if command -v open &> /dev/null; then
-            open "chrome://extensions/"
-            echo -e "${GREEN}✓ 已在 Chrome 中打开扩展页面${NC}"
+        # 注意 1: chrome:// 是浏览器的私有 scheme，必须用 `open -a <App>` 显式指定
+        #         浏览器 App；不指定时 LaunchServices 无法根据 scheme 找到应用，
+        #         会报 -10814 (kLSApplicationNotFoundErr) 并让脚本失败。
+        # 注意 2: chrome://extensions/ 只存在于 Chromium 系浏览器（Chrome / Edge /
+        #         Brave / Helium / Vivaldi / Arc 等），Firefox、Safari 里没有这个页面。
+        # 浏览器识别表：显示名|Application Support 相对目录
+        # 与 scripts/install-native-host.sh 的 BROWSER_TABLE 保持同一套映射
+        # （Chrome 用 "Google/Chrome"，第三方分支多用 bundle id，不能想当然用 bundle id 拼路径）
+        CHROMIUM_TABLE="
+Google Chrome|Google/Chrome
+Google Chrome Canary|Google/Chrome Canary
+Chromium|Chromium
+Microsoft Edge|Microsoft Edge
+Brave Browser|BraveSoftware/Brave-Browser
+Helium|net.imput.helium
+Vivaldi|Vivaldi
+Arc|Arc/User Data
+"
+        APP_SUPPORT="$HOME/Library/Application Support"
+        AVAILABLE_APPS=()
+        AVAILABLE_RELS=()
+        REGISTERED_APPS=()
+        REGISTERED_RELS=()
+
+        while IFS='|' read -r app rel; do
+            [ -z "$app" ] && continue
+            if [ ! -d "/Applications/$app.app" ] && [ ! -d "$HOME/Applications/$app.app" ]; then
+                continue
+            fi
+            AVAILABLE_APPS+=("$app")
+            AVAILABLE_RELS+=("$rel")
+            # 已经注册过本项目宿主的浏览器，说明扩展就装在那里
+            if [ -f "$APP_SUPPORT/$rel/NativeMessagingHosts/com.workassistant.backend.json" ]; then
+                REGISTERED_APPS+=("$app")
+                REGISTERED_RELS+=("$rel")
+            fi
+        done <<< "$CHROMIUM_TABLE"
+
+        # 挑选要打开的浏览器，优先级：
+        #   1) 环境变量 WORKASSISTANT_BROWSER 显式指定
+        #   2) 已注册本项目宿主、且「扩展确实装在里面」的浏览器（最可靠）
+        #   3) 其他已注册本项目宿主的浏览器
+        #   4) 已安装列表里的第一个
+        CHROME_APP="${WORKASSISTANT_BROWSER:-}"
+
+        if [ -z "$CHROME_APP" ] && [ ${#REGISTERED_APPS[@]} -eq 1 ]; then
+            CHROME_APP="${REGISTERED_APPS[0]}"
+        fi
+
+        # 从已注册的宿主清单里取扩展真实 ID（跳过 chrome-extension://*/ 通配）
+        EXT_ID=""
+        for rel in "${REGISTERED_RELS[@]}"; do
+            MANIFEST="$APP_SUPPORT/$rel/NativeMessagingHosts/com.workassistant.backend.json"
+            if [ -f "$MANIFEST" ]; then
+                EXT_ID="$(grep -o 'chrome-extension://[a-p]\{32\}/' "$MANIFEST" 2>/dev/null | head -n1 | sed 's|chrome-extension://||; s|/$||')"
+                if [ -n "$EXT_ID" ]; then
+                    break
+                fi
+            fi
+        done
+
+        # 装了多个浏览器时，按「扩展实际安装在哪」来定
+        if [ -z "$CHROME_APP" ] && [ ${#REGISTERED_APPS[@]} -gt 0 ] && [ -n "$EXT_ID" ]; then
+            for i in "${!REGISTERED_APPS[@]}"; do
+                for PREF in "$APP_SUPPORT/${REGISTERED_RELS[$i]}/Default/Secure Preferences" "$APP_SUPPORT/${REGISTERED_RELS[$i]}"/Profile*/"Secure Preferences"; do
+                    if [ -f "$PREF" ] && grep -q "$EXT_ID" "$PREF" 2>/dev/null; then
+                        CHROME_APP="${REGISTERED_APPS[$i]}"
+                        break
+                    fi
+                done
+                if [ -n "$CHROME_APP" ]; then
+                    break
+                fi
+            done
+        fi
+
+        if [ -z "$CHROME_APP" ] && [ ${#REGISTERED_APPS[@]} -gt 0 ]; then
+            CHROME_APP="${REGISTERED_APPS[0]}"
+        fi
+        if [ -z "$CHROME_APP" ] && [ ${#AVAILABLE_APPS[@]} -gt 0 ]; then
+            CHROME_APP="${AVAILABLE_APPS[0]}"
+        fi
+
+        if [ -n "$CHROME_APP" ]; then
+            if open -a "$CHROME_APP" "chrome://extensions/" 2>/dev/null; then
+                echo -e "${GREEN}✓ 已在 $CHROME_APP 中打开扩展页面${NC}"
+                if [ ${#AVAILABLE_APPS[@]} -gt 1 ]; then
+                    echo -e "${YELLOW}   本机其他可选浏览器: ${AVAILABLE_APPS[*]}${NC}"
+                    echo -e "${YELLOW}   指定别的浏览器: WORKASSISTANT_BROWSER=\"Helium\" ./install.sh${NC}"
+                fi
+            else
+                echo -e "${YELLOW}⚠️  自动打开失败，请手动在该浏览器地址栏访问 chrome://extensions/${NC}"
+            fi
         elif command -v google-chrome &> /dev/null; then
             google-chrome "chrome://extensions/" &> /dev/null &
             echo -e "${GREEN}✓ 已在 Chrome 中打开扩展页面${NC}"
         else
-            echo -e "${YELLOW}⚠️  无法自动打开，请手动打开 chrome://extensions/${NC}"
+            echo -e "${YELLOW}⚠️  未检测到 Chromium 系浏览器（Chrome/Edge/Brave/Helium 等）${NC}"
+            echo -e "${YELLOW}   请手动在浏览器地址栏访问 chrome://extensions/${NC}"
         fi
     # Linux 系统
     else
@@ -826,7 +921,7 @@ else
     echo ""
 fi
 
-echo "  2. ${YELLOW}在 Chrome 中加载扩展${NC}"
+echo "  2. ${YELLOW}在 Chromium 系浏览器中加载扩展${NC}"
 echo "     - 已自动打开扩展页面（如果选择）"
 echo "     - 或手动访问: chrome://extensions/"
 echo "     - 开启「开发者模式」，加载扩展"

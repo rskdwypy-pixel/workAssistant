@@ -91,6 +91,12 @@ trap cleanup EXIT INT TERM
 
 # 阻塞等待：Chrome 认为宿主存活，后端就存活。
 # Chrome 结束宿主时会关闭 stdin，用它作为退出信号。
-while read -r _ || [[ -n "${_:-}" ]]; do
-  :
-done
+#
+# 这里必须用 `cat > /dev/null`，不能用
+#     while read -r _ || [[ -n "${_:-}" ]]; do ...; done
+# 原因是 bash 的 read 在「EOF 且一个字节都没读到」时**不会清空目标变量**，
+# 于是 `[[ -n "${_:-}" ]]` 永远为真，循环退不出来 —— 表现为宿主进程 100% CPU
+# 空转，把一个后台进程变成隐形耗电大户。
+#
+# cat 在 EOF 时正常返回 0，且不解析内容，对二进制（含 NUL 的长度前缀）也安全。
+cat > /dev/null
