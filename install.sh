@@ -373,9 +373,9 @@ if [ ! -f ".env" ]; then
     esac
 
     # 写入配置到 .env
-    sed -i.bak "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=$API_KEY|" .env
-    sed -i.bak "s|^OPENAI_BASE_URL=.*|OPENAI_BASE_URL=$BASE_URL|" .env
-    sed -i.bak "s|^OPENAI_MODEL=.*|OPENAI_MODEL=$MODEL|" .env
+    sed -i '' "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=$API_KEY|" .env
+    sed -i '' "s|^OPENAI_BASE_URL=.*|OPENAI_BASE_URL=$BASE_URL|" .env
+    sed -i '' "s|^OPENAI_MODEL=.*|OPENAI_MODEL=$MODEL|" .env
     rm -f .env.bak
 
     echo ""
@@ -462,9 +462,9 @@ else
             esac
 
             # 更新配置
-            sed -i.bak "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=$API_KEY|" .env
-            sed -i.bak "s|^OPENAI_BASE_URL=.*|OPENAI_BASE_URL=$BASE_URL|" .env
-            sed -i.bak "s|^OPENAI_MODEL=.*|OPENAI_MODEL=$MODEL|" .env
+            sed -i '' "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=$API_KEY|" .env
+            sed -i '' "s|^OPENAI_BASE_URL=.*|OPENAI_BASE_URL=$BASE_URL|" .env
+            sed -i '' "s|^OPENAI_MODEL=.*|OPENAI_MODEL=$MODEL|" .env
             rm -f .env.bak
 
             echo ""
@@ -556,11 +556,11 @@ if [[ $config_zentao =~ ^[Yy]$ ]]; then
     fi
 
     # 写入配置到 .env
-    sed -i.bak "s|^ZENTAO_ENABLED=.*|ZENTAO_ENABLED=true|" .env
-    sed -i.bak "s|^ZENTAO_URL=.*|ZENTAO_URL=$ZENTAO_URL|" .env
-    sed -i.bak "s|^ZENTAO_USERNAME=.*|ZENTAO_USERNAME=$ZENTAO_USERNAME|" .env
-    sed -i.bak "s|^ZENTAO_PASSWORD=.*|ZENTAO_PASSWORD=$ZENTAO_PASSWORD|" .env
-    sed -i.bak "s|^ZENTAO_CREATE_TASK_URL=.*|ZENTAO_CREATE_TASK_URL=$ZENTAO_EXECUTION_ID|" .env
+    sed -i '' "s|^ZENTAO_ENABLED=.*|ZENTAO_ENABLED=true|" .env
+    sed -i '' "s|^ZENTAO_URL=.*|ZENTAO_URL=$ZENTAO_URL|" .env
+    sed -i '' "s|^ZENTAO_USERNAME=.*|ZENTAO_USERNAME=$ZENTAO_USERNAME|" .env
+    sed -i '' "s|^ZENTAO_PASSWORD=.*|ZENTAO_PASSWORD=$ZENTAO_PASSWORD|" .env
+    sed -i '' "s|^ZENTAO_CREATE_TASK_URL=.*|ZENTAO_CREATE_TASK_URL=$ZENTAO_EXECUTION_ID|" .env
     rm -f .env.bak
 
     echo ""
