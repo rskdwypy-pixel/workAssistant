@@ -32,15 +32,22 @@ PBKDF2_ITER=200000
 usage() {
   cat <<EOF
 用法：
-  $(basename "$0") <口令>    # 交互式输入口令，不留在 shell 历史里
+  $(basename "$0") export   # 把 .env 加密成 secrets.env.enc，供入库
+  $(basename "$0") import   # 在新机器解密还原 .env
 
 说明：
-  导出后会把 ${ENC_FILE#"${PROJECT_DIR}/"} 加入 git 提交（明文 .env 仍保持忽略）。
+  口令交互式输入（不回显），不要作为命令行参数传，以免留在 shell 历史里。
+  导出后请自行 git add ${ENC_FILE#"${PROJECT_DIR}/"} 并提交。
   口令请单独记在密码管理器里，不要和 GitHub 账号密码复用。
 EOF
 }
 
-[ $# -ge 1 ] && usage && exit 1
+# 合法子命令校验。注意不能写成 [ $# -ge 1 ]：正常调用 `./export-secrets.sh export`
+# 的 $# 就是 1，会被误判为「没给子命令」。
+case "${1:-}" in
+  export|import) ;;
+  *) usage; exit 1 ;;
+esac
 
 if ! command -v openssl >/dev/null 2>&1; then
   echo "❌ 未找到 openssl，无法加解密。请先安装 openssl。" >&2

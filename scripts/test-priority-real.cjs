@@ -17,6 +17,22 @@ const newtabSrc = fs.readFileSync(path.join(EXT, 'newtab.js'), 'utf8');
 const results = [];
 const check = (name, pass, extra = '') => results.push({ name, pass: !!pass, extra });
 
+/**
+ * 轮询等待条件成立。
+ *
+ * 不用固定 sleep 次数：不同 jsdom 版本的 microtask / Promise 调度时序不同，
+ * 写死「等 N 拍」会在某些版本上过早判定。这里等待真正的条件本身。
+ */
+const waitFor = async (predicate, timeoutMs = 2000) => {
+  const step = 10;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await new Promise(r => setTimeout(r, step));
+  }
+  return predicate();
+};
+
 function extractFunction(name) {
   const start = newtabSrc.indexOf(`async function ${name}(`);
   if (start < 0) throw new Error(`源码里找不到 async function ${name}`);
@@ -119,6 +135,11 @@ async function main() {
     const tasks = [mkTask({ zentaoId: 945, zentaoExecution: '174' })];
     install(win, { backend: 'ok', tasks });
     await win.updateTaskPriority('t1', 1);
+    // trackSync 内部用 inflight Promise 串行化。若调用时队列还是空的，
+    // waitAll 会立刻返回，此时同步可能尚未登记 —— 表现为「推了 0 次」。
+    // 这在不同 jsdom 版本下 microtask 调度时序不同，所以这里轮询等待，
+    // 断言真正的条件（推送发生），而不是依赖固定的等待次数。
+    await waitFor(() => win.__events.zentaoEdits > 0, 2000);
     await win.OptimisticUI.waitAll('t1');
     check('成功后推送禅道', win.__events.zentaoEdits === 1, `推了 ${win.__events.zentaoEdits} 次`);
   }

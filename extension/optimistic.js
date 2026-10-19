@@ -96,6 +96,38 @@
   }
 
   /**
+   * 找到任务卡片节点。防御式实现，任何异常/缺失都退化为遍历查找，
+   * 绝不让「找不到节点」升级成「同步状态更新整体失败」。
+   *
+   * @param {string|number} taskId
+   * @returns {Element|null}
+   */
+  function findTaskCard(taskId) {
+    const id = String(taskId);
+
+    // 首选：精确的属性选择器（快）。CSS.escape 不存在时跳过这一步。
+    if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') {
+      try {
+        const hit = document.querySelector(`.task-card[data-task-id="${CSS.escape(id)}"]`);
+        if (hit) return hit;
+      } catch (e) {
+        // id 含非法选择器字符时 querySelector 会抛 SyntaxError，继续走兜底
+      }
+    }
+
+    // 兜底：遍历比较 attribute 值，绕开选择器解析
+    try {
+      const cards = document.querySelectorAll('.task-card[data-task-id]');
+      for (let i = 0; i < cards.length; i++) {
+        if (cards[i].getAttribute('data-task-id') === id) return cards[i];
+      }
+    } catch (e) {
+      // 连 querySelectorAll 都不可用（极端环境），放弃更新角标
+    }
+    return null;
+  }
+
+  /**
    * 把任务塞进 allTasks 并立刻重渲染（不重新请求后端）
    * @param {object} task 任务对象，需带 id
    */
@@ -147,7 +179,12 @@
     // 重渲染后节点已是新的，所以先渲染再取节点
     if (shouldRerender) rerender();
 
-    const card = document.querySelector(`.task-card[data-task-id="${CSS.escape(String(taskId))}"]`);
+    // 定位卡片。任务 id 含引号/反斜杠等特殊字符时，未转义的选择器会让
+    // querySelector 抛 SyntaxError，把整个同步状态更新连带打断；
+    // 而 CSS 在部分环境（老浏览器、测试的 jsdom）里并不存在。
+    // 这里做双重防御：CSS 缺失时退化为全量查找，选择器非法时也退化为遍历，
+    // 无论哪种情况都不能让角标更新失败。
+    const card = findTaskCard(taskId);
     if (!card) return;
 
     if (state === 'idle') {
@@ -206,10 +243,21 @@
       quiet = false
     } = options;
 
+    // 角标是纯装饰，渲染失败绝不能影响同步本身的结果处理。
+    // 统一包一层：吞掉异常并告警，保证禅道结果照常判定。
+    const markSync = (id, state, reason) => {
+      if (!markCard) return;
+      try {
+        setCardSyncState(id, state, reason);
+      } catch (e) {
+        console.warn('[Optimistic] 更新卡片同步角标失败（已忽略）:', e);
+      }
+    };
+
     // 同一任务串行化：上一次没跑完就先排队，避免禅道状态被乱序覆盖
     const prev = inflight.get(String(taskId)) || Promise.resolve();
     const run = prev.then(async () => {
-      if (markCard) setCardSyncState(taskId, 'syncing');
+      markSync(taskId, 'syncing');
 
       let result;
       try {
@@ -219,7 +267,7 @@
       }
 
       if (result && result.success) {
-        if (markCard) setCardSyncState(taskId, 'idle');
+        markSync(taskId, 'idle');
         if (typeof onSuccess === 'function') {
           try { await onSuccess(result); } catch (e) { console.warn('[Optimistic] onSuccess 出错:', e); }
         }
@@ -236,7 +284,7 @@
 
       // 失败：保留同步按钮，让用户能手动重试
       const reason = (result && (result.message || result.reason)) || '未知错误';
-      if (markCard) setCardSyncState(taskId, 'failed', reason);
+      markSync(taskId, 'failed', reason);
       if (typeof onFailure === 'function') {
         try { await onFailure(result); } catch (e) { console.warn('[Optimistic] onFailure 出错:', e); }
       }
