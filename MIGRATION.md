@@ -1,5 +1,8 @@
 # 换机迁移指南
 
+> **让新机器上的 AI 来做？** 把 [`NEW-MACHINE-PROMPT.md`](NEW-MACHINE-PROMPT.md)
+> 全文复制给它即可，里面是完整可执行的指令。
+
 目标：新机器拉取代码后，恢复到与旧机器一致的可运行状态。
 
 ## 一条命令的版本（配置已加密入库）
@@ -7,9 +10,19 @@
 ```bash
 git clone https://github.com/rskdwypy-pixel/workAssistant.git
 cd workAssistant
-npm install
-./scripts/import-secrets.sh      # 输入导出时设的口令，还原 .env
+./scripts/export-secrets.sh import   # 输入导出时设的口令
 ```
+
+`import` 会自动完成：解密 `.env` → `npm install` → 自检禅道配置项。
+末尾会打印仍需手动完成的步骤。
+
+配置变更后重新导出，**一条命令即可**（加密 + 提交 + 推送全自动）：
+
+```bash
+./scripts/export-secrets.sh export
+```
+
+> 注意脚本名统一是 `export-secrets.sh`，用子命令区分 export / import。
 
 再补两个**无法随代码迁移**的步骤（与机器/路径相关）：
 

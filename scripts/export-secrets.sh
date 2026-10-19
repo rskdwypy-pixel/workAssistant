@@ -89,11 +89,45 @@ export_secrets() {
   chmod 600 "$ENC_FILE"
 
   echo "✅ 已生成 ${ENC_FILE#"${PROJECT_DIR}/"}"
-  echo ""
-  echo "下一步："
-  echo "  1. git add ${ENC_FILE#"${PROJECT_DIR}/"}"
-  echo "  2. git commit -m 'chore: 更新加密配置'"
-  echo "  3. git push"
+
+  # 顺手把密文提交推送，省得再手敲三条命令。
+  # 口令已在上面的交互中问过，这里不再索取任何凭据。
+  if ! command -v git >/dev/null 2>&1; then
+    echo "" ; echo "未找到 git，请手动执行："
+    echo "  git add ${ENC_FILE#"${PROJECT_DIR}/"} && git commit -m 'chore: 更新加密配置' && git push"
+    return 0
+  fi
+
+  cd "$PROJECT_DIR"
+  echo "正在提交并推送 ..."
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    echo "  （当前不是 git 仓库，跳过提交）"
+    return 0
+  fi
+
+  # 密文指纹入 commit message，方便日后确认换机拿到的是哪一版配置
+  local fp
+  fp="$(git hash-object "$ENC_FILE" | cut -c1-7)"
+
+  git add "$ENC_FILE" || { echo "❌ git add 失败"; return 1; }
+  git commit -q -m "chore: 更新加密配置（密文指纹 ${fp}）" \
+    || { echo "  （密文无变化，跳过提交）"; }
+
+  # remote 优先用官方 github；官方直连不通时退回 origin（镜像）
+  local remote=""
+  if git remote get-url github >/dev/null 2>&1; then remote="github"; fi
+  if [ -z "$remote" ] && git remote get-url origin >/dev/null 2>&1; then remote="origin"; fi
+  if [ -z "$remote" ]; then
+    echo "  未配置 remote，请手动 git push"
+    return 0
+  fi
+
+  if git push "$remote" HEAD >/dev/null 2>&1; then
+    echo "✅ 已推送到 ${remote}（密文指纹 ${fp}）"
+  else
+    echo "⚠️  推送失败（${remote}）。请检查网络后手动执行 git push ${remote} HEAD"
+  fi
+
   echo ""
   echo "换机后执行： ./scripts/import-secrets.sh"
 }
@@ -123,13 +157,46 @@ import_secrets() {
   chmod 600 "$ENV_FILE"
 
   echo "✅ 已还原 ${ENV_FILE#"${PROJECT_DIR}/"}"
+
+  # 自动补装依赖：新机器上 node_modules 必然不存在
+  if command -v npm >/dev/null 2>&1; then
+    if [ ! -d "${PROJECT_DIR}/node_modules" ]; then
+      echo ""
+      echo "正在安装依赖（首次较慢）..."
+      if (cd "$PROJECT_DIR" && npm install --no-audit --no-fund >/dev/null 2>&1); then
+        echo "✅ 依赖已安装"
+      else
+        echo "⚠️  依赖安装失败，请手动执行： cd ${PROJECT_DIR#"${HOME}/"} && npm install"
+      fi
+    fi
+  fi
+
+  # 自检：让「能不能跑」当场可见，而不是让用户等到装扩展才发现问题
+  if command -v node >/dev/null 2>&1; then
+    local health="skipped"
+    if (cd "$PROJECT_DIR" && node -e "
+      require('dotenv').config();
+      const need = ['ZENTAO_URL','ZENTAO_USERNAME','ZENTAO_PASSWORD'];
+      const missing = need.filter(k => !process.env[k]);
+      if (missing.length) { console.error('缺少: ' + missing.join(', ')); process.exit(1); }
+    " 2>/dev/null); then
+      health="ok"
+    else
+      health="incomplete"
+    fi
+    case "$health" in
+      ok)       echo "✅ 配置自检通过（禅道配置项齐全）" ;;
+      incomplete) echo "⚠️  .env 已还原，但禅道配置项不全 —— 可在扩展设置页补全" ;;
+      *)        echo "⚠️  配置自检未执行（需先 npm install 装 dotenv）" ;;
+    esac
+  fi
+
   echo ""
   echo "还需完成（这些与机器相关，无法随代码迁移）："
-  echo "  1. npm install"
-  echo "  2. 装扩展：浏览器扩展页加载 extension/ 目录"
-  echo "  3. npm run setup:auto-start   （注册开机自启与 Native Messaging）"
-  echo "  4. 扩展 ID 因安装路径而异，需按新 ID 重新生成 NativeMessagingHosts"
-  echo "     清单里的 allowed_origins"
+  echo "  1. 浏览器扩展页加载 extension/ 目录，拿到新的扩展 ID"
+  echo "  2. npm run setup:auto-start   （注册开机自启与 Native Messaging）"
+  echo "     注意顺序：必须先加载扩展拿到新 ID，否则宿主清单里的"
+  echo "     allowed_origins 会写错，后端连不上"
 }
 
 case "${1:-}" in
