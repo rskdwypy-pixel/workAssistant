@@ -27,7 +27,7 @@ export function syncVersion({ check = false } = {}) {
 
   const htmlPath = join(ROOT, 'extension', 'newtab.html');
   const html = readFileSync(htmlPath, 'utf8');
-  const updatedHtml = html.replace(/工作助手 v\d+\.\d+\.\d+/g, `工作助手 v${version}`);
+  const updatedHtml = html.replace(/(?:工作助手|禅道助手) v\d+\.\d+\.\d+/g, `禅道助手 v${version}`);
   if (updatedHtml !== html) {
     if (!check) writeFileSync(htmlPath, updatedHtml);
     changed.push('extension/newtab.html');

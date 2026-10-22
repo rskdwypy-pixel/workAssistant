@@ -1,5 +1,5 @@
 ﻿#
-# 工作助手 · Windows 一条命令安装 / 升级 / 卸载
+# 禅道助手 · Windows 一条命令安装 / 升级 / 卸载
 #
 #   安装 / 升级（在 PowerShell 里粘贴运行）：
 #     curl.exe -fsSL -o "$env:TEMP\wa-install.ps1" https://github.com/rskdwypy-pixel/workAssistant/releases/latest/download/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\wa-install.ps1"
@@ -169,7 +169,7 @@ try {
 
 # ==================== 卸载 ====================
 if ($Uninstall) {
-  Step '卸载工作助手'
+  Step '卸载禅道助手'
   Stop-Installed
   Remove-ItemProperty -Path $RunKey -Name $AppName -ErrorAction SilentlyContinue
   Ok '已移除开机自启'
@@ -185,7 +185,7 @@ if ($Uninstall) {
     Ok "程序已删除；数据和配置保留在 $WaHome\data（重新安装后自动使用）"
   }
   Write-Host ''
-  Write-Host '  别忘了在浏览器扩展页移除「工作助手」扩展。'
+  Write-Host '  别忘了在浏览器扩展页移除「禅道助手」扩展。'
   exit 0
 }
 
@@ -237,7 +237,7 @@ if ($haveNode) {
 }
 
 # ==================== 2. 程序 ====================
-Step '安装工作助手'
+Step '安装禅道助手'
 if (-not $Package) { $Package = "https://github.com/$Repo/releases/latest/download/workassistant.tar.gz" }
 $pkgSha = ''
 if (Test-Path -LiteralPath $Package) {
@@ -260,7 +260,7 @@ $pkgLocal = Join-Path $Tmp 'workassistant.tar.gz'
 if ($pkgFile -ne $pkgLocal) { Copy-Item -LiteralPath $pkgFile -Destination $pkgLocal -Force }
 if (-not (Expand-Tar $Tmp 'workassistant.tar.gz' 'pkg' '-xzf')) { Die '安装包解压失败' }
 $pkgDir = Get-ChildItem -LiteralPath $pkgRoot -Directory | Select-Object -First 1
-if (-not $pkgDir -or -not (Test-Path -LiteralPath (Join-Path $pkgDir.FullName '.wa-package'))) { Die '不是工作助手的安装包' }
+if (-not $pkgDir -or -not (Test-Path -LiteralPath (Join-Path $pkgDir.FullName '.wa-package'))) { Die '不是禅道助手的安装包' }
 $info = (Read-Text (Join-Path $pkgDir.FullName '.wa-package')) | ConvertFrom-Json
 $Version = [string]$info.version
 $Previous = Read-Text (Join-Path $WaHome 'current.txt')
@@ -389,12 +389,12 @@ if (-not $browser) { $browser = 'Chrome / Edge 等，地址 chrome://extensions'
 Write-Host ''
 Write-Host "  在浏览器的扩展页（$browser）："
 Write-Host '    1. 打开「开发者模式」（只需一次）'
-Write-Host '    2. 如果以前加载过「工作助手」，先把旧的移除'
+Write-Host '    2. 如果以前加载过「工作助手」或「禅道助手」，先把旧的移除'
 Write-Host '    3. 点「加载已解压的扩展程序」，在地址栏粘贴目录（已在剪贴板）后选择文件夹：'
 Write-Host "       $extDir"
 Write-Host '  然后打开一个新标签页：登录禅道，或在登录卡片上导入加密配置文件。'
 Write-Host ''
-Ok "安装完成：工作助手 $Version"
+Ok "安装完成：禅道助手 $Version"
 
 } finally {
   Remove-Item -LiteralPath $Tmp -Recurse -Force -ErrorAction SilentlyContinue

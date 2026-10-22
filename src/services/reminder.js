@@ -133,7 +133,7 @@ async function morningReminder(skipWeekendCheck = false) {
     const message = `今日待办: ${todoTasks.length} 项 | 进行中: ${inProgressTasks.length} 项`;
 
     // 发送系统通知
-    await sendSystemNotification('☀️ 早安！工作助手', message);
+    await sendSystemNotification('☀️ 早安！禅道助手', message);
 
     // 发送Webhook
     await sendMorningReminder(tasks);

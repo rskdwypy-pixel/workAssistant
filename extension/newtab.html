@@ -4,7 +4,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>工作助手</title>
+  <title>禅道助手</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/icon32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/icon16.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -234,10 +236,11 @@
         <button class="tab-btn active" data-mode="task">📋 任务</button>
         <button class="tab-btn" data-mode="bug">🐛 Bug</button>
         <button class="tab-btn" data-mode="report">📊 报告</button>
-        <!-- 右上角：读取账号时显示加载提示；已登录显示头像（点开是用户信息与设置）；未登录显示「登录禅道」 -->
+        <!-- 右上角：读取账号时显示加载提示；已登录显示头像（点开是用户信息与设置）；未登录显示「登录禅道」和设置图标 -->
         <div class="account-area" id="accountArea">
           <span id="accountLoading" class="account-loading" role="status"><span class="account-spinner" aria-hidden="true"></span>正在读取禅道账号…</span>
           <button id="accountLoginBtn" class="tab-login-btn" type="button" hidden>登录禅道</button>
+          <button id="accountSettingsBtn" class="account-settings-btn" type="button" title="设置" aria-label="设置" hidden><svg aria-hidden="true"><use href="#si-sliders"/></svg></button>
           <button id="accountAvatarBtn" class="account-avatar" type="button" aria-haspopup="true" aria-expanded="false" hidden></button>
         </div>
       </div>
@@ -792,7 +795,7 @@
             <div class="set-service">
               <div class="svc-top">
                 <span class="status-dot unknown" id="serviceStatusDot" title="检测中…"></span>
-                <span class="svc-title">工作助手后端</span>
+                <span class="svc-title">禅道助手后端</span>
                 <span class="svc-status" id="serviceStatusText">检测中…</span>
               </div>
               <div class="svc-meta">
@@ -1173,7 +1176,7 @@
           <!-- ========== 关于 ========== -->
           <section class="set-panel" id="p-about" role="tabpanel" aria-label="关于">
             <h4>关于</h4>
-            <p class="set-desc" id="aboutVersionDesc">工作助手 v1.3.0 · 界面设计方案 v1.0</p>
+            <p class="set-desc" id="aboutVersionDesc">禅道助手 v1.3.0</p>
 
             <div class="set-row">
               <div class="sr-label">版本</div>
@@ -1200,20 +1203,18 @@
             </div>
 
             <div class="set-row">
-              <div class="sr-label">本地服务</div>
-              <div class="sr-control"><span class="input-hint">127.0.0.1:3721 · Node 后端 · 数据全部留在本机</span></div>
+              <div class="sr-label">安装位置<small>程序与浏览器加载的扩展</small></div>
+              <div class="sr-control about-paths" id="aboutInstall"><span class="input-hint">读取中…</span></div>
             </div>
             <div class="set-row">
-              <div class="sr-label">浏览器扩展</div>
-              <div class="sr-control"><span class="input-hint">Manifest V3 · unpacked 开发模式</span></div>
+              <div class="sr-label">数据与日志<small>配置、任务、报告都只存在本机</small></div>
+              <div class="sr-control about-paths" id="aboutData"><span class="input-hint">读取中…</span></div>
             </div>
             <div class="set-row">
-              <div class="sr-label">界面</div>
-              <div class="sr-control"><span class="input-hint">设计令牌 v1.0 · WCAG AA 对比度 · 全键盘可达</span></div>
-            </div>
-            <div class="set-row">
-              <div class="sr-label">反馈</div>
-              <div class="sr-control"><span class="input-hint">GitHub · rskdwypy-pixel/workAssistant</span></div>
+              <div class="sr-label">反馈与源码</div>
+              <div class="sr-control">
+                <span class="input-hint"><a href="https://github.com/rskdwypy-pixel/workAssistant" target="_blank" rel="noopener">github.com/rskdwypy-pixel/workAssistant</a> · 问题与建议请提 Issue</span>
+              </div>
             </div>
           </section>
         </div>

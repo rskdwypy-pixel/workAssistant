@@ -242,7 +242,7 @@ async function sendTaskReminder(task, triggerType) {
  */
 async function testWebhook(webhookUrl, webhookType) {
   const title = '🔔 测试推送';
-  const content = '这是一条来自工作助手的测试通知。如果您收到此消息，说明 Webhook 配置成功！';
+  const content = '这是一条来自禅道助手的测试通知。如果您收到此消息，说明 Webhook 配置成功！';
   return await sendNotification(title, content, [], { url: webhookUrl, type: webhookType });
 }
 

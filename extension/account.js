@@ -118,6 +118,9 @@ const Account = {
     const avatar = document.getElementById('accountAvatarBtn');
     const loginBtn = document.getElementById('accountLoginBtn');
     if (avatar) avatar.addEventListener('click', (e) => { e.stopPropagation(); this.toggleMenu(); });
+    document.getElementById('accountSettingsBtn')?.addEventListener('click', () => {
+      if (typeof openSettingsModal === 'function') openSettingsModal();
+    });
     if (loginBtn) loginBtn.addEventListener('click', () => this.showLogin({ mode: 'first', fromButton: true }));
     document.getElementById('settingsSwitchAccountBtn')?.addEventListener('click', () => {
       document.getElementById('settingsModal')?.classList.remove('active');
@@ -132,7 +135,7 @@ const Account = {
     });
   },
 
-  /** 右上角：读取中 → 加载提示；已登录 → 头像（设置收进菜单）；未登录 → 「登录禅道」 */
+  /** 右上角：读取中 → 加载提示；已登录 → 头像（设置收进菜单）；未登录 → 「登录禅道」+ 设置图标 */
   render() {
     const s = this.state;
     const avatar = document.getElementById('accountAvatarBtn');
@@ -144,6 +147,8 @@ const Account = {
     const loggedIn = s.state !== 'unconfigured';
     avatar.hidden = !loggedIn;
     loginBtn.hidden = loggedIn;
+    const settingsBtn = document.getElementById('accountSettingsBtn');
+    if (settingsBtn) settingsBtn.hidden = loggedIn;
     if (loggedIn) {
       const a = avatarOf(s.profile, s.username);
       avatar.style.background = a.color;
@@ -273,7 +278,7 @@ const Account = {
         <div class="login-view" data-view="form">
           <div class="login-brand" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
           <h2 id="loginTitle">${titles[mode]}</h2>
-          <p class="login-sub">工作助手的任务、Bug、报告都来自禅道</p>
+          <p class="login-sub">禅道助手的任务、Bug、报告都来自禅道</p>
           ${notice ? `<div class="login-notice ${mode === 'relogin' ? 'is-warn' : ''}">${accountEsc(notice)}</div>` : ''}
           <form class="login-form" novalidate>
             <label class="login-field"><span>禅道地址</span>

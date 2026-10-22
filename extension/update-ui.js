@@ -24,8 +24,9 @@ const UpdateUI = {
     document.getElementById('updateApplyBtn')?.addEventListener('click', () => this.apply());
     document.getElementById('updateAutoToggle')?.addEventListener('change', (e) => this.setAuto(e.target.checked));
     // 打开「关于」时刷新一次
-    document.querySelector('[data-panel="p-about"]')?.addEventListener('click', () => this.load());
+    document.querySelector('[data-panel="p-about"]')?.addEventListener('click', () => { this.load(); this.loadAbout(); });
     this.load();
+    this.loadAbout();
   },
 
   trackInteraction() {
@@ -50,6 +51,46 @@ const UpdateUI = {
     } catch {
       this.render(null);
     }
+  },
+
+  /** 关于：安装位置、数据、日志（路径可一键复制） */
+  async loadAbout() {
+    const install = document.getElementById('aboutInstall');
+    const data = document.getElementById('aboutData');
+    if (!install || !data) return;
+    let a = null;
+    try {
+      const res = await this.request('/api/admin/about');
+      if (res.success) a = res.data;
+    } catch { /* 下面显示连不上 */ }
+    if (!a) {
+      install.innerHTML = data.innerHTML = '<span class="input-hint">连不上本地后台服务，读不到</span>';
+      return;
+    }
+    const row = (label, value) => {
+      const el = document.createElement('div');
+      el.className = 'about-path';
+      el.innerHTML = '<span class="ap-k"></span><code class="ap-v"></code><button type="button" class="set-btn set-btn-ghost set-btn-sm ap-copy">复制</button>';
+      el.querySelector('.ap-k').textContent = label;
+      el.querySelector('.ap-v').textContent = value;
+      el.querySelector('.ap-copy').addEventListener('click', async (e) => {
+        try {
+          await navigator.clipboard.writeText(value);
+          e.target.textContent = '已复制';
+          setTimeout(() => { e.target.textContent = '复制'; }, 1500);
+        } catch { /* 复制失败时可手动选中 */ }
+      });
+      return el;
+    };
+    install.replaceChildren(
+      row(a.installed ? '程序' : '仓库（开发版）', a.installDir),
+      row('扩展目录', a.extensionDir)
+    );
+    data.replaceChildren(row('数据', a.dataDir), ...(a.logFile ? [row('日志', a.logFile)] : []));
+    const hint = document.createElement('span');
+    hint.className = 'input-hint';
+    hint.textContent = `本地服务 127.0.0.1:${a.port} · Node ${a.node}`;
+    data.appendChild(hint);
   },
 
   async check() {

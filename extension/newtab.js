@@ -1821,7 +1821,7 @@ async function prepareImport(file) {
   [info, pass, btn].forEach(el => { el.hidden = true; });
   try {
     const parsed = JSON.parse(await file.text());
-    if (!parsed || parsed.__app !== 'workAssistant') throw new Error('不是工作助手导出的配置文件');
+    if (!parsed || parsed.__app !== 'workAssistant') throw new Error('不是禅道助手导出的配置文件');
     if (!parsed.encrypted) throw new Error('这是旧版导出的文件（不含密码与 Key）：请在原机器上用新版本重新导出');
     pendingImportFile = parsed;
     const at = parsed.exportedAt ? new Date(parsed.exportedAt).toLocaleString('zh-CN') : '未知时间';
@@ -5831,7 +5831,7 @@ function loadSettings() {
     const manifestVer = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getManifest)
       ? chrome.runtime.getManifest().version
       : '1.1.0';
-    aboutVerEl.textContent = `工作助手 v${manifestVer} · 界面设计方案 v1.0`;
+    aboutVerEl.textContent = `禅道助手 v${manifestVer}`;
   }
 
   // 提示词与主配置不在同一接口，单独拉取（完成后会刷新「已保存」基线）

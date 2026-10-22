@@ -4,6 +4,7 @@ import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { config } from '../config.js';
 
 const router = express.Router();
 
@@ -262,6 +263,28 @@ router.post('/admin/autostart', async (req, res) => {
     console.error('[Admin] 开机自启操作失败:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
+});
+
+/**
+ * GET /api/admin/about - 设置 → 关于：版本与各个位置（安装目录、数据、日志、扩展目录）
+ * 安装版在 WA_HOME 下；开发版（在仓库里运行）是仓库目录
+ */
+router.get('/admin/about', (req, res) => {
+  const home = process.env.WA_HOME || '';
+  res.json({
+    success: true,
+    data: {
+      version: config.app.version,
+      installed: !!home,
+      platform: process.platform,
+      node: process.versions.node,
+      installDir: home || PROJECT_DIR,
+      dataDir: config.paths.data,
+      logFile: process.env.WORKASSISTANT_LOG_FILE || '',
+      extensionDir: join(home || PROJECT_DIR, 'extension'),
+      port: config.server.port
+    }
+  });
 });
 
 export default router;

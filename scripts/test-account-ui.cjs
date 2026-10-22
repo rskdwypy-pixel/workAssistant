@@ -64,15 +64,18 @@ function setup(s) {
   // ============ 第一次使用 ============
   let s = { state: stateOf('unconfigured') };
   let { win, doc, $ } = setup(s);
-  check('读取账号时：右上角显示加载提示，头像和「登录禅道」都不显示',
-    !$('accountLoading').hidden && /正在读取禅道账号/.test($('accountLoading').textContent) && $('accountAvatarBtn').hidden && $('accountLoginBtn').hidden);
+  check('读取账号时：右上角显示加载提示，头像、「登录禅道」、设置图标都不显示',
+    !$('accountLoading').hidden && /正在读取禅道账号/.test($('accountLoading').textContent) && $('accountAvatarBtn').hidden && $('accountLoginBtn').hidden && $('accountSettingsBtn').hidden);
   await win.Account.init();
   check('读取完成：加载提示消失', $('accountLoading').hidden);
   let overlay = $('loginOverlay');
   check('第一次使用：弹出登录卡片（地址、账号、密码、登录、导入配置、稍后再说）',
     overlay && /登录禅道/.test(overlay.querySelector('h2').textContent) && overlay.querySelectorAll('.login-form input').length === 3 &&
     overlay.querySelector('[data-login="import"]') && /稍后再说/.test(overlay.querySelector('[data-login="skip"]').textContent));
-  check('未登录：右上角只显示「登录禅道」，没有设置按钮和头像', !$('accountLoginBtn').hidden && !$('settingsBtn') && $('accountAvatarBtn').hidden);
+  check('未登录：右上角显示「登录禅道」和设置图标，不显示头像', !$('accountLoginBtn').hidden && !$('accountSettingsBtn').hidden && $('accountAvatarBtn').hidden);
+  win.openSettingsModal = (g) => { s.settingsOpened = g || 'default'; };
+  $('accountSettingsBtn').click();
+  check('未登录：点设置图标打开设置', s.settingsOpened === 'default');
 
   overlay.querySelector('.login-submit').click();
   await tick(10);
@@ -140,7 +143,7 @@ function setup(s) {
   win.localStorage.setItem('waAiHintPending', '1');
   await win.Account.init();
   const avatar = $('accountAvatarBtn');
-  check('已登录：右上角是头像（姓名首字 + 绿点），设置按钮收进菜单', !avatar.hidden && avatar.textContent.trim() === '张' && avatar.querySelector('.account-dot.is-ok') && !$('settingsBtn') && $('accountLoginBtn').hidden && !$('loginOverlay'));
+  check('已登录：右上角是头像（姓名首字 + 绿点），设置按钮收进菜单', !avatar.hidden && avatar.textContent.trim() === '张' && avatar.querySelector('.account-dot.is-ok') && !$('settingsBtn') && $('accountSettingsBtn').hidden && $('accountLoginBtn').hidden && !$('loginOverlay'));
   check('登录后第一次打开：提示 AI 未配置（只提示一次）', doc.querySelector('.account-hint') && /AI 未配置/.test(doc.querySelector('.account-hint').textContent) && !win.localStorage.getItem('waAiHintPending'));
   doc.querySelector('.account-hint .ah-go').click();
   check('AI 提示「去配置」打开设置的 AI 分组', s.settingsOpened === 'p-ai' && !doc.querySelector('.account-hint'));

@@ -67,7 +67,7 @@ try {
   check('导入：改了文件头的内容清单也被拒绝（参与校验）', /口令不正确/.test(reject({ ...file, contents: ['别的'] }, '正确的口令 horse')));
   check('导入：旧版明文文件给出说明', /旧版/.test(reject({ __app: 'workAssistant', __version: 1, config: {} }, 'x')));
   check('导入：拒绝超大加密参数（防止拖死后端）', /参数不正确/.test(reject({ ...file, kdf: { ...file.kdf, N: 2 ** 24 } }, '正确的口令 horse')));
-  check('导入：不是本应用的文件', /不是工作助手/.test(reject({ foo: 1 }, 'x')));
+  check('导入：不是本应用的文件', /不是禅道助手/.test(reject({ foo: 1 }, 'x')));
   const decrypted = t.decryptSettings(file, '正确的口令 horse');
   check('导入：正确口令解出完整内容', JSON.stringify(decrypted) === JSON.stringify(settings));
 

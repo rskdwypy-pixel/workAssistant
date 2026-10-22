@@ -38,6 +38,7 @@ function setup(s) {
     if (s.down) throw new TypeError('Failed to fetch');
     if (u === '/health') return reply({ app: 'workassistant', version: s.healthVersion || s.status.current });
     if (u === '/api/update/status') return reply({ success: true, data: s.status });
+    if (u === '/api/admin/about') return reply({ success: true, data: s.about || { version: '1.2.0', installed: true, platform: 'darwin', node: '22.20.0', installDir: '/Users/x/Library/Application Support/WorkAssistant', dataDir: '/Users/x/Library/Application Support/WorkAssistant/data', logFile: '/Users/x/Library/Logs/WorkAssistant/backend.log', extensionDir: '/Users/x/Library/Application Support/WorkAssistant/extension', port: 3721 } });
     if (u === '/api/update/check') return reply({ success: true, data: s.afterCheck || s.status });
     if (u === '/api/update/settings') { s.status = { ...s.status, auto: JSON.parse(init.body).auto }; return reply({ success: true, data: s.status }); }
     if (u === '/api/update/apply') return reply({ success: true, data: { ...s.status, state: 'restarting' } });
@@ -58,6 +59,13 @@ function setup(s) {
   await tick(10);
   check('打开页面：让 background 看一下扩展文件是否已更新', s.messages.some(m => m.action === 'checkSelfUpdate'));
   check('已是最新：显示版本和检查时间，不显示「立即更新」', /v1\.2\.0 已是最新版本/.test($('updateStatusText').textContent) && /检查过/.test($('updateStatusText').textContent) && $('updateApplyBtn').hidden && $('updateAutoToggle').checked);
+
+  const paths = [...win.document.querySelectorAll('.about-path')].map(e => `${e.querySelector('.ap-k').textContent}=${e.querySelector('.ap-v').textContent}`);
+  check('关于：显示程序、扩展、数据、日志的位置', paths.length === 4 && /^程序=.*WorkAssistant$/.test(paths[0]) && /^扩展目录=.*extension$/.test(paths[1]) && /^数据=/.test(paths[2]) && /^日志=.*backend\.log$/.test(paths[3]), paths.join(' | '));
+  Object.defineProperty(win.navigator, 'clipboard', { value: { writeText: async (t) => { s.copied = t; } }, configurable: true });
+  win.document.querySelectorAll('.about-path .ap-copy')[1].click();
+  await tick(10);
+  check('关于：路径一键复制', s.copied === '/Users/x/Library/Application Support/WorkAssistant/extension');
 
   // 刚自动更新过
   s.status = statusOf({ lastUpdate: { from: '1.1.3', to: '1.2.0', at: '2026-10-22T02:00:00.000Z' } });
@@ -103,11 +111,14 @@ function setup(s) {
   ({ win, $ } = setup({ status: statusOf({ installed: false, state: 'dev', current: '1.2.0' }) }));
   await tick(10);
   check('开发版：说明不自动更新，按钮和开关不可用', /开发版/.test($('updateStatusText').textContent) && $('updateCheckBtn').disabled && $('updateAutoToggle').disabled);
+  ({ win, $ } = setup({ status: statusOf({ installed: false, state: 'dev' }), about: { version: '1.2.0', installed: false, platform: 'darwin', node: '22.20.0', installDir: '/repo', dataDir: '/repo/data', logFile: '', extensionDir: '/repo/extension', port: 3721 } }));
+  await tick(10);
+  check('关于（开发版）：显示仓库目录，没有日志文件就不显示', [...win.document.querySelectorAll('#aboutInstall .about-path')].some(e => e.querySelector('.ap-k').textContent === '仓库（开发版）' && e.querySelector('.ap-v').textContent === '/repo') && win.document.querySelectorAll('#aboutData .about-path').length === 1);
 
   // 连不上后台
   ({ win, $ } = setup({ status: statusOf(), down: true }));
   await tick(10);
-  check('连不上后台：说明原因', /连不上本地后台服务/.test($('updateStatusText').textContent));
+  check('连不上后台：说明原因', /连不上本地后台服务/.test($('updateStatusText').textContent) && /连不上本地后台服务/.test($('aboutInstall').textContent));
 
   // 页面操作记进 session
   s = { status: statusOf() };

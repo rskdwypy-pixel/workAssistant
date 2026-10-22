@@ -97,7 +97,7 @@ try {
   fs.writeFileSync(path.join(old, 'data', 'tasks.json'), JSON.stringify({ tasks: [{ id: 't1', title: '旧任务' }] }));
   const p110 = makePackage('1.1.0');
   let r = install('--no-service', '--package', p110, '--migrate-from', old);
-  check('全新安装成功', r.status === 0 && /安装完成：工作助手 1.1.0/.test(plain(r)), plain(r).slice(-600));
+  check('全新安装成功', r.status === 0 && /安装完成：禅道助手 1.1.0/.test(plain(r)), plain(r).slice(-600));
   check('目录结构：runtime / versions / bin / extension / data / backups / current.txt',
     ['runtime/node/bin/node', 'versions/1.1.0/src/index.js', 'bin/workassistant-run', 'bin/native-host', 'extension/manifest.json', 'data', 'backups'].every(p => fs.existsSync(path.join(WA, p))) &&
     fs.readFileSync(path.join(WA, 'current.txt'), 'utf8').trim() === '1.1.0');
@@ -181,7 +181,7 @@ try {
   r = install('--package', p110);
   const out2 = plain(r);
   if (process.env.WA_TEST_DEBUG) fs.writeFileSync(process.env.WA_TEST_DEBUG + '.old', out2);
-  check('旧方式启动的后台：认出并停掉，新后台正常启动', r.status === 0 && /已停止旧方式启动的工作助手后台/.test(out2) && health() && health().version === '1.1.0', out2.slice(-900));
+  check('旧方式启动的后台：认出并停掉，新后台正常启动', r.status === 0 && /已停止旧方式启动的禅道助手后台/.test(out2) && health() && health().version === '1.1.0', out2.slice(-900));
   check('旧方式启动的后台：顺带从它的目录迁移配置', /从 .*old-running 迁移配置和数据/.test(out2) && fs.readFileSync(path.join(WA, 'data', '.env'), 'utf8').includes('old-running'));
   check('重装同一版本：提示「重新安装」，不说「上一个版本 1.1.0」', /版本 1\.1\.0（重新安装）/.test(plain(install('--package', p110))));
   install('--uninstall', '--purge');

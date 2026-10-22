@@ -102,7 +102,7 @@ async function rebuildTask(record, exec) {
 
   // 取消旧任务
   const cancelled = await z.updateTaskStatus(oldId, 'cancel', {
-    comment: `已移到执行「${exec.name}」，新任务 #${newId}（工作助手换执行重建）`
+    comment: `已移到执行「${exec.name}」，新任务 #${newId}（禅道助手换执行重建）`
   });
   if (!cancelled.success) warnings.push(`旧任务 #${oldId} 未能取消，请在禅道里手动取消：${cancelled.message}`);
 

@@ -1,5 +1,5 @@
 // ============================================================================
-// 工作助手 - background service worker
+// 禅道助手 - background service worker
 // 所有禅道操作统一走后端直连（纯 HTTP + session cookie），
 // 不再通过 chrome.tabs / chrome.scripting 注入禅道标签页，
 // 因此执行任何操作都不会再打开新的禅道标签页。
@@ -258,7 +258,7 @@ async function syncFromZentaoViaBackend() {
       chrome.notifications.create({
         type: 'basic',
         iconUrl: 'icons/icon128.png',
-        title: '工作助手 - 禅道同步',
+        title: '禅道助手 - 禅道同步',
         message: `已同步我的任务：更新 ${d.updated || 0} 个，新增 ${d.added || 0} 个` +
           (d.bugs ? `；Bug：更新 ${d.bugs.updated || 0} 个，新增 ${d.bugs.added || 0} 个` : '') +
           (removed ? `；禅道里已删除的 ${removed} 条已从插件移除` : '')
@@ -617,14 +617,14 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       chrome.notifications.create({
         type: 'basic',
         iconUrl: 'icons/icon128.png',
-        title: '工作助手',
+        title: '禅道助手',
         message: result.success ? `任务已添加：${result.data.title}` : '添加失败，请确保后端服务正在运行'
       });
     } catch (err) {
       chrome.notifications.create({
         type: 'basic',
         iconUrl: 'icons/icon128.png',
-        title: '工作助手',
+        title: '禅道助手',
         message: '连接失败，请确保后端服务正在运行'
       });
     }

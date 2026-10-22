@@ -27,7 +27,7 @@
 set -euo pipefail
 
 HOST_NAME="com.workassistant.backend"
-HOST_DESC="工作助手本地后端服务"
+HOST_DESC="禅道助手本地后端服务"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LAUNCHER="$PROJECT_DIR/scripts/backend-launcher.sh"
 NODE_PATH_FILE="$PROJECT_DIR/scripts/.node-path"
@@ -238,7 +238,7 @@ else
 fi
 
 echo "════════════════════════════════════════════"
-echo "  工作助手 · 后端自动启动宿主注册"
+echo "  禅道助手 · 后端自动启动宿主注册"
 echo "════════════════════════════════════════════"
 echo "  项目目录: $PROJECT_DIR"
 echo ""

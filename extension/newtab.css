@@ -2897,6 +2897,14 @@ body {
   color: var(--primary); font-size: 13px; font-weight: 600; cursor: pointer; transition: all .2s;
 }
 .tab-login-btn:hover { background: var(--primary); color: #fff; }
+/* 未登录（本地模式）时的设置入口：已登录时设置在头像菜单里 */
+.account-settings-btn {
+  width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; flex: none;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-surface);
+  color: var(--text-secondary); cursor: pointer; transition: all .2s;
+}
+.account-settings-btn svg { width: 18px; height: 18px; }
+.account-settings-btn:hover, .account-settings-btn:focus-visible { border-color: var(--primary); color: var(--primary); outline: none; }
 .account-avatar {
   position: relative; width: 34px; height: 34px; border-radius: 50%; border: none; flex: none;
   display: inline-flex; align-items: center; justify-content: center; cursor: pointer;

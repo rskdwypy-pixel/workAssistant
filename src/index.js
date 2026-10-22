@@ -112,7 +112,7 @@ function startServer() {
 
   const httpServer = app.listen(server.port, server.host, () => {
     console.log('╔════════════════════════════════════════╗');
-    console.log('║        🏠 工作助手服务已启动           ║');
+    console.log('║        🏠 禅道助手服务已启动           ║');
     console.log('╠════════════════════════════════════════╣');
     console.log(`║  地址: http://${server.host}:${server.port}     ║`);
     console.log(`║  早间提醒: 每天 ${config.schedule.morningHour}:00           ║`);
@@ -138,11 +138,11 @@ function startServer() {
       // 已有本项目后端在跑 = 正常让位，以 0 退出：
       // LaunchAgent 的 KeepAlive 只对异常退出重启，不会因此陷入重启循环。
       if (await isOurBackendOnPort()) {
-        console.error(`端口 ${server.port} 已有工作助手后端在运行，本实例退出（不重复启动）`);
+        console.error(`端口 ${server.port} 已有禅道助手后端在运行，本实例退出（不重复启动）`);
         process.exit(0);
       }
       // 被别的程序占了：以非 0 退出，让 launchd 稍后重试，并在日志里说清楚
-      console.error(`端口 ${server.port} 被其他程序占用，工作助手后端无法启动。` +
+      console.error(`端口 ${server.port} 被其他程序占用，禅道助手后端无法启动。` +
         `可执行 ${process.platform === 'win32' ? `netstat -ano | findstr :${server.port}` : `lsof -nP -iTCP:${server.port} -sTCP:LISTEN`} 查看占用者，或在 .env 中修改 PORT`);
       process.exit(2);
     }

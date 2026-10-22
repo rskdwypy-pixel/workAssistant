@@ -199,7 +199,7 @@ export function createUpdater(opts = {}) {
     const pkgDir = join(unpack, top[0].name);
     let info;
     try { info = JSON.parse(readFileSync(join(pkgDir, '.wa-package'), 'utf8')); } catch { info = null; }
-    if (!info || info.app !== 'workassistant' || info.version !== version) throw new Error('不是工作助手的安装包，或版本号对不上');
+    if (!info || info.app !== 'workassistant' || info.version !== version) throw new Error('不是禅道助手的安装包，或版本号对不上');
     if (info.node && compareVersions(info.node, process.versions.node) > 0) {
       const e = new Error(`新版本 ${version} 需要更新运行环境（Node ${info.node}），请重新运行一次安装命令`);
       e.needsInstaller = true;

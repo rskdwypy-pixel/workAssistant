@@ -1,5 +1,5 @@
 /* ============================================================================
-   工作助手 · 设置页设计系统 v1.0
+   禅道助手 · 设置页设计系统 v1.0
    ----------------------------------------------------------------------------
    与 docs/SETTINGS_PROTOTYPE.html 同源。
 
@@ -563,3 +563,14 @@ body.debug-on .debug-only.block { display: block; }
 body.debug-on .settings-modal-content .set-danger { display: flex; }
 .set-danger .sd-text { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--text-2); line-height: 1.6; }
 .set-danger .sd-text b { font-size: 13px; color: var(--st-danger); }
+
+/* 关于：路径（可复制） */
+.settings-modal-content .about-paths { gap: 8px; }
+.settings-modal-content .about-path { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.settings-modal-content .about-path .ap-k { flex: none; width: 56px; font-size: 12px; color: var(--text-muted-warm); }
+.settings-modal-content .about-path .ap-v {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+  background: var(--bg-sunken-warm); border: 1px solid var(--border-warm); border-radius: 4px; padding: 3px 6px;
+}
+.settings-modal-content .about-path .ap-copy { flex: none; }

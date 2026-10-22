@@ -115,7 +115,7 @@ function encryptSettings(settings, passphrase) {
  * @returns {Object} settings
  */
 function decryptSettings(file, passphrase) {
-  if (!file || file.__app !== APP) throw new Error('不是工作助手导出的配置文件');
+  if (!file || file.__app !== APP) throw new Error('不是禅道助手导出的配置文件');
   if (!file.encrypted) throw new Error('这是旧版导出的文件（不含密码与 Key，且旧版导入没有生效）：请在原机器上用新版本重新导出');
   if (file.__version > VERSION) throw new Error('配置文件来自更新的版本，请先升级插件');
   if (file.cipher !== 'aes-256-gcm' || !file.kdf || file.kdf.name !== 'scrypt') throw new Error('不支持的加密方式');

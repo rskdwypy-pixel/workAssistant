@@ -178,7 +178,7 @@ async function restartSupervisor(env) {
 
   // ===== 系统通知 =====
   const { WIN_TOAST_SCRIPT } = await import(require('url').pathToFileURL(path.join(ROOT, 'src', 'utils', 'winToast.js')).href);
-  const toast = ps(WIN_TOAST_SCRIPT, { WA_NOTIFY_TITLE: '工作助手测试', WA_NOTIFY_MESSAGE: '通知内容 "带引号" 与 $(whoami)' });
+  const toast = ps(WIN_TOAST_SCRIPT, { WA_NOTIFY_TITLE: '禅道助手测试', WA_NOTIFY_MESSAGE: '通知内容 "带引号" 与 $(whoami)' });
   console.log(`  · 系统通知脚本：${toast.status === 0 ? '执行成功' : `执行失败（虚拟机没有桌面会话时属正常）：${toast.out.trim().split('\n')[0]}`}`);
 
   // ===== 自动更新 =====

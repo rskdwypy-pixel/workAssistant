@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# 工作助手 · Mac 一条命令安装 / 升级 / 卸载
+# 禅道助手 · Mac 一条命令安装 / 升级 / 卸载
 #
 #   安装 / 升级：curl -fsSL https://github.com/rskdwypy-pixel/workAssistant/releases/latest/download/install.sh | bash
 #   卸载：       bash install.sh --uninstall          （保留数据）
@@ -119,7 +119,7 @@ diagnose() {
 
 # ==================== 卸载 ====================
 if [[ "$UNINSTALL" == "1" ]]; then
-  step "卸载工作助手"
+  step "卸载禅道助手"
   stop_launch_agent
   rm -f "$PLIST"
   ok "已移除开机自启"
@@ -136,7 +136,7 @@ if [[ "$UNINSTALL" == "1" ]]; then
     ok "程序已删除；数据和配置保留在 $WA_HOME/data（重新安装后自动使用）"
   fi
   echo ""
-  echo "  别忘了在浏览器扩展页移除「工作助手」扩展。"
+  echo "  别忘了在浏览器扩展页移除「禅道助手」扩展。"
   exit 0
 fi
 
@@ -177,7 +177,7 @@ fi
 NODE="$NODE_DIR/bin/node"
 
 # ==================== 2. 程序 ====================
-step "安装工作助手"
+step "安装禅道助手"
 if [[ -z "$PACKAGE" ]]; then
   PACKAGE="https://github.com/$REPO/releases/latest/download/workassistant.tar.gz"
 fi
@@ -198,7 +198,7 @@ fi
 mkdir -p "$TMP/pkg"
 tar -xzf "$PKG_FILE" -C "$TMP/pkg"
 PKG_DIR="$(find "$TMP/pkg" -mindepth 1 -maxdepth 1 -type d | head -1)"
-[[ -f "$PKG_DIR/.wa-package" ]] || die "不是工作助手的安装包"
+[[ -f "$PKG_DIR/.wa-package" ]] || die "不是禅道助手的安装包"
 VERSION="$("$NODE" -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).version' "$PKG_DIR/.wa-package")"
 PREVIOUS="$(cat "$WA_HOME/current.txt" 2>/dev/null || true)"
 
@@ -282,7 +282,7 @@ else
   step "注册开机自启并启动后台服务"
   stop_launch_agent
   for _ in $(seq 1 20); do [[ -z "$(port_pid)" ]] && break; sleep 0.25; done
-  # 端口还被占着：旧方式启动的工作助手后台就停掉它；别的程序不动它，说清楚是谁
+  # 端口还被占着：旧方式启动的禅道助手后台就停掉它；别的程序不动它，说清楚是谁
   PID_ON_PORT="$(port_pid)"
   if [[ -n "$PID_ON_PORT" ]]; then
     if is_old_workassistant "$PID_ON_PORT"; then
@@ -295,7 +295,7 @@ else
       for _ in $(seq 1 20); do [[ -z "$(port_pid)" ]] && break; sleep 0.25; done
       [[ -n "$(port_pid)" ]] && kill -9 "$(port_pid)" 2>/dev/null || true
       sleep 0.5
-      ok "已停止旧方式启动的工作助手后台（${OLD_DIR}）"
+      ok "已停止旧方式启动的禅道助手后台（${OLD_DIR}）"
     else
       die "端口 $PORT 被另一个程序占用：PID $PID_ON_PORT  $(proc_cmd "$PID_ON_PORT" | cut -c1-120)。请关闭它后重新安装"
     fi
@@ -327,13 +327,13 @@ cat <<GUIDE
 
   在浏览器的扩展页（${BROWSER:-Chrome / Edge 等，地址 chrome://extensions}）：
     1. 打开右上角「开发者模式」（只需一次）
-    2. 如果以前加载过「工作助手」，先把旧的移除
+    2. 如果以前加载过「工作助手」或「禅道助手」，先把旧的移除
     3. 点「加载已解压的扩展程序」，按 ⌘⇧G 粘贴目录（已在剪贴板）：
        $WA_HOME/extension
   然后打开一个新标签页：登录禅道，或在登录卡片上导入加密配置文件。
 
 GUIDE
-ok "安装完成：工作助手 $VERSION"
+ok "安装完成：禅道助手 $VERSION"
 }
 
 main "$@"

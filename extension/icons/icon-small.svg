@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <!-- 16px 简化版：只留底色、禅圆、对勾，笔画加粗 -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366F1"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="16" height="16" rx="3.5" fill="url(#bg)"/>
+  <path d="M11.3 4.2 A5 5 0 1 0 13 8" fill="none" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M5.4 8.2 L7.2 10 L10.6 6.4" fill="none" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
