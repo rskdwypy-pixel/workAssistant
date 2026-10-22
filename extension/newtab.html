@@ -234,10 +234,10 @@
         <button class="tab-btn active" data-mode="task">📋 任务</button>
         <button class="tab-btn" data-mode="bug">🐛 Bug</button>
         <button class="tab-btn" data-mode="report">📊 报告</button>
-        <!-- 右上角：已登录显示头像（点开是用户信息与设置）；未登录显示「登录禅道」与设置 -->
+        <!-- 右上角：读取账号时显示加载提示；已登录显示头像（点开是用户信息与设置）；未登录显示「登录禅道」 -->
         <div class="account-area" id="accountArea">
+          <span id="accountLoading" class="account-loading" role="status"><span class="account-spinner" aria-hidden="true"></span>正在读取禅道账号…</span>
           <button id="accountLoginBtn" class="tab-login-btn" type="button" hidden>登录禅道</button>
-          <button id="settingsBtn" class="tab-settings-btn" type="button" title="设置">⚙️ 设置</button>
           <button id="accountAvatarBtn" class="account-avatar" type="button" aria-haspopup="true" aria-expanded="false" hidden></button>
         </div>
       </div>
@@ -1173,7 +1173,7 @@
           <!-- ========== 关于 ========== -->
           <section class="set-panel" id="p-about" role="tabpanel" aria-label="关于">
             <h4>关于</h4>
-            <p class="set-desc" id="aboutVersionDesc">工作助手 v1.1.2 · 界面设计方案 v1.0</p>
+            <p class="set-desc" id="aboutVersionDesc">工作助手 v1.1.3 · 界面设计方案 v1.0</p>
 
             <div class="set-row">
               <div class="sr-label">本地服务</div>

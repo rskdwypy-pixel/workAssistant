@@ -1972,28 +1972,6 @@ body {
   border-bottom-color: var(--primary);
 }
 
-/* 标签栏右侧的设置按钮（任务 / Bug / 报告页都能打开设置） */
-.tab-settings-btn {
-  margin-left: auto;
-  align-self: center;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.tab-settings-btn:hover {
-  border-color: var(--primary);
-  color: var(--primary);
-}
-
 /* 侧栏「智能总结」标题右侧的图标按钮（历史报告 / 提示词） */
 .summary-head-actions {
   display: flex;
@@ -2906,7 +2884,13 @@ body {
 
 /* ==================== 账号：右上角、用户菜单、登录卡片、重置 ==================== */
 .account-area { margin-left: auto; align-self: center; display: flex; align-items: center; gap: 8px; position: relative; }
-.account-area .tab-settings-btn { margin-left: 0; }
+.account-loading { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
+.account-spinner {
+  width: 14px; height: 14px; border-radius: 50%; flex: none;
+  border: 2px solid var(--border); border-top-color: var(--primary); animation: account-spin .8s linear infinite;
+}
+@keyframes account-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .account-spinner { animation-duration: 2.4s; } }
 .account-area [hidden] { display: none !important; }
 .tab-login-btn {
   padding: 6px 14px; border: 1px solid var(--primary); border-radius: var(--radius-sm); background: var(--bg-surface);

@@ -272,8 +272,8 @@ function setup(state) {
   items[1].click();
   await tick(20);
   check('历史报告：点开即在窗口中查看，可返回列表', /今天主要在联调接口/.test(doc.getElementById('reportDrawer').textContent) && doc.querySelector('#reportDrawer [data-report-act="history"]'));
-  check('设置按钮在标签栏右侧（报告页也能打开），看板头部不再有设置 / 历史按钮',
-    doc.querySelector('.mode-tabs #settingsBtn') && !doc.querySelector('.task-board-header #settingsBtn') && !doc.getElementById('bugSettingsBtn'));
+  check('右上角不再有设置按钮（设置在头像菜单里），看板头部也没有设置 / 历史按钮',
+    !doc.getElementById('settingsBtn') && !doc.getElementById('bugSettingsBtn'));
 
   // ============ 设置 → 全员报告成员 ============
   s = { members: [{ account: 'lijc', realname: '李佳成', role: 'dev' }, { account: 'wangr', realname: '周航', role: '' }], selected: ['wangr', 'gone'] };

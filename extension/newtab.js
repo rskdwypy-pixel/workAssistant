@@ -1731,7 +1731,6 @@ function bindEvents() {
   });
 
   // 设置
-  document.getElementById('settingsBtn').addEventListener('click', () => openSettingsModal());
 
   document.getElementById('closeSettings').addEventListener('click', () => {
     document.getElementById('settingsModal').classList.remove('active');

@@ -54,10 +54,18 @@ const STATUS_TEXT = { ok: '已连接', offline: '无法连接禅道', invalid: '
 const Account = {
   state: null,
   menuOpen: false,
+  // 连不上后台时的自动重试：刚装好或刚开机，后台可能还在启动（浏览器宿主正在拉起它）
+  connectRetries: 12,
+  connectRetryMs: 1500,
 
   async init() {
     this.bind();
     await this.refresh();
+    for (let i = 0; !this.state && this.backendProblem === 'down' && i < this.connectRetries; i++) {
+      this.setLoadingText('正在连接本地后台服务…');
+      await new Promise(r => setTimeout(r, this.connectRetryMs));
+      await this.refresh();
+    }
     const s = this.state;
     // 连不上后台 / 后台不认这个插件：明确提示（以前静默停在默认界面，看起来像旧版插件）
     if (!s) return this.showBackendNotice();
@@ -73,6 +81,12 @@ const Account = {
     window.addEventListener('focus', () => {
       if (Date.now() - lastFocus > 60 * 1000) { lastFocus = Date.now(); this.refresh(); }
     });
+  },
+
+  /** 右上角加载提示的文字（保留前面的转圈图标） */
+  setLoadingText(text) {
+    const el = document.getElementById('accountLoading');
+    if (el && el.lastChild) el.lastChild.textContent = text;
   },
 
   /** 未登录（含点了「稍后再说」的本地模式） */
@@ -115,17 +129,18 @@ const Account = {
     });
   },
 
-  /** 右上角：已登录 → 头像（设置收进菜单）；未登录 → 「登录禅道」+ 设置 */
+  /** 右上角：读取中 → 加载提示；已登录 → 头像（设置收进菜单）；未登录 → 「登录禅道」 */
   render() {
     const s = this.state;
     const avatar = document.getElementById('accountAvatarBtn');
     const loginBtn = document.getElementById('accountLoginBtn');
-    const settingsBtn = document.getElementById('settingsBtn');
+    // 读到账号状态就撤掉加载提示；一直连不上后台时由 showBackendNotice 撤掉并说明原因
+    const loading = document.getElementById('accountLoading');
+    if (loading && s) loading.hidden = true;
     if (!avatar || !s) return;
     const loggedIn = s.state !== 'unconfigured';
     avatar.hidden = !loggedIn;
     loginBtn.hidden = loggedIn;
-    settingsBtn.hidden = loggedIn;
     if (loggedIn) {
       const a = avatarOf(s.profile, s.username);
       avatar.style.background = a.color;
@@ -407,6 +422,8 @@ const Account = {
   /** 连不上本地后台 / 后台太旧不认这个插件：说清楚原因和怎么修，可一键复制安装命令、重试 */
   showBackendNotice() {
     document.getElementById('backendNotice')?.remove();
+    const loading = document.getElementById('accountLoading');
+    if (loading) loading.hidden = true;
     const kind = this.backendProblem || 'down';
     const text = {
       down: '连不上本地后台服务（127.0.0.1:3721）。请在终端重新运行安装命令；仍不行时查看日志 ~/Library/Logs/WorkAssistant/backend.log。',

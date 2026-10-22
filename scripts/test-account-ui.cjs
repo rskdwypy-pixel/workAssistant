@@ -42,7 +42,8 @@ function setup(s) {
     const body = init.body ? JSON.parse(init.body) : null;
     s.requests.push({ method, url: u, body });
     const reply = (b, status = 200) => ({ ok: status < 400, status, json: async () => b });
-    if (s.down) throw new TypeError('Failed to fetch');
+    // down：true 一直连不上；数字 = 前几次连不上（后台还在启动）
+    if (s.down) { if (typeof s.down === 'number') s.down--; throw new TypeError('Failed to fetch'); }
     if (s.reject) return reply({ success: false, message: 'Forbidden' }, 403);
     if (u.startsWith('/api/account/login')) return reply(s.login ? s.login(body) : { success: false, message: 'x' });
     if (u.startsWith('/api/account/logout')) return reply({ success: true, data: stateOf('unconfigured') });
@@ -54,7 +55,7 @@ function setup(s) {
   win.Toast = { success: (m) => s.toasts.push(m), error: (m) => s.toasts.push(m), info: (m) => s.toasts.push(m), warning: () => {} };
   win.Confirm = { show: async (t, m) => { s.confirms.push(m); return s.confirmAnswer !== false; } };
   win.openSettingsModal = (g) => { s.settingsOpened = g || 'default'; };
-  win.eval(`var API_BASE_URL = 'http://127.0.0.1:3721';\n${REP}\n${ACC.replace(/if \(typeof document !== 'undefined'\) \{[\s\S]*?\n\}\n?$/, '')}\nwindow.Account = Account; Account.reload = () => { window.__s.reloads++; };`);
+  win.eval(`var API_BASE_URL = 'http://127.0.0.1:3721';\n${REP}\n${ACC.replace(/if \(typeof document !== 'undefined'\) \{[\s\S]*?\n\}\n?$/, '')}\nwindow.Account = Account; Account.reload = () => { window.__s.reloads++; }; Account.connectRetryMs = 5;`);
   win.__s = s;
   return { win, doc: win.document, $: (id) => win.document.getElementById(id) };
 }
@@ -63,12 +64,15 @@ function setup(s) {
   // ============ 第一次使用 ============
   let s = { state: stateOf('unconfigured') };
   let { win, doc, $ } = setup(s);
+  check('读取账号时：右上角显示加载提示，头像和「登录禅道」都不显示',
+    !$('accountLoading').hidden && /正在读取禅道账号/.test($('accountLoading').textContent) && $('accountAvatarBtn').hidden && $('accountLoginBtn').hidden);
   await win.Account.init();
+  check('读取完成：加载提示消失', $('accountLoading').hidden);
   let overlay = $('loginOverlay');
   check('第一次使用：弹出登录卡片（地址、账号、密码、登录、导入配置、稍后再说）',
     overlay && /登录禅道/.test(overlay.querySelector('h2').textContent) && overlay.querySelectorAll('.login-form input').length === 3 &&
     overlay.querySelector('[data-login="import"]') && /稍后再说/.test(overlay.querySelector('[data-login="skip"]').textContent));
-  check('未登录：右上角显示「登录禅道」和设置，不显示头像', !$('accountLoginBtn').hidden && !$('settingsBtn').hidden && $('accountAvatarBtn').hidden);
+  check('未登录：右上角只显示「登录禅道」，没有设置按钮和头像', !$('accountLoginBtn').hidden && !$('settingsBtn') && $('accountAvatarBtn').hidden);
 
   overlay.querySelector('.login-submit').click();
   await tick(10);
@@ -136,7 +140,7 @@ function setup(s) {
   win.localStorage.setItem('waAiHintPending', '1');
   await win.Account.init();
   const avatar = $('accountAvatarBtn');
-  check('已登录：右上角是头像（姓名首字 + 绿点），设置按钮收进菜单', !avatar.hidden && avatar.textContent.trim() === '张' && avatar.querySelector('.account-dot.is-ok') && $('settingsBtn').hidden && $('accountLoginBtn').hidden && !$('loginOverlay'));
+  check('已登录：右上角是头像（姓名首字 + 绿点），设置按钮收进菜单', !avatar.hidden && avatar.textContent.trim() === '张' && avatar.querySelector('.account-dot.is-ok') && !$('settingsBtn') && $('accountLoginBtn').hidden && !$('loginOverlay'));
   check('登录后第一次打开：提示 AI 未配置（只提示一次）', doc.querySelector('.account-hint') && /AI 未配置/.test(doc.querySelector('.account-hint').textContent) && !win.localStorage.getItem('waAiHintPending'));
   doc.querySelector('.account-hint .ah-go').click();
   check('AI 提示「去配置」打开设置的 AI 分组', s.settingsOpened === 'p-ai' && !doc.querySelector('.account-hint'));
@@ -204,12 +208,22 @@ function setup(s) {
   check('重置：带上「同时清空本地数据」并刷新', reset && reset.body.includeData === true && s.reloads === 1);
   check('重置：清掉浏览器里的设置与草稿，保留调试模式', ['workAssistantConfig', 'taskDraft', 'lastTabMode', 'waLoginSkipped'].every(k => win.localStorage.getItem(k) === null) && win.localStorage.getItem('debugMode') === 'true');
 
+  // ============ 首次安装：后台还在启动 ============
+  s = { state: stateOf('unconfigured'), down: 3 };
+  ({ win, doc, $ } = setup(s));
+  const initing = win.Account.init();
+  await tick(8);
+  check('后台还在启动：右上角提示「正在连接本地后台服务」，先不报错', !$('accountLoading').hidden && /正在连接本地后台服务/.test($('accountLoading').textContent) && !$('backendNotice'));
+  await initing;
+  check('后台起来后：照常弹出登录卡片（本地没有禅道配置）', $('loginOverlay') && /登录禅道/.test($('loginOverlay').querySelector('h2').textContent) && !$('backendNotice') && $('accountLoading').hidden);
+
   // ============ 连不上后台 / 后台太旧 ============
   s = { state: stateOf('unconfigured'), down: true };
   ({ win, doc, $ } = setup(s));
   await win.Account.init();
   let notice = $('backendNotice');
   check('连不上后台：明确提示并给出安装命令，不弹登录卡片', notice && /连不上本地后台服务/.test(notice.textContent) && /releases\/latest\/download\/install\.sh/.test(notice.querySelector('.bn-cmd').textContent) && !$('loginOverlay'));
+  check('连不上后台：加载提示不会一直转', $('accountLoading').hidden);
   s.down = false;
   notice.querySelector('[data-bn="retry"]').click();
   await tick(20);
