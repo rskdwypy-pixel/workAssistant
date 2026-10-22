@@ -139,8 +139,15 @@ async function updateBugStatus(bugId, newStatus, extraData = {}) {
       throw new Error(`Bug ${bugId} 不存在`);
     }
 
-    bug.status = newStatus;
+    // 只改给出的字段：以前不传状态也会把状态改成 undefined
+    if (newStatus !== undefined && newStatus !== null && newStatus !== '') bug.status = newStatus;
     bug.updatedAt = new Date().toISOString();
+    if (extraData.title !== undefined && String(extraData.title).trim()) {
+      bug.title = String(extraData.title).trim();
+      bug.content = bug.title;
+    }
+    if (extraData.priority !== undefined) bug.priority = Number(extraData.priority) || bug.priority;
+    if (extraData.severity !== undefined) bug.severity = Number(extraData.severity) || bug.severity;
 
     if (extraData.assignedTo !== undefined) {
       bug.assignedTo = extraData.assignedTo;

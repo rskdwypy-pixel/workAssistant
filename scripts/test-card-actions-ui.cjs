@@ -68,6 +68,9 @@ function setup(state) {
     const body = init.body && typeof init.body === 'string' ? JSON.parse(init.body) : null;
     state.requests.push({ method, path: u.pathname, body });
     const json = (o, status = 200) => ({ ok: status < 400, status, json: async () => o, blob: async () => new win.Blob(['x']) });
+    // 模拟后端正在重启：前 N 次请求连不上（浏览器抛 TypeError: Failed to fetch），/health 也要等到恢复
+    if (state.downCalls > 0) { state.downCalls--; throw new TypeError('Failed to fetch'); }
+    if (u.pathname === '/health') return json({ status: 'ok' });
     if (u.pathname === '/api/zentao/open') return json(state.openResult(body));
     if (u.pathname === '/api/executions') return json({ success: true, data: state.executions });
     if (u.pathname === '/api/executions/favorites') return json({ success: true, data: state.favorites.map(id => ({ id })) });
@@ -96,9 +99,9 @@ function setup(state) {
     const showTaskDetail = () => { window.__s.detailOpened = true; };
     ${extract(['escapeHtml', 'resetListenerScope', 'Confirm'])}
     ${ATT}
-    ${extract(['openInZentao', 'ExecutionPicker', 'createTaskCard'])}
+    ${extract(['fetchBackendWithRetry', 'openInZentao', 'ExecutionPicker', 'createTaskCard'])}
     ${extractStatement('[data-exec-task]')}
-    window.__api = { openInZentao, ExecutionPicker, createTaskCard, Confirm, AttachmentQuickView, AttachmentPreview, attachmentBadgeHTML };
+    window.__api = { fetchBackendWithRetry, openInZentao, ExecutionPicker, createTaskCard, Confirm, AttachmentQuickView, AttachmentPreview, attachmentBadgeHTML };
   `);
   return win;
 }
@@ -143,6 +146,21 @@ async function main() {
     const win = setup(s);
     await win.__api.openInZentao('task', 1);
     check('后端失败：提示原因，不打开空页面', s.tabs.length === 0 && s.toasts.some(t => t[0] === 'error' && /禅道未启用/.test(t[1])));
+  }
+  {
+    // 后端正在重启：第一次请求和第一次健康检查都连不上，恢复后自动重试成功
+    const s = { ...baseState(), permissionAlready: true, downCalls: 2 };
+    const win = setup(s);
+    await win.__api.openInZentao('bug', 7);
+    check('后端正在重启：等它恢复后自动重试，照常打开禅道', s.tabs.length === 1 && /bug-view-7/.test(s.tabs[0]) && !s.toasts.some(t => t[0] === 'error'), JSON.stringify(s.toasts));
+  }
+  {
+    // 一直连不上：给出能看懂的原因，而不是「Failed to fetch」
+    const s = { ...baseState(), permissionAlready: true, downCalls: 1000 };
+    const win = setup(s);
+    let msg = '';
+    try { await win.__api.fetchBackendWithRetry('http://127.0.0.1:3721/api/zentao/open', {}, 1200); } catch (e) { msg = e.message; }
+    check('后端一直连不上：提示本地服务可能正在重启', /本地服务暂时连不上/.test(msg), msg);
   }
   {
     // 卡片上的 #ID 打开禅道（不再打开插件内详情）

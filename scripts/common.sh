@@ -50,9 +50,28 @@ wa_resolve_node_for_install() {
   return 1
 }
 
-# 运行时使用的 node：安装时固化的 scripts/.node-path 优先（浏览器/launchd 不继承 shell 环境）
+# 安装版目录结构（一条命令安装的）：
+#   WorkAssistant/versions/<版本>/   程序（本脚本所在目录的上一级；打包时写入 .wa-package 标记）
+#   WorkAssistant/runtime/node/      自带的 node
+#   WorkAssistant/bin/               固定入口（workassistant-run、native-host），切换版本不用改登录项和宿主注册
+#   WorkAssistant/data/              数据与配置（.env），更新不碰
+#   WorkAssistant/current.txt        当前版本
+# 是安装版时输出 WorkAssistant 目录；在仓库里开发时返回失败
+wa_install_home() {
+  local project_dir="$1" home
+  [[ -f "$project_dir/.wa-package" ]] || return 1
+  home="$(cd "$project_dir/../.." 2>/dev/null && pwd)" || return 1
+  [[ -f "$home/current.txt" ]] || return 1
+  echo "$home"
+}
+
+# 运行时使用的 node：安装版用自带的；开发时安装时固化的 scripts/.node-path 优先（浏览器/launchd 不继承 shell 环境）
 wa_resolve_node_for_run() {
-  local project_dir="$1" saved=""
+  local project_dir="$1" saved="" home=""
+  if home="$(wa_install_home "$project_dir")" && wa_node_ok "$home/runtime/node/bin/node"; then
+    echo "$home/runtime/node/bin/node"
+    return 0
+  fi
   if [[ -f "$project_dir/scripts/.node-path" ]]; then
     saved="$(cat "$project_dir/scripts/.node-path")"
     if wa_node_ok "$saved"; then

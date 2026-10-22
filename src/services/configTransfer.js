@@ -238,6 +238,7 @@ async function applySettings(s) {
     Object.assign(config.zentao, s.zentao);
     const { clearCookies } = await import('./zentaoService.js');
     clearCookies();
+    (await import('./account.js')).invalidateState();
   }
   if (s.ai) {
     Object.assign(config.ai, { baseURL: s.ai.baseURL, model: s.ai.model, reportModel: s.ai.reportModel, apiKey: s.ai.apiKey, keys: mergedKeys });

@@ -14,6 +14,7 @@
  */
 import { join } from 'path';
 import { config } from '../config.js';
+import { decodeZentaoText } from '../utils/text.js';
 import { readJSON, writeJSON, readHistory } from '../utils/storage.js';
 
 const KIND_LABEL = { daily: '日报', weekly: '周报', monthly: '月报' };
@@ -107,7 +108,7 @@ async function mapLimit(items, limit, fn) {
 function slimTask(t, exec) {
   return {
     id: String(t.id),
-    name: t.name || '',
+    name: decodeZentaoText(t.name || ''),
     status: t.status || '',
     assignedTo: t.assignedTo || '',
     finishedBy: t.finishedBy || '',
@@ -121,8 +122,8 @@ function slimTask(t, exec) {
     lastEditedDate: dayOf(t.lastEditedDate),
     deadline: dayOf(t.deadline),
     executionId: String(exec.id),
-    executionName: exec.name || '',
-    project: exec.projectName || exec.name || '未归属项目'
+    executionName: decodeZentaoText(exec.name || ''),
+    project: decodeZentaoText(exec.projectName || exec.name || '') || '未归属项目'
   };
 }
 
@@ -173,7 +174,7 @@ async function collectRaw(period, { onProgress } = {}) {
   try {
     const [opened, resolved] = await Promise.all([z.fetchMyList('bug', 'openedBy', CH), z.fetchMyList('bug', 'resolvedBy', CH)]);
     const inRange = (d) => { const s = dayOf(d); return s && s >= period.begin && s <= period.end; };
-    const slimBug = (b) => ({ id: String(b.id), title: b.title || '', status: b.status || '', severity: b.severity, productName: b.productName || '', openedDate: dayOf(b.openedDate), resolvedDate: dayOf(b.resolvedDate), resolution: b.resolution || '' });
+    const slimBug = (b) => ({ id: String(b.id), title: decodeZentaoText(b.title || ''), status: b.status || '', severity: b.severity, productName: decodeZentaoText(b.productName || ''), openedDate: dayOf(b.openedDate), resolvedDate: dayOf(b.resolvedDate), resolution: b.resolution || '' });
     myBugs.opened = opened.items.filter(b => inRange(b.openedDate)).map(slimBug);
     myBugs.resolved = resolved.items.filter(b => inRange(b.resolvedDate)).map(slimBug);
   } catch (err) {

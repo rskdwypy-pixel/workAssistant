@@ -30,7 +30,11 @@ const SUITES = [
   'test-reports-ui',
   'test-ai-settings.mjs',
   'test-zentao-truth.mjs',
-  'test-config-transfer.mjs'
+  'test-config-transfer.mjs',
+  'test-account.mjs',
+  'test-account-ui',
+  'test-bug-board-ui',
+  'test-installer'
 ];
 
 // 让子进程能解析到项目本地的 node_modules（jsdom / acorn）

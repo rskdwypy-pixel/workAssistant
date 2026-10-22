@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { decodeZentaoText } from '../utils/text.js';
 import { createHash } from 'crypto';
 
 // 存储 cookie（内存中）
@@ -646,7 +647,7 @@ async function getMyTasks() {
 function toMyTask(t) {
   return {
     id: String(t.id),
-    name: t.name,
+    name: decodeZentaoText(t.name),
     status: t.status,
     estimate: t.estimate,
     consumed: t.consumed,
@@ -658,8 +659,8 @@ function toMyTask(t) {
     priority: t.pri,
     type: t.type,
     openedBy: t.openedBy,
-    executionName: t.executionName,
-    projectName: t.projectName,
+    executionName: decodeZentaoText(t.executionName),
+    projectName: decodeZentaoText(t.projectName),
     progress: t.progress
   };
 }
@@ -723,6 +724,9 @@ async function findDeletedInZentao(kind, ids, CH, concurrency = 6) {
   return gone;
 }
 
+/** 和我有关的 Bug：「我的地盘 → Bug」的 指派给我 / 由我创建 / 抄送给我 / 由我指派 */
+const MY_BUG_LISTS = ['assignedTo', 'openedBy', 'mailto', 'assignedBy'];
+
 /**
  * 禅道 Bug 状态 → 本地状态
  * active 且未确认 = unconfirmed，active 且已确认 = activated
@@ -735,9 +739,11 @@ function mapZentaoBugStatus(b) {
 
 /**
  * 同步「我的 Bug」到本地：
- *   - 指派给我、未关闭的 Bug：新增或更新
- *   - 我提的 Bug：只刷新本地已有记录的状态（不把历史上提过的上百个 Bug 全拉进来）
- *   - 本地有、两个列表里都没有的：逐个查详情，禅道里已删除的删掉本地记录
+ *   - 和我有关的（「我的地盘 → Bug」里的 指派给我 / 由我创建 / 抄送给我 / 由我指派）、还没解决的（激活）：新增或更新
+ *   - 已解决、已关闭的不新增；本地已有的照样按禅道刷新状态（在插件里解决的 Bug 会进「已解决」）
+ *   - 本地有、这几个列表里都没有的：逐个查详情，禅道里已删除的删掉本地记录
+ * 以前只新增「指派给我」的，「由我创建」的只刷新本地已有记录：没人指派给我时（实测 0 个），
+ * 本地数据清空后 Bug 列表就一直是空的，自己提的 53 个激活 Bug 一个都看不到。
  * @returns {Promise<{added:number, updated:number, unchanged:number, skipped:number, removed:number, total:number}>}
  */
 async function syncMyBugs() {
@@ -746,14 +752,13 @@ async function syncMyBugs() {
 
   const { removeZentaoDeleted } = await import('./taskManager.js');
 
-  let assigned;
-  let opened;
+  let related;
   let CH;
   try {
     CH = cookiesToString(await getZentaoCookies());
     const live = (b) => String(b.deleted) !== '1';
-    assigned = (await fetchMyList('bug', 'assignedTo', CH)).items.filter(live);
-    opened = (await fetchMyList('bug', 'openedBy', CH)).items.filter(live);
+    related = [];
+    for (const type of MY_BUG_LISTS) related.push(...(await fetchMyList('bug', type, CH)).items.filter(live));
   } catch (err) {
     console.error('[ZentaoService] 查询我的Bug失败:', err.message);
     throw new Error(describeZentaoTransportError(err));
@@ -765,24 +770,23 @@ async function syncMyBugs() {
       .map(t => String(t.zentaoId))
   );
 
-  const listed = new Set([...assigned, ...opened].map(b => String(b.id)));
+  const listed = new Set(related.map(b => String(b.id)));
   const deleted = await findDeletedInZentao('bug', [...localBugIds].filter(id => !listed.has(id)), CH);
 
   const picked = new Map();
-  assigned.filter(b => b.status !== 'closed').forEach(b => picked.set(String(b.id), b));
-  [...assigned, ...opened]
-    .filter(b => localBugIds.has(String(b.id)))
+  related
+    .filter(b => b.status === 'active' || localBugIds.has(String(b.id)))
     .forEach(b => picked.set(String(b.id), b));
 
   const mapped = [...picked.values()].map(b => ({
     zentaoId: Number(b.id),
-    title: b.title,
+    title: decodeZentaoText(b.title),
     status: mapZentaoBugStatus(b),
     severity: Number(b.severity) || 3,
     priority: Number(b.pri) || 3,
     bugType: b.type || 'codeerror',
     productId: b.product ? String(b.product) : '',
-    productName: b.productName || '',
+    productName: decodeZentaoText(b.productName || ''),
     openedBy: b.openedBy || '',
     resolvedBy: b.resolvedBy || '',
     resolution: b.resolution || '',
@@ -2035,6 +2039,89 @@ async function closeBug({ bugId, comment }) {
   }
 }
 
+/**
+ * 走禅道的 Bug 动作表单（edit / assignTo / activate）：取表单 → 只改给定字段、其余原样带回 → 提交 → 回读详情确认
+ * 禅道表单被退回时 HTTP 照样是 200，只看响应会误报成功，所以以回读结果为准。
+ * @param {'edit'|'assignTo'|'activate'} action
+ * @param {(fields:Object) => void} mutate - 改表单字段
+ * @param {(bug:Object) => boolean} verify - 回读的禅道 Bug 是否符合预期
+ */
+async function submitBugForm(bugId, action, mutate, verify, okMessage) {
+  try {
+    const CH = cookiesToString(await getZentaoCookies());
+    const page = `${zentaoBase()}/zentao/bug-${action}-${bugId}.html?onlybody=yes`;
+    const html = await (await fetch(page, { headers: { Accept: 'text/html', Cookie: CH } })).text();
+    const fields = extractFormFields(html);
+    if (!('assignedTo' in fields)) {
+      return { success: false, message: `没有取到禅道 Bug #${bugId} 的表单（可能已删除、已关闭或无权限）` };
+    }
+    mutate(fields);
+    fields.uid = genUid();
+    const resp = await fetch(page, {
+      method: 'POST',
+      headers: { Cookie: CH, 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+      body: toFormBody(fields).toString(),
+      redirect: 'manual'
+    });
+    const text = await resp.text();
+    const reason = extractZentaoError(text);
+    if (reason) return { success: false, message: reason };
+    const view = await getZentaoJson(`bug-view-${bugId}.json?onlybody=yes`, CH);
+    if (view && view.bug && verify(view.bug)) return { success: true, message: okMessage, bug: view.bug };
+    return { success: false, message: '禅道没有保存这次修改（表单被退回）' };
+  } catch (err) {
+    return { success: false, message: describeZentaoTransportError(err) };
+  }
+}
+
+/** 编辑 Bug 的标题 / 优先级 / 严重程度（只改给出的字段） */
+function editBug({ bugId, title, pri, severity }) {
+  const t = title != null ? String(title).trim() : null;
+  if (t === '') return Promise.resolve({ success: false, message: '标题不能为空' });
+  return submitBugForm(bugId, 'edit', (f) => {
+    if (t !== null) f.title = t;
+    if (pri != null && pri !== '') f.pri = String(pri);
+    if (severity != null && severity !== '') f.severity = String(severity);
+  }, (b) => (t === null || b.title === t) && (pri == null || pri === '' || String(b.pri) === String(pri)) &&
+    (severity == null || severity === '' || String(b.severity) === String(severity)), 'Bug 已更新');
+}
+
+/** 指派 Bug（禅道「指派」动作：会记一条历史并通知对方），可带备注 */
+function assignBug({ bugId, assignedTo, comment }) {
+  if (!assignedTo) return Promise.resolve({ success: false, message: '请选择指派人' });
+  return submitBugForm(bugId, 'assignTo', (f) => {
+    f.assignedTo = String(assignedTo);
+    f.comment = comment || '';
+  }, (b) => b.assignedTo === String(assignedTo), 'Bug 已指派');
+}
+
+/** 激活（重新打开）已解决的 Bug；与「确认」（bug-confirmBug）不是一回事 */
+function reactivateBug({ bugId, assignedTo, comment }) {
+  return submitBugForm(bugId, 'activate', (f) => {
+    if (assignedTo) f.assignedTo = String(assignedTo);
+    f.comment = comment || '';
+    delete f['files[]'];
+    delete f['labels[]'];
+  }, (b) => b.status === 'active', 'Bug 已激活');
+}
+
+/**
+ * 按编号查禅道 Bug（关联前核对）
+ * @returns {Promise<{exists:boolean, id?:string, title?:string, status?:string}>}
+ */
+async function getBugBrief(bugId) {
+  try {
+    const inner = await getZentaoJson(`bug-view-${bugId}.json?onlybody=yes`);
+    const b = inner && inner.bug;
+    if (!b || !b.id || String(b.deleted) === '1') return { exists: false };
+    return { exists: true, id: String(b.id), title: decodeZentaoText(b.title || ''), status: b.status || '' };
+  } catch (err) {
+    // 不存在时禅道返回的不是合法 JSON（失败结果后面拼着跳转），解析失败即视为不存在
+    if (/JSON|Unexpected/.test(err.message)) return { exists: false };
+    throw err;
+  }
+}
+
 /** 删除 Bug（bug-delete-{id}-yes） */
 async function deleteBug(bugId) {
   try {
@@ -2502,13 +2589,13 @@ async function searchZentao(words, type, { limit = 20, details: withDetails = tr
     items.push({
       type,
       id: String(hit.objectID),
-      title: (item && (item.name || item.title)) || plainSummary(hit.title),
+      title: decodeZentaoText((item && (item.name || item.title)) || '') || plainSummary(hit.title),
       summary: plainSummary(hit.summary).slice(0, 160),
       status: item ? item.status : '',
       statusLabel: item ? (SEARCH_STATUS_LABEL[type][item.status] || item.status) : '',
       assignedTo: item ? item.assignedTo : '',
       assignedToName: item ? (users[item.assignedTo] || (item.assignedTo === 'closed' ? 'Closed' : item.assignedTo || '')) : '',
-      where: (d && d.execution && d.execution.name) || (item && item.executionName) || product || '',
+      where: decodeZentaoText((d && d.execution && d.execution.name) || (item && item.executionName) || product || ''),
       deadline: item && item.deadline && !String(item.deadline).startsWith('0000') ? item.deadline : '',
       editedDate: String(hit.editedDate || '').slice(0, 10)
     });
@@ -2607,6 +2694,7 @@ function isConfigured() {
 
 export {
   loginZentao,
+  getZentaoJson,
   getZentaoCookies,
   cookiesToString,
   clearCookies,
@@ -2649,6 +2737,10 @@ export {
   // 报告页
   getTeamMembers,
   searchZentao,
+  editBug,
+  assignBug,
+  reactivateBug,
+  getBugBrief,
   listExecutionTasks,
   getTaskEfforts,
   fetchMyList,

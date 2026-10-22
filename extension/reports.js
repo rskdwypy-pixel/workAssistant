@@ -54,6 +54,16 @@ const ReportPage = {
   show() {
     const root = document.getElementById('reportMode');
     if (!root) return;
+    // 本地模式（没登录禅道）：报告数据都来自禅道，给出登录入口
+    if (typeof Account !== 'undefined' && Account.isLocalMode()) {
+      this.rendered = false;
+      root.innerHTML = `<section class="report-page"><div class="report-empty report-login-empty">
+        <p><strong>报告数据来自禅道</strong></p>
+        <p class="report-muted">日报 / 周报 / 月报统计的是禅道里的工时记录与任务，登录禅道后即可查看与生成。</p>
+        <button type="button" class="btn-primary" data-report-login>登录禅道</button></div></section>`;
+      root.querySelector('[data-report-login]').addEventListener('click', () => Account.showLogin({ fromButton: true }));
+      return;
+    }
     if (!this.rendered) {
       this.rendered = true;
       root.innerHTML = `

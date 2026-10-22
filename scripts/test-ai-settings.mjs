@@ -232,6 +232,23 @@ ${stmts.map(n => SRC.slice(n.start, n.end)).join('\n')}`);
     z$('zentaoPassword').value === '' && /已保存/.test(z$('zentaoPassword').placeholder) && z$('zentaoCreateTaskUrl').value === '167');
   check('禅道设置：打开设置时不回填浏览器里的密码', /setVal\('zentaoPassword', ''\)/.test(top('loadSettings')));
 
+  // ============ 设置以后端为准回填（浏览器里的设置为空时不能显示默认值） ============
+  $('apiBaseUrl').value = 'https://open.bigmodel.cn/api/paas/v4/';
+  $('aiModel').value = 'glm-4-flash';
+  $('webhookUrl').value = '';
+  $('aiProvider').value = 'zhipu';
+  win.AiModelPicker.applyBackendConfig({
+    ai: { apiBaseUrl: 'https://relay.example:8444/v1', aiModel: 'minimax-m3', aiReportModel: 'kimi-k3-1' },
+    schedule: { morningHour: 8, eveningHour: 20 },
+    webhook: { url: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=x', type: 'wecom' }
+  });
+  check('设置回填：AI 地址、两类模型、提醒时间、推送地址与类型都以后端为准',
+    $('apiBaseUrl').value === 'https://relay.example:8444/v1' && $('aiModel').value === 'minimax-m3' && $('aiReportModel').value === 'kimi-k3-1' &&
+    $('morningHour').value === '8' && $('eveningHour').value === '20' && /qyapi/.test($('webhookUrl').value) && $('webhookType').value === 'wecom');
+  check('设置回填：按地址认出服务商（认不出的是「自定义」）', $('aiProvider').value === 'custom');
+  win.AiModelPicker.applyBackendConfig({ ai: { apiBaseUrl: 'https://open.bigmodel.cn/api/paas/v4' } });
+  check('设置回填：智谱的地址认出是智谱', $('aiProvider').value === 'zhipu');
+
   // ============ 后端地址 ============
   const rb = win.resolveBackendUrl;
   check('后端地址：用保存的本机后端地址（localhost 换成 127.0.0.1）', rb({ backendUrl: 'http://localhost:3721' }, 'X') === 'http://127.0.0.1:3721');

@@ -23,6 +23,10 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$PROJECT_DIR/scripts/common.sh"
 
 NODE_BIN="$(wa_resolve_node_for_run "$PROJECT_DIR" || true)"
+# 安装版：数据与配置在 WorkAssistant/data（与程序分开）
+if WA_HOME="$(wa_install_home "$PROJECT_DIR")"; then
+  export WA_HOME WA_DATA_DIR="$WA_HOME/data"
+fi
 
 # 按 Native Messaging 协议写一条消息：4 字节小端长度 + UTF-8 JSON
 send_message() {

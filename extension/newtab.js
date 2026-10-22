@@ -244,6 +244,26 @@ function resetListenerScope(owner) {
  * @param {task|bug} type
  * @param {string|number} zentaoId
  */
+/**
+ * 请求本地后端；连不上（后端正在重启：开机自启、插件拉起、更新后重载，期间十几秒不响应）时，
+ * 等后端恢复（最多 8 秒）再重试一次，仍失败给出能看懂的原因，而不是浏览器的「Failed to fetch」
+ */
+async function fetchBackendWithRetry(url, init, waitMs = 8000) {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    // 网络层失败（连接被拒、重置）浏览器抛 TypeError；按名字判断，跨窗口 / 跨环境也可靠
+    if (!err || err.name !== 'TypeError') throw err;
+    const deadline = Date.now() + waitMs;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 500));
+      const ok = await fetch(`${API_BASE_URL}/health`).then(r => r.ok).catch(() => false);
+      if (ok) return fetch(url, init);
+    }
+    throw new Error('本地服务暂时连不上（可能正在重启），请稍后再试');
+  }
+}
+
 async function openInZentao(type, zentaoId) {
   const cachedBase = ZentaoBrowserClient.getBaseUrl();
   let granted = false;
@@ -262,7 +282,7 @@ async function openInZentao(type, zentaoId) {
       const c = await chrome.cookies.get({ url: `${cachedBase}/zentao/`, name: 'zentaosid' }).catch(() => null);
       browserSid = c ? c.value : null;
     }
-    const resp = await fetch(`${API_BASE_URL}/api/zentao/open`, {
+    const resp = await fetchBackendWithRetry(`${API_BASE_URL}/api/zentao/open`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type, id: String(zentaoId), browserSid })
@@ -622,7 +642,12 @@ const Confirm = {
     this.okBtn = document.getElementById('confirmOk');
   },
 
-  show(title, message, okText = '确定', cancelText = '取消') {
+  /**
+   * 插件内的确认框（不要用浏览器原生 confirm：样式与插件不协调，还会带上扩展的标题栏）
+   * @param {{danger?:boolean}} [options] - danger：删除、停止服务等不可逆操作，确认按钮标红
+   * @returns {Promise<boolean>}
+   */
+  show(title, message, okText = '确定', cancelText = '取消', options = {}) {
     if (!this.dialog) this.init();
     // 上一次还没结算（例如被新的确认顶掉）：先按取消处理，再显示这一次
     if (this._settle) this._settle(false);
@@ -631,6 +656,12 @@ const Confirm = {
     this.messageEl.textContent = message;
     this.cancelBtn.textContent = cancelText;
     this.okBtn.textContent = okText;
+    this.dialog.classList.toggle('is-danger', !!options.danger);
+    // 图标：一般确认用「i」，危险操作用「!」
+    const icon = this.dialog.querySelector('.confirm-icon svg');
+    if (icon) icon.innerHTML = options.danger
+      ? '<circle cx="12" cy="12" r="10"></circle><path d="M12 8v4"></path><path d="M12 16h.01"></path>'
+      : '<circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path>';
 
     this.dialog.classList.add('active');
 
@@ -1398,12 +1429,38 @@ const AiModelPicker = {
     this.loadKeyStatus();
   },
 
+  /**
+   * 设置以后端为准回填：浏览器里的设置可能是空的（扩展 ID 变了、换了浏览器、重置过），
+   * 以前此时显示默认值，一保存就把后端的真实配置（AI 地址、推送地址等）冲掉
+   */
+  applyBackendConfig(d) {
+    const set = (id, v) => { const el = document.getElementById(id); if (el && v !== undefined && v !== null && v !== '') el.value = v; };
+    const ai = d.ai || {};
+    if (ai.apiBaseUrl) {
+      set('apiBaseUrl', ai.apiBaseUrl);
+      const host = this.hostOf(ai.apiBaseUrl);
+      const match = Object.keys(AI_PROVIDERS).find(p => AI_PROVIDERS[p].baseUrl && this.hostOf(AI_PROVIDERS[p].baseUrl) === host);
+      const provider = match || 'custom';
+      const select = document.getElementById('aiProvider');
+      if (select && select.value !== provider && [...select.options].some(o => o.value === provider)) select.value = provider;
+      this.provider = provider;
+    }
+    set('aiModel', ai.aiModel);
+    if (ai.aiReportModel !== undefined) { const el = document.getElementById('aiReportModel'); if (el) el.value = ai.aiReportModel || ''; }
+    if (d.schedule) { set('morningHour', d.schedule.morningHour); set('eveningHour', d.schedule.eveningHour); }
+    if (d.webhook) {
+      if (d.webhook.url !== undefined) { const el = document.getElementById('webhookUrl'); if (el) el.value = d.webhook.url || ''; }
+      set('webhookType', d.webhook.type);
+    }
+  },
+
   /** 后端告诉我们哪些接口地址保存过 Key（不回传 Key 本身） */
   async loadKeyStatus() {
     try {
       const resp = await fetch(`${API_BASE_URL}/api/config`);
       const result = await resp.json();
       this.savedKeyHosts = (result && result.data && result.data.ai && result.data.ai.savedKeyHosts) || [];
+      if (result && result.data) this.applyBackendConfig(result.data);
     } catch {
       this.savedKeyHosts = [];
     }
@@ -1674,21 +1731,7 @@ function bindEvents() {
   });
 
   // 设置
-  document.getElementById('settingsBtn').addEventListener('click', () => {
-    loadSettings();
-    document.getElementById('settingsModal').classList.add('active');
-    checkServiceStatus();
-  });
-
-  // Bug 标签页的设置按钮
-  const bugSettingsBtn = document.getElementById('bugSettingsBtn');
-  if (bugSettingsBtn) {
-    bugSettingsBtn.addEventListener('click', () => {
-      loadSettings();
-      document.getElementById('settingsModal').classList.add('active');
-      checkServiceStatus();
-    });
-  }
+  document.getElementById('settingsBtn').addEventListener('click', () => openSettingsModal());
 
   document.getElementById('closeSettings').addEventListener('click', () => {
     document.getElementById('settingsModal').classList.remove('active');
@@ -1697,12 +1740,7 @@ function bindEvents() {
   // ========== 提示词（提示词读写见顶层 loadPrompts / savePrompts）==========
 
   // 顶栏「提示词」按钮：直接打开设置面板并定位到「提示词」分组
-  document.getElementById('promptSettingsBtn').addEventListener('click', () => {
-    loadSettings();
-    document.getElementById('settingsModal').classList.add('active');
-    checkServiceStatus();
-    if (window.settingsUI) window.settingsUI.showGroup('p-prompt');
-  });
+  document.getElementById('promptSettingsBtn').addEventListener('click', () => openSettingsModal('p-prompt'));
 
   // 「恢复默认」= 清空输入框（空即使用系统默认提示词）
   const promptResetMap = {
@@ -1805,7 +1843,7 @@ async function importAllConfig() {
   const show = (text, cls) => { if (resultEl) { resultEl.textContent = text; resultEl.className = `test-result ${cls || ''}`; } };
   if (!pendingImportFile) return;
   if (!pass.value) { show('✗ 请输入导出时设置的口令', 'error'); pass.focus(); return; }
-  if (!confirm('导入会覆盖当前的禅道、AI、通知、提示词等设置（其他地址已保存的 AI Key 保留）。继续吗？')) return;
+  if (!(await Confirm.show('导入配置', '导入会覆盖当前的禅道、AI、通知、提示词等设置（其他地址已保存的 AI Key 保留）。继续吗？', '导入'))) return;
   show('解密并导入中…');
   try {
     const response = await fetch(`${API_BASE_URL}/api/config/import`, {
@@ -4293,12 +4331,11 @@ async function setAutoStart(enabled) {
   const resultEl = document.getElementById('autoStartResult');
   if (!toggle) return;
 
-  if (!enabled && !confirm(
-    '确定关闭开机自启吗？\n\n' +
-    '关闭后：下次登录 macOS 不会再自动启动后端，\n' +
-    '早间提醒与晚间日报需要后端在运行才能触发。\n\n' +
-    '当前正在运行的服务不会受影响。'
-  )) {
+  if (!enabled && !(await Confirm.show(
+    '关闭开机自启',
+    '关闭后，下次登录 macOS 不会再自动启动后端，早间提醒与晚间日报需要后端在运行才能触发。\n当前正在运行的服务不会受影响。',
+    '关闭自启'
+  ))) {
     toggle.checked = true; // 撤销这次勾选
     return;
   }
@@ -4345,11 +4382,11 @@ async function stopBackendService() {
   const resultEl = document.getElementById('serviceActionResult');
   const disableAuto = document.getElementById('serviceDisableAutoStart');
 
-  if (!confirm(
-    '确定停止本地服务吗？\n\n' +
-    '停止后：任务同步、AI 解析、日报定时生成都会暂停。\n' +
-    '（日报定时任务依赖后端常驻，请确认现在不需要。）'
-  )) return;
+  if (!(await Confirm.show(
+    '停止本地服务',
+    '停止后，任务同步、AI 解析、日报定时生成都会暂停（日报定时任务依赖后端常驻，请确认现在不需要）。',
+    '停止服务', '取消', { danger: true }
+  ))) return;
 
   setBtnLoading(btn, '停止中…');
   if (resultEl) { resultEl.textContent = ''; resultEl.className = 'test-result'; }
@@ -5225,8 +5262,19 @@ const ZentaoSearch = {
       return;
     }
     const label = state.type === 'bug' ? 'Bug' : '任务';
-    state.panel.innerHTML = `<div class="zsearch-status"><span class="zsearch-spinner"></span>正在禅道中搜索${label}…</div>`;
     state.panel.hidden = false;
+    // 本地模式（没登录禅道）：任务走本地搜索，并提示登录后可搜禅道里的全部
+    if (window.Account && Account.isLocalMode()) {
+      if (state.type === 'task') {
+        state.localFiltered = true;
+        await handleSearch();
+      }
+      if (token !== this.token) return;
+      state.panel.innerHTML = `<div class="zsearch-status">${state.type === 'task' ? '看板中已显示本地搜索结果。' : ''}登录禅道后可搜索禅道里的全部${label}<br><button type="button" class="tab-login-btn zsearch-login">登录禅道</button></div>`;
+      state.panel.querySelector('.zsearch-login').addEventListener('click', () => { state.panel.hidden = true; Account.showLogin({ fromButton: true }); });
+      return;
+    }
+    state.panel.innerHTML = `<div class="zsearch-status"><span class="zsearch-spinner"></span>正在禅道中搜索${label}…</div>`;
     // 两步：先只要命中（约 0.3 秒）马上列出，再查状态 / 指派人等详情补全（约 3 秒）
     const fetchResults = async (details) => {
       const resp = await fetch(`${API_BASE_URL}/api/zentao/search?type=${state.type}&q=${encodeURIComponent(q)}${details ? '' : '&details=0'}`);
@@ -5615,7 +5663,7 @@ function openDatetimeModal(task) {
       syncDeadlineToZentao(task, val);
     } catch (err) {
       console.warn('更新时间失败:', err);
-      alert('更新时间失败');
+      Toast.error(`更新时间失败：${err.message}`);
     } finally {
       document.getElementById('dtModalConfirmBtn').textContent = '确定保存';
     }
@@ -5722,6 +5770,18 @@ async function savePrompts() {
   });
   const result = await response.json();
   if (!result.success) throw new Error(result.error || '保存提示词失败');
+}
+
+/**
+ * 打开设置弹窗（可直接定位到某个分组，如 'p-data'）
+ * 右上角头像菜单、登录卡片「导入配置」、AI 未配置提示等都从这里进
+ */
+function openSettingsModal(group) {
+  loadSettings();
+  document.getElementById('settingsModal').classList.add('active');
+  checkServiceStatus();
+  setTimeout(() => ExecutionFavorites.loadFavorites(), 100);
+  if (group && window.settingsUI) window.settingsUI.showGroup(group);
 }
 
 function loadSettings() {
@@ -7606,15 +7666,20 @@ const ExecutionFavorites = {
   }
 };
 
-// 在设置弹窗打开时加载执行收藏
-const originalSettingsBtn = document.getElementById('settingsBtn');
-if (originalSettingsBtn) {
-  originalSettingsBtn.addEventListener('click', () => {
-    setTimeout(() => ExecutionFavorites.loadFavorites(), 100);
-  });
-}
 
 // ==================== Bug 管理 ====================
+
+/** Bug 优先级 / 严重程度的可选值（卡片与详情共用） */
+const BUG_PRIORITY_CHOICES = [
+  { value: 1, label: 'P1', cls: 'bug-pri-1' }, { value: 2, label: 'P2', cls: 'bug-pri-2' },
+  { value: 3, label: 'P3', cls: 'bug-pri-3' }, { value: 4, label: 'P4', cls: 'bug-pri-4' }
+];
+const BUG_SEVERITY_CHOICES = [
+  { value: 1, label: '致命', cls: 'bug-severity-1' }, { value: 2, label: '严重', cls: 'bug-severity-2' },
+  { value: 3, label: '一般', cls: 'bug-severity-3' }, { value: 4, label: '提示', cls: 'bug-severity-4' }
+];
+/** 看板三列对应的本地状态 */
+const BUG_COLUMN_STATUS = { bugUnconfirmedList: 'unconfirmed', bugActivatedList: 'activated', bugClosedList: 'resolved' };
 
 const BugManager = {
   bugs: [],
@@ -7867,6 +7932,8 @@ const BugManager = {
       this.bugs = uniqueBugs;
     }
 
+    this.bindBugDropZones();
+
     // 渲染 Bug 到各个列
     const unconfirmedList = document.getElementById('bugUnconfirmedList');
     const activatedList = document.getElementById('bugActivatedList');
@@ -7956,8 +8023,10 @@ const BugManager = {
 
   async createBugCard(bug) {
     const card = document.createElement('div');
-    card.className = 'task-card bug-card';
+    // 状态配色：已确认浅蓝、已解决浅绿（见 newtab.css 的 .bug-status-*）
+    card.className = `task-card bug-card bug-status-${bug.status}`;
     card.dataset.bugId = bug.id;
+    card.draggable = true;
 
     const severityClass = `bug-severity-${bug.severity || 3}`;
     const severityText = ['', '致命', '严重', '一般', '提示'][bug.severity || 3];
@@ -7999,10 +8068,14 @@ const BugManager = {
         assigneeNames = getDisplayName(bug.assignedTo);
       }
       if (assigneeNames) {
-        assigneeDisplay = `<span class="bug-assignee">👤 ${escapeHtml(assigneeNames)}</span>`;
+        assigneeDisplay = `<button type="button" class="bug-assignee bug-assignee-btn" title="点击修改指派人">👤 ${escapeHtml(assigneeNames)}</button>`;
       }
-      console.log('[BugManager] assigneeDisplay:', assigneeDisplay);
     }
+    if (!assigneeDisplay) {
+      assigneeDisplay = '<button type="button" class="bug-assignee bug-assignee-btn is-empty" title="点击指派">👤 未指派</button>';
+    }
+    const priority = Number(bug.priority) || 3;
+    const priorityBtn = `<button type="button" class="bug-priority-toggle bug-pri-${priority}" title="点击修改优先级">P${priority} <span class="bug-pri-caret">▼</span></button>`;
 
     // Bug ID 显示和链接（直接在标题后面）
     let bugIdSuffix = '';
@@ -8032,7 +8105,7 @@ const BugManager = {
         ${attachmentBadgeHTML(bug)}
       </div>
       ${bug.projectName ? `<span class="execution-tag">${escapeHtml(bug.projectName)}</span>` : ''}
-      ${assigneeDisplay ? `<div class="bug-meta">${assigneeDisplay}</div>` : ''}
+      <div class="bug-meta">${priorityBtn}${assigneeDisplay}</div>
       ${bug.comment ? `<div class="bug-comment-preview">${escapeHtml(bug.comment.substring(0, 50))}${bug.comment.length > 50 ? '...' : ''}</div>` : ''}
       <div class="bug-card-actions">
         ${quickActionButton}
@@ -8073,6 +8146,41 @@ const BugManager = {
       this.showBugDetail(bug.id);
     });
 
+    // 与任务卡片一致：点标题原地编辑、P▼ 改优先级、点指派人改指派
+    const titleText = card.querySelector('.task-title-text');
+    if (titleText) {
+      titleText.classList.add('bug-title-editable');
+      titleText.title = '点击编辑标题';
+      titleText.addEventListener('click', (e) => {
+        if (e.target.closest('.bug-id-link-inline')) return;
+        e.stopPropagation();
+        this.editBugTitleInline(titleText, bug.id);
+      });
+    }
+    card.querySelector('.bug-priority-toggle').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.openChoiceMenu(e.currentTarget, BUG_PRIORITY_CHOICES, Number(bug.priority) || 3, (value) => this.saveBugFields(bug.id, { priority: value }));
+    });
+    card.querySelector('.bug-assignee-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.openAssignPopover(e.currentTarget, bug.id);
+    });
+
+    // 拖拽改状态（放下后弹出对应的确认 / 解决 / 激活表单，取消则卡片留在原列）
+    card.addEventListener('dragstart', (e) => {
+      if (e.target.closest('input, textarea')) { e.preventDefault(); return; }
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', bug.id);
+      this.dragging = { bugId: bug.id, from: bug.status };
+      card.classList.add('bug-dragging');
+      this.markDropTargets(bug);
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('bug-dragging');
+      this.dragging = null;
+      this.markDropTargets(null);
+    });
+
     // 添加快捷按钮事件
     const activateBtn = card.querySelector('.bug-activate-btn');
     if (activateBtn) {
@@ -8101,103 +8209,406 @@ const BugManager = {
     return card;
   },
 
+  // ==================== 卡片 / 详情里的编辑 ====================
+
+  /** 当前登录账号：确认 / 解决 / 激活默认指派给自己 */
+  currentAccount() {
+    return (window.Account && Account.state && Account.state.username) ||
+      (ZentaoBrowserClient.config && ZentaoBrowserClient.config.username) || '';
+  },
+
+  /** 账号或姓名 → 账号（本地记录里的指派人有时存的是姓名） */
+  accountOf(user, users) {
+    if (!user) return '';
+    if (users[user]) return user;
+    return Object.keys(users).find(a => users[a] === user) || user;
+  },
+
+  /** 单选指派人组件设值（确认 / 解决表单） */
+  setSingleSelectValue(displayId, account, users) {
+    const display = document.getElementById(displayId);
+    if (!display || !account) return;
+    display.dataset.value = account;
+    display.innerHTML = `<span class="multi-select-tag"><span class="multi-select-tag-name">${escapeHtml(users[account] || account)}</span></span>`;
+    const box = display.parentElement;
+    if (box) box.querySelectorAll('.multi-select-option').forEach(o => o.classList.toggle('selected', o.dataset.value === account));
+  },
+
+  /** 关闭卡片 / 详情上打开的浮层（优先级菜单、指派浮层） */
+  closePopovers() {
+    document.querySelectorAll('.bug-choice-menu, .bug-assign-pop').forEach(el => el.remove());
+  },
+
+  /** 浮层定位在按钮下方（贴边时往左收） */
+  placePopover(el, anchor) {
+    document.body.appendChild(el);
+    const r = anchor.getBoundingClientRect();
+    const w = el.offsetWidth;
+    el.style.top = `${Math.min(r.bottom + 4, window.innerHeight - el.offsetHeight - 8)}px`;
+    el.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`;
+    const close = (e) => {
+      if (!el.isConnected) return document.removeEventListener('mousedown', close, true);
+      if (!el.contains(e.target) && e.target !== anchor) { el.remove(); document.removeEventListener('mousedown', close, true); }
+    };
+    setTimeout(() => document.addEventListener('mousedown', close, true), 0);
+    el.addEventListener('keydown', (e) => { if (e.key === 'Escape') { el.remove(); anchor.focus(); } });
+  },
+
+  /** 选项菜单（优先级 / 严重程度），样式同任务卡片的 P▼ 菜单 */
+  openChoiceMenu(anchor, choices, current, onPick) {
+    this.closePopovers();
+    const menu = document.createElement('div');
+    menu.className = 'bug-choice-menu';
+    menu.setAttribute('role', 'menu');
+    menu.innerHTML = choices.map(c => `<button type="button" role="menuitem" class="bug-choice ${c.cls} ${c.value === current ? 'is-current' : ''}" data-value="${c.value}">${c.label}</button>`).join('');
+    menu.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-value]');
+      if (!btn) return;
+      e.stopPropagation();
+      menu.remove();
+      const value = Number(btn.dataset.value);
+      if (value !== current) onPick(value);
+    });
+    this.placePopover(menu, anchor);
+    (menu.querySelector('.is-current') || menu.querySelector('button')).focus();
+  },
+
+  /** 指派浮层：搜索成员、选人，可填备注（写进禅道的指派历史） */
+  async openAssignPopover(anchor, bugId) {
+    const bug = this.bugs.find(b => b.id === bugId);
+    if (!bug) return;
+    this.closePopovers();
+    const users = await ZentaoBrowserClient.getUsers() || {};
+    const current = this.accountOf(Array.isArray(bug.assignedTo) ? bug.assignedTo[0] : bug.assignedTo, users);
+    const me = this.currentAccount();
+    let picked = current;
+    const pop = document.createElement('div');
+    pop.className = 'bug-assign-pop';
+    pop.innerHTML = `
+      <div class="bap-head">指派给</div>
+      <input type="text" class="bap-search" placeholder="搜索姓名或账号" aria-label="搜索成员">
+      <div class="bap-list" role="listbox"></div>
+      <textarea class="bap-comment" rows="2" placeholder="备注（选填，会写进禅道的指派记录）"></textarea>
+      <div class="bap-actions"><button type="button" data-bap="cancel">取消</button><button type="button" class="is-primary" data-bap="ok">确定</button></div>`;
+    const list = pop.querySelector('.bap-list');
+    const render = (q = '') => {
+      const kw = q.trim().toLowerCase();
+      const entries = Object.entries(users)
+        .filter(([a, n]) => !kw || a.toLowerCase().includes(kw) || String(n).includes(q.trim()))
+        .sort(([a], [b]) => (b === me) - (a === me));
+      list.innerHTML = entries.length
+        ? entries.map(([a, n]) => `<button type="button" role="option" class="bap-user ${a === picked ? 'is-picked' : ''}" data-account="${escapeHtml(a)}">${escapeHtml(n)} <span>${escapeHtml(a)}${a === me ? ' · 我' : ''}</span></button>`).join('')
+        : '<div class="bap-empty">没有匹配的成员</div>';
+    };
+    render();
+    pop.querySelector('.bap-search').addEventListener('input', (e) => render(e.target.value));
+    list.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-account]');
+      if (!btn) return;
+      picked = btn.dataset.account;
+      list.querySelectorAll('.bap-user').forEach(b => b.classList.toggle('is-picked', b === btn));
+    });
+    pop.addEventListener('click', (e) => {
+      const act = e.target.closest('[data-bap]');
+      if (!act) return;
+      if (act.dataset.bap === 'cancel') return pop.remove();
+      if (!picked) return Toast.warning('请选择指派人');
+      const comment = pop.querySelector('.bap-comment').value.trim();
+      pop.remove();
+      if (picked === current && !comment) return;
+      this.saveBugFields(bugId, { assignedTo: picked }, { comment, assigneeName: users[picked] || picked });
+    });
+    this.placePopover(pop, anchor);
+    pop.querySelector('.bap-search').focus();
+  },
+
+  /** 卡片标题原地编辑：回车保存、Esc 取消、失焦保存（同任务卡片） */
+  editBugTitleInline(el, bugId) {
+    const bug = this.bugs.find(b => b.id === bugId);
+    if (!bug || el.querySelector('input')) return;
+    const original = el.innerHTML;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'bug-title-input';
+    input.value = bug.title;
+    el.innerHTML = '';
+    el.appendChild(input);
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      const title = input.value.trim();
+      if (save && title && title !== bug.title) {
+        this.saveBugFields(bugId, { title });
+      } else {
+        el.innerHTML = original;
+      }
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', () => finish(true));
+    input.addEventListener('click', (e) => e.stopPropagation());
+  },
+
   /**
-   * 显示编辑 BugID 弹窗
+   * 保存 Bug 的标题 / 优先级 / 严重程度 / 指派人：先改界面，写回禅道成功再存本地；失败回滚并提示
+   * 指派走禅道「指派」动作（记历史、通知对方，可带备注）；其余走「编辑」表单（其他字段原样带回）
+   */
+  async saveBugFields(bugId, changes, { comment = '', assigneeName = '' } = {}) {
+    const bug = this.bugs.find(b => b.id === bugId);
+    if (!bug) return;
+    const before = {};
+    Object.keys(changes).forEach(k => { before[k] = bug[k]; });
+    Object.assign(bug, changes);
+    await this.refreshBugViews(bugId);
+    try {
+      if (bug.zentaoId) {
+        const path = 'assignedTo' in changes ? '/api/zentao/bug/assign' : '/api/zentao/bug/edit';
+        const body = 'assignedTo' in changes
+          ? { bugId: bug.zentaoId, assignedTo: changes.assignedTo, comment }
+          : { bugId: bug.zentaoId, title: changes.title, pri: changes.priority, severity: changes.severity };
+        const r = await (await fetch(`${API_BASE_URL}${path}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        })).json();
+        if (!r.success) throw new Error(r.message || '禅道拒绝了这次修改');
+      }
+      const local = await (await fetch(`${API_BASE_URL}/api/bug/${bugId}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...changes, ...(comment ? { comment } : {}) })
+      })).json();
+      if (!local.success) throw new Error(local.error || '本地保存失败');
+      const what = 'assignedTo' in changes ? `已指派给 ${assigneeName}` : 'title' in changes ? '标题已更新' : 'priority' in changes ? `优先级已改为 P${changes.priority}` : '严重程度已更新';
+      Toast.success(bug.zentaoId ? `${what}，已同步到禅道` : what);
+    } catch (err) {
+      Object.assign(bug, before);
+      await this.refreshBugViews(bugId);
+      Toast.error(`修改失败：${err.message}`);
+    }
+  },
+
+  /** 改完后刷新卡片，以及正开着的这条 Bug 的详情 */
+  async refreshBugViews(bugId) {
+    await this.renderBugs();
+    const modal = document.getElementById('bugDetailModal');
+    if (modal && modal.style.display === 'flex' && modal.dataset.bugId === bugId) await this.showBugDetail(bugId);
+  },
+
+  // ==================== 拖拽改状态 ====================
+
+  /**
+   * 从某状态拖到另一列：返回要做的禅道动作，或不允许的原因
+   * @returns {{action:'confirm'|'resolve'|'reactivate'}|{reason:string}|null} null = 同一列
+   */
+  dropRule(from, to) {
+    const f = from === 'closed' ? 'resolved' : from;
+    if (f === to) return null;
+    if (f === 'unconfirmed' && to === 'activated') return { action: 'confirm' };
+    if (to === 'resolved') return { action: 'resolve' };
+    if (f === 'resolved' && to === 'activated') return { action: 'reactivate' };
+    if (f === 'activated' && to === 'unconfirmed') return { reason: '禅道不支持把已确认的 Bug 改回未确认' };
+    return { reason: '已解决的 Bug 激活后是「已确认」，请拖到「已确认」列' };
+  },
+
+  /** 拖拽中：能放的列高亮，不能放的变灰 */
+  markDropTargets(bug) {
+    Object.entries(BUG_COLUMN_STATUS).forEach(([id, status]) => {
+      const col = document.getElementById(id) && document.getElementById(id).closest('.task-column');
+      if (!col) return;
+      const rule = bug ? this.dropRule(bug.status, status) : null;
+      col.classList.toggle('bug-drop-ok', !!(rule && rule.action));
+      col.classList.toggle('bug-drop-no', !!(rule && rule.reason));
+      col.classList.remove('bug-drop-over');
+    });
+  },
+
+  /** 绑定三列的放置事件（只绑一次） */
+  bindBugDropZones() {
+    if (this.dropZonesBound) return;
+    this.dropZonesBound = true;
+    Object.entries(BUG_COLUMN_STATUS).forEach(([id, status]) => {
+      const list = document.getElementById(id);
+      const col = list && list.closest('.task-column');
+      if (!col) return;
+      col.addEventListener('dragover', (e) => {
+        if (!this.dragging) return;
+        e.preventDefault();
+        const bug = this.bugs.find(b => b.id === this.dragging.bugId);
+        const rule = bug && this.dropRule(bug.status, status);
+        e.dataTransfer.dropEffect = rule && rule.action ? 'move' : 'none';
+        col.classList.add('bug-drop-over');
+      });
+      col.addEventListener('dragleave', (e) => { if (!col.contains(e.relatedTarget)) col.classList.remove('bug-drop-over'); });
+      col.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const bugId = this.dragging ? this.dragging.bugId : e.dataTransfer.getData('text/plain');
+        this.markDropTargets(null);
+        this.handleBugDrop(bugId, status);
+      });
+    });
+  },
+
+  /** 放下：弹出对应的表单；卡片在动作成功、重新加载后才换列，取消则留在原列 */
+  handleBugDrop(bugId, toStatus) {
+    const bug = this.bugs.find(b => b.id === bugId);
+    if (!bug) return;
+    const rule = this.dropRule(bug.status, toStatus);
+    if (!rule) return;
+    if (rule.reason) return Toast.warning(rule.reason);
+    if (!bug.zentaoId) return Toast.warning('这个 Bug 还没有同步到禅道，请先点卡片上的「同步」');
+    if (rule.action === 'confirm') return this.activateBug(bugId);
+    if (rule.action === 'resolve') return this.showResolveModal(bugId);
+    return this.showReactivateModal(bugId);
+  },
+
+  /** 激活（重新打开）已解决的 Bug：指派人默认自己，可填备注 */
+  async showReactivateModal(bugId) {
+    const bug = this.bugs.find(b => b.id === bugId);
+    if (!bug) return;
+    this.hideBugDetail();
+    document.getElementById('bugReactivateModal')?.remove();
+    const users = await ZentaoBrowserClient.getUsers() || {};
+    const me = this.currentAccount();
+    const modal = document.createElement('div');
+    modal.id = 'bugReactivateModal';
+    modal.className = 'modal active';
+    modal.style.display = 'flex';
+    modal.innerHTML = `
+      <div class="modal-content bug-small-modal" role="dialog" aria-modal="true" aria-labelledby="bugReactivateTitle">
+        <div class="modal-header"><h3 id="bugReactivateTitle">激活 Bug</h3><button type="button" class="close-btn" data-ra="cancel" aria-label="关闭">&times;</button></div>
+        <div class="modal-body">
+          <p class="bug-small-subject">#${escapeHtml(bug.zentaoId)} ${escapeHtml(bug.title)}</p>
+          <label class="bug-small-field"><span>指派给</span>
+            <select data-ra="assignee">${Object.entries(users).map(([a, n]) => `<option value="${escapeHtml(a)}" ${a === me ? 'selected' : ''}>${escapeHtml(n)}（${escapeHtml(a)}）</option>`).join('')}</select>
+          </label>
+          <label class="bug-small-field"><span>备注</span><textarea data-ra="comment" rows="3" placeholder="为什么重新打开（选填）"></textarea></label>
+          <div class="bug-small-error" role="alert"></div>
+        </div>
+        <div class="modal-footer bug-small-footer"><button type="button" class="btn-secondary" data-ra="cancel">取消</button><button type="button" class="btn-primary" data-ra="ok">激活</button></div>
+      </div>`;
+    document.body.appendChild(modal);
+    const close = () => modal.remove();
+    modal.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+    modal.addEventListener('click', async (e) => {
+      if (e.target === modal) return close();
+      const act = e.target.closest('[data-ra]') && e.target.closest('[data-ra]').dataset.ra;
+      if (act === 'cancel') return close();
+      if (act !== 'ok') return;
+      const ok = e.target.closest('[data-ra="ok"]');
+      const assignedTo = modal.querySelector('[data-ra="assignee"]').value;
+      const comment = modal.querySelector('[data-ra="comment"]').value.trim();
+      ok.disabled = true;
+      ok.textContent = '激活中…';
+      try {
+        const r = await (await fetch(`${API_BASE_URL}/api/zentao/bug/reactivate`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bugId: bug.zentaoId, assignedTo, comment })
+        })).json();
+        if (!r.success) throw new Error(r.message || '激活失败');
+        const status = r.bug && String(r.bug.confirmed) === '1' ? 'activated' : 'unconfirmed';
+        await fetch(`${API_BASE_URL}/api/bug/${bugId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status, assignedTo, ...(comment ? { comment } : {}) })
+        });
+        close();
+        Toast.success('Bug 已激活');
+        await this.loadBugs();
+      } catch (err) {
+        modal.querySelector('.bug-small-error').textContent = err.message;
+        ok.disabled = false;
+        ok.textContent = '激活';
+      }
+    });
+    modal.querySelector('[data-ra="comment"]').focus();
+  },
+
+  /**
+   * 关联禅道 Bug（原「编辑 BugID」）：输入编号后先到禅道核对，显示标题确认后才能保存
    */
   showEditBugIdModal(bugId, currentZentaoId) {
     const bug = this.bugs.find(b => b.id === bugId);
     if (!bug) return;
-
-    // 创建弹窗
+    document.getElementById('editBugIdModal')?.remove();
     const modal = document.createElement('div');
     modal.id = 'editBugIdModal';
-    modal.className = 'modal';
+    modal.className = 'modal active';
     modal.style.display = 'flex';
     modal.innerHTML = `
-      <div class="modal-content" style="max-width: 400px; word-wrap: break-word; overflow-wrap: break-word;">
-        <h3>编辑禅道 BugID</h3>
-        <div style="margin-bottom: 16px; color: var(--text-secondary); word-break: break-all;">
-          Bug标题: <strong>${escapeHtml(bug.title)}</strong>
+      <div class="modal-content bug-small-modal" role="dialog" aria-modal="true" aria-labelledby="editBugIdTitle">
+        <div class="modal-header"><h3 id="editBugIdTitle">关联禅道 Bug</h3><button type="button" class="close-btn" data-eb="cancel" aria-label="关闭">&times;</button></div>
+        <div class="modal-body">
+          <p class="bug-small-subject">${escapeHtml(bug.title)}</p>
+          <label class="bug-small-field"><span>禅道 Bug 编号</span>
+            <input type="text" inputmode="numeric" data-eb="id" value="${escapeHtml(currentZentaoId || '')}" placeholder="如 468" autocomplete="off">
+          </label>
+          <div class="bug-small-hint" data-eb="result">${currentZentaoId ? `当前关联 #${escapeHtml(currentZentaoId)}；改成其他编号会关联到那个 Bug` : '当前未关联禅道 Bug'}</div>
         </div>
-        <div style="margin-bottom: 16px;">
-          <label style="display: block; margin-bottom: 8px; font-weight: 500;">禅道 BugID:</label>
-          <input type="number" id="editBugZentaoIdInput" class="form-input" value="${currentZentaoId || ''}" placeholder="请输入禅道BugID" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px; font-size: 14px; box-sizing: border-box;">
-          <small style="display: block; margin-top: 4px; color: var(--text-muted); word-break: break-all;">
-            ${currentZentaoId ? '当前BugID: ' + currentZentaoId : '当前未关联禅道Bug'}
-          </small>
-        </div>
-        <div style="display: flex; justify-content: flex-end; gap: 8px;">
-          <button id="cancelEditBugIdBtn" class="btn-secondary">取消</button>
-          <button id="saveEditBugIdBtn" class="btn-primary">保存</button>
-        </div>
-      </div>
-    `;
-
+        <div class="modal-footer bug-small-footer"><button type="button" class="btn-secondary" data-eb="cancel">取消</button><button type="button" class="btn-primary" data-eb="save" disabled>保存</button></div>
+      </div>`;
     document.body.appendChild(modal);
+    const input = modal.querySelector('[data-eb="id"]');
+    const result = modal.querySelector('[data-eb="result"]');
+    const save = modal.querySelector('[data-eb="save"]');
+    let verified = '';
+    let token = 0;
+    const close = () => modal.remove();
 
-    // 取消按钮
-    document.getElementById('cancelEditBugIdBtn').addEventListener('click', () => {
-      document.body.removeChild(modal);
-    });
-
-    // 保存按钮
-    document.getElementById('saveEditBugIdBtn').addEventListener('click', async () => {
-      const input = document.getElementById('editBugZentaoIdInput');
-      const newZentaoId = input.value.trim();
-
-      if (!newZentaoId) {
-        Toast.warning('请输入禅道BugID');
-        return;
-      }
-
-      // 更新到后端
+    // 输入停顿后到禅道核对这个编号
+    const verify = debounce(async () => {
+      const id = input.value.trim();
+      verified = '';
+      save.disabled = true;
+      result.className = 'bug-small-hint';
+      if (!id) { result.textContent = '请输入禅道 Bug 编号'; return; }
+      if (!/^\d{1,10}$/.test(id)) { result.textContent = '编号应为数字'; result.classList.add('is-error'); return; }
+      if (id === String(currentZentaoId || '')) { result.textContent = `当前已关联 #${id}`; return; }
+      const my = ++token;
+      result.textContent = '正在禅道中核对…';
       try {
-        const response = await fetch(`${API_BASE_URL}/api/bug/${bugId}/zentaoId`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ zentaoId: newZentaoId })
-        });
-
-        const result = await response.json();
-        if (result.success) {
-          // 更新本地数据
-          bug.zentaoId = newZentaoId;
-          bug.updatedAt = new Date().toISOString();
-
-          // 重新渲染 Bug 卡片
-          await this.loadBugs();
-
-          document.body.removeChild(modal);
-          Toast.success('BugID已更新');
-        } else {
-          Toast.error('更新失败: ' + (result.error || '未知错误'));
-        }
+        const r = await (await fetch(`${API_BASE_URL}/api/zentao/bug/brief?bugId=${id}`)).json();
+        if (my !== token) return;
+        if (!r.success) throw new Error(r.message || '核对失败');
+        if (!r.data.exists) { result.textContent = `禅道里没有 Bug #${id}（或已删除）`; result.classList.add('is-error'); return; }
+        verified = id;
+        save.disabled = false;
+        result.innerHTML = `将关联：<b>#${escapeHtml(id)} ${escapeHtml(r.data.title)}</b>`;
+        result.classList.add('is-ok');
       } catch (err) {
-        console.error('[BugManager] 更新BugID失败:', err);
-        Toast.error('更新失败: ' + err.message);
+        if (my !== token) return;
+        result.textContent = `核对失败：${err.message}`;
+        result.classList.add('is-error');
+      }
+    }, 400);
+    input.addEventListener('input', verify);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !save.disabled) save.click();
+      if (e.key === 'Escape') close();
+    });
+    modal.addEventListener('click', async (e) => {
+      if (e.target === modal) return close();
+      const act = e.target.closest('[data-eb]') && e.target.closest('[data-eb]').dataset.eb;
+      if (act === 'cancel') return close();
+      if (act !== 'save' || !verified) return;
+      save.disabled = true;
+      try {
+        const r = await (await fetch(`${API_BASE_URL}/api/bug/${bugId}/zentaoId`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ zentaoId: verified })
+        })).json();
+        if (!r.success) throw new Error(r.error || r.message || '保存失败');
+        close();
+        Toast.success(`已关联禅道 Bug #${verified}`);
+        await this.loadBugs();
+      } catch (err) {
+        result.textContent = `保存失败：${err.message}`;
+        result.className = 'bug-small-hint is-error';
+        save.disabled = false;
       }
     });
-
-    // 点击背景关闭
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) {
-        document.body.removeChild(modal);
-      }
-    });
-
-    // 输入框回车保存
-    const input = document.getElementById('editBugZentaoIdInput');
-    input.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        document.getElementById('saveEditBugIdBtn').click();
-      }
-    });
-
-    // 自动聚焦并选中文本
-    setTimeout(() => {
-      input.focus();
-      input.select();
-    }, 100);
+    setTimeout(() => { input.focus(); input.select(); }, 50);
   },
 
   /**
@@ -9490,7 +9901,7 @@ const BugManager = {
    * 删除所有 Bug 卡片
    */
   async deleteAllBugs() {
-    if (!confirm('确定要删除所有 Bug 卡片吗？此操作不可恢复！')) {
+    if (!(await Confirm.show('删除所有 Bug 卡片', '会删除插件里的全部 Bug 卡片（禅道里的 Bug 不受影响），此操作不可恢复。', '全部删除', '取消', { danger: true }))) {
       return;
     }
 
@@ -9527,8 +9938,10 @@ const BugManager = {
 
     if (!modal || !headerInfo || !content || !actions) return;
 
+    modal.dataset.bugId = bugId;
     const severityText = ['', '致命', '严重', '一般', '提示'][bug.severity || 3];
-    const statusText = { unconfirmed: '未确认', activated: '已确认', closed: '已解决' }[bug.status] || bug.status;
+    // 已解决的状态是 resolved（以前只认 closed，已解决的 Bug 会显示英文 resolved）
+    const statusText = { unconfirmed: '未确认', activated: '已确认', resolved: '已解决', closed: '已关闭' }[bug.status] || bug.status;
 
     // 在标题栏显示优先级和状态
     headerInfo.innerHTML = `
@@ -9585,11 +9998,22 @@ const BugManager = {
       }
     }
 
+    const priority = Number(bug.priority) || 3;
+    const severity = Number(bug.severity) || 3;
+    const typeText = this.getBugTypeText ? this.getBugTypeText(bug.bugType) : (bug.bugType || '');
     content.innerHTML = `
       <div style="margin-bottom: 16px;">
-        ${bug.projectName ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">项目: ${escapeHtml(bug.projectName)}</p>` : ''}
-        <p style="margin: 8px 0 4px 0; font-size: 13px; font-weight: 500;">标题: ${escapeHtml(bug.title)}</p>
-        ${bug.zentaoId ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">禅道BugID: <span class="bug-detail-zentao-id">${escapeHtml(bug.zentaoId)}</span></p>` : '<p style="margin: 4px 0; font-size: 13px; color: var(--text-muted);">禅道BugID: 未关联</p>'}
+        <h4 class="bug-detail-title" tabindex="0" role="button" title="点击编辑标题"><span class="bdt-text">${escapeHtml(bug.title)}</span><span class="bdt-pen" aria-hidden="true">✎</span></h4>
+        <div class="bug-detail-fields">
+          <div class="bdf"><span class="bdf-k">优先级</span><button type="button" class="bug-priority-toggle bug-pri-${priority}" data-bd="priority">P${priority} <span class="bug-pri-caret">▼</span></button></div>
+          <div class="bdf"><span class="bdf-k">严重程度</span><button type="button" class="bug-severity bug-severity-${severity} bug-severity-toggle" data-bd="severity">${severityText} <span class="bug-pri-caret">▼</span></button></div>
+          <div class="bdf"><span class="bdf-k">指派人</span><button type="button" class="bug-assignee bug-assignee-btn ${assigneeText ? '' : 'is-empty'}" data-bd="assignee">👤 ${escapeHtml(assigneeText || '未指派')} <span class="bug-pri-caret">▼</span></button></div>
+          <div class="bdf"><span class="bdf-k">禅道</span>${bug.zentaoId ? `<a href="#" class="bug-id-link-inline" data-bd="zentao" style="margin-left:0">#${escapeHtml(bug.zentaoId)}</a>` : '<span class="bdf-v is-muted">未关联</span>'}</div>
+          ${typeText ? `<div class="bdf"><span class="bdf-k">类型</span><span class="bdf-v">${escapeHtml(typeText)}</span></div>` : ''}
+          ${bug.productName || bug.projectName ? `<div class="bdf"><span class="bdf-k">所属</span><span class="bdf-v">${escapeHtml(bug.productName || bug.projectName)}</span></div>` : ''}
+          ${bug.openedBy ? `<div class="bdf"><span class="bdf-k">创建人</span><span class="bdf-v">${escapeHtml(getDisplayName(bug.openedBy))}</span></div>` : ''}
+          ${bug.assignedDate && !String(bug.assignedDate).startsWith('0000') ? `<div class="bdf"><span class="bdf-k">指派时间</span><span class="bdf-v">${escapeHtml(bug.assignedDate)}</span></div>` : ''}
+        </div>
         ${bug.steps ? `
           <div style="margin-top: 12px;">
             <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 500;">重现步骤:</p>
@@ -9625,13 +10049,31 @@ const BugManager = {
             }).join('')}
           </div>
         ` : ''}
-        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
-          ${assigneeText ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">指派人: ${escapeHtml(assigneeText)}</p>` : ''}
-          ${bug.assignedDate ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">指派时间: ${escapeHtml(bug.assignedDate)}</p>` : ''}
-          ${ccText ? `<p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">抄送人: ${escapeHtml(ccText)}</p>` : ''}
-        </div>
+        ${ccText ? `<div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);"><p style="margin: 4px 0; font-size: 13px; color: var(--text-secondary);">抄送人: ${escapeHtml(ccText)}</p></div>` : ''}
       </div>
     `;
+
+    // 详情里的编辑：与卡片一致（标题原地编辑；优先级 / 严重程度 / 指派人点击即改，写回禅道）
+    const titleEl = content.querySelector('.bug-detail-title');
+    const editTitle = () => this.editBugTitleInline(titleEl.querySelector('.bdt-text'), bugId);
+    titleEl.addEventListener('click', editTitle);
+    titleEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === titleEl) { e.preventDefault(); editTitle(); } });
+    content.querySelector('[data-bd="priority"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.openChoiceMenu(e.currentTarget, BUG_PRIORITY_CHOICES, priority, (value) => this.saveBugFields(bugId, { priority: value }));
+    });
+    content.querySelector('[data-bd="severity"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.openChoiceMenu(e.currentTarget, BUG_SEVERITY_CHOICES, severity, (value) => this.saveBugFields(bugId, { severity: value }));
+    });
+    content.querySelector('[data-bd="assignee"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.openAssignPopover(e.currentTarget, bugId);
+    });
+    content.querySelector('[data-bd="zentao"]')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      openInZentao('bug', bug.zentaoId);
+    });
 
     // 清空并重新创建按钮，避免 CSP 问题
     // 附件区：截图 / 录屏预览、下载、追加（可直接粘贴截图）、删除、重试
@@ -9640,50 +10082,21 @@ const BugManager = {
     }
 
     actions.innerHTML = '';
-
-    // 编辑 BugID 按钮（始终显示）
-    const editBugIdBtn = document.createElement('button');
-    editBugIdBtn.className = 'btn-secondary';
-    editBugIdBtn.textContent = '编辑BugID';
-    editBugIdBtn.onclick = () => this.showEditBugIdModal(bugId, bug.zentaoId);
-    actions.appendChild(editBugIdBtn);
-
-    if (bug.status === 'unconfirmed') {
-      const activateBtn = document.createElement('button');
-      activateBtn.className = 'btn-primary';
-      activateBtn.textContent = '确认';
-      activateBtn.style.marginLeft = '8px';
-      activateBtn.onclick = () => this.activateBug(bugId);
-      actions.appendChild(activateBtn);
-
-      const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'btn-danger';
-      deleteBtn.textContent = '删除';
-      deleteBtn.style.marginLeft = '8px';
-      deleteBtn.onclick = () => this.deleteBug(bugId);
-      actions.appendChild(deleteBtn);
-    } else if (bug.status === 'activated') {
-      const resolveBtn = document.createElement('button');
-      resolveBtn.className = 'btn-primary';
-      resolveBtn.textContent = '已解决';
-      resolveBtn.style.marginLeft = '8px';
-      resolveBtn.onclick = () => this.showResolveModal(bugId);
-      actions.appendChild(resolveBtn);
-
-      const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'btn-danger';
-      deleteBtn.textContent = '删除';
-      deleteBtn.style.marginLeft = '8px';
-      deleteBtn.onclick = () => this.deleteBug(bugId);
-      actions.appendChild(deleteBtn);
-    } else {
-      const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'btn-danger';
-      deleteBtn.textContent = '删除';
-      deleteBtn.style.marginLeft = '8px';
-      deleteBtn.onclick = () => this.deleteBug(bugId);
-      actions.appendChild(deleteBtn);
-    }
+    const addAction = (text, cls, onClick) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = cls;
+      btn.textContent = text;
+      btn.onclick = onClick;
+      actions.appendChild(btn);
+    };
+    // 「关联禅道 Bug」（原「编辑BugID」）；状态动作按当前状态：确认 / 解决 / 激活（原来的「已解决」是动作，改名「解决」）
+    addAction('关联禅道 Bug', 'btn-secondary', () => this.showEditBugIdModal(bugId, bug.zentaoId));
+    if (bug.status === 'unconfirmed') addAction('确认', 'btn-primary', () => this.activateBug(bugId));
+    if (bug.status === 'unconfirmed' || bug.status === 'activated') addAction('解决', 'btn-primary', () => this.showResolveModal(bugId));
+    if (bug.status === 'resolved' && bug.zentaoId) addAction('激活', 'btn-primary', () => this.showReactivateModal(bugId));
+    addAction('删除', 'btn-danger', () => this.deleteBug(bugId));
+    actions.classList.add('bug-detail-actions');
 
     modal.style.display = 'flex';
   },
@@ -9717,49 +10130,8 @@ const BugManager = {
     // 保存当前操作的 Bug ID
     modal.dataset.bugId = bugId;
 
-    // 设置默认指派人（使用 Bug 的指派人）
-    if (bug.assignedTo && bug.assignedTo !== '') {
-      const assigneeDisplay = document.getElementById('resolveAssigneeDisplay');
-      if (assigneeDisplay) {
-        // 获取用户列表
-        const users = await ZentaoBrowserClient.getUsers();
-
-        let userAccount = bug.assignedTo;
-        let displayName = bug.assignedTo;
-        let foundValidAccount = false;
-
-        // 如果 assignedTo 是账号
-        if (users && users[bug.assignedTo]) {
-          displayName = users[bug.assignedTo];
-          foundValidAccount = true;
-        } else {
-          // 如果 assignedTo 是姓名（包含中文），尝试反向查找账号
-          if (/[\u4e00-\u9fa5]/.test(bug.assignedTo)) {
-            console.log('[BugManager] assignedTo 是姓名，尝试反向查找账号:', bug.assignedTo);
-            const foundAccount = Object.keys(users).find(account => users[account] === bug.assignedTo);
-            if (foundAccount) {
-              userAccount = foundAccount;
-              foundValidAccount = true;
-              console.log('[BugManager] 找到账号:', foundAccount);
-            } else {
-              // 如果找不到账号，使用姓名作为显示文本，但设置 dataset.value 为空
-              console.log('[BugManager] 未找到对应账号，使用姓名');
-              assigneeDisplay.dataset.value = '';
-              assigneeDisplay.innerHTML = `<span class="multi-select-tag"><span class="multi-select-tag-name">${displayName}</span></span>`;
-            }
-          } else {
-            // 不是中文也不是账号中的用户，直接使用
-            foundValidAccount = true;
-          }
-        }
-
-        // 只有找到有效账号时才设置显示值
-        if (foundValidAccount) {
-          assigneeDisplay.dataset.value = userAccount;
-          assigneeDisplay.innerHTML = `<span class="multi-select-tag"><span class="multi-select-tag-name">${displayName}</span></span>`;
-        }
-      }
-    }
+    // 默认指派给当前登录用户（可改）
+    this.setSingleSelectValue('resolveAssigneeDisplay', this.currentAccount(), await ZentaoBrowserClient.getUsers() || {});
 
     // 验证截图 / 附件：随「解决」动作一起提交到禅道（出现在该次解决的历史记录下）
     const resolveAttachmentsHost = document.getElementById('resolveAttachments');
@@ -9852,9 +10224,11 @@ const BugManager = {
     modal.dataset.zentaoBugId = bug.zentaoId;
     // 注意：激活 Bug 不需要 executionId，所以不再保存它
 
-    // 重置表单
-    document.getElementById('activatePri').value = '3';
-    document.getElementById('activateType').value = 'codeerror';
+    // 带入 Bug 原来的优先级与类型（以前固定重置为 3 / 代码错误，确认时会悄悄改掉禅道里的值）
+    document.getElementById('activatePri').value = String(Number(bug.priority) || 3);
+    const typeSelect = document.getElementById('activateType');
+    typeSelect.value = bug.bugType || 'codeerror';
+    if (!typeSelect.value) typeSelect.value = 'codeerror';
     document.getElementById('activateComment').value = '';
 
     // 如果 Bug 缺少 assignedTo 或 cc 字段（用户手动添加的 BugID），从禅道获取 Bug 详情
@@ -9877,49 +10251,8 @@ const BugManager = {
       }
     }
 
-    // 设置默认指派人（使用 Bug 创建时的指派人）
-    if (bug.assignedTo && bug.assignedTo !== '') {
-      const assigneeDisplay = document.getElementById('activateAssigneeDisplay');
-      if (assigneeDisplay) {
-        // 获取用户列表
-        const users = await ZentaoBrowserClient.getUsers();
-
-        let userAccount = bug.assignedTo;
-        let displayName = bug.assignedTo;
-        let foundValidAccount = false;
-
-        // 如果 assignedTo 是账号
-        if (users && users[bug.assignedTo]) {
-          displayName = users[bug.assignedTo];
-          foundValidAccount = true;
-        } else {
-          // 如果 assignedTo 是姓名（包含中文），尝试反向查找账号
-          if (/[\u4e00-\u9fa5]/.test(bug.assignedTo)) {
-            console.log('[BugManager] assignedTo 是姓名，尝试反向查找账号:', bug.assignedTo);
-            const foundAccount = Object.keys(users).find(account => users[account] === bug.assignedTo);
-            if (foundAccount) {
-              userAccount = foundAccount;
-              foundValidAccount = true;
-              console.log('[BugManager] 找到账号:', foundAccount);
-            } else {
-              // 如果找不到账号，使用姓名作为显示文本，但设置 dataset.value 为空
-              console.log('[BugManager] 未找到对应账号，使用姓名');
-              assigneeDisplay.dataset.value = '';
-              assigneeDisplay.innerHTML = `<span class="multi-select-tag"><span class="multi-select-tag-name">${displayName}</span></span>`;
-            }
-          } else {
-            // 不是中文也不是账号中的用户，直接使用
-            foundValidAccount = true;
-          }
-        }
-
-        // 只有找到有效账号时才设置显示值
-        if (foundValidAccount) {
-          assigneeDisplay.dataset.value = userAccount;
-          assigneeDisplay.innerHTML = `<span class="multi-select-tag"><span class="multi-select-tag-name">${displayName}</span></span>`;
-        }
-      }
-    }
+    // 默认指派给当前登录用户（可改）
+    this.setSingleSelectValue('activateAssigneeDisplay', this.currentAccount(), await ZentaoBrowserClient.getUsers() || {});
 
     // 设置默认抄送人（使用 Bug 创建时的抄送人）
     if (bug.cc) {
@@ -10644,7 +10977,11 @@ const BugManager = {
     const bug = this.bugs.find(b => b.id === bugId);
     if (!bug) return;
 
-    const confirmDelete = confirm('确定要删除这个 Bug 吗？此操作将同时删除禅道中的 Bug。');
+    const confirmDelete = await Confirm.show(
+      '删除 Bug',
+      `确定删除「${bug.title}」吗？${bug.zentaoId ? `会同时删除禅道中的 Bug #${bug.zentaoId}，` : ''}此操作不可恢复。`,
+      '删除', '取消', { danger: true }
+    );
     if (!confirmDelete) return;
 
     Toast.info('正在删除 Bug...');

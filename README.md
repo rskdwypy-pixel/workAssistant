@@ -1,683 +1,157 @@
 # 工作助手
 
-> AI 驱动的智能任务管理工具，支持任务与 Bug 管理、禅道双向同步、自动日报生成
+把禅道的任务、Bug、日报 / 周报 / 月报放进浏览器新标签页的个人工作台。浏览器扩展负责界面，本机后台服务负责连接禅道和 AI；数据都留在你自己的电脑上。
 
-## ✨ 功能特点
+## 功能
 
-### 📝 任务管理
-- **智能任务添加** - 自然语言输入，AI 自动分析任务标题、优先级、分类
-- **三栏看板** - 待办/进行中/已完成，支持拖拽排序与状态变更
-- **日历视图** - GitHub 式日历，颜色显示每日完成度
-- **快速搜索** - 支持关键词搜索任务
-- **键盘快捷键** - Delete 删除，Esc 取消选中
-- **进度管理** - 可视化进度条，动态渐变色背景
+- **任务看板**：待办 / 进行中 / 已完成三列，拖拽改状态并记工时；卡片上直接改标题、优先级、截止时间、所属执行；附件与截图（截图会插入禅道正文）。
+- **Bug 看板**：未确认 / 已确认 / 已解决三列，拖拽即确认、解决、激活；卡片和详情里可改标题、优先级、严重程度、指派人（可附备注）。同步「指派给我 / 由我创建 / 抄送给我 / 由我指派」的未解决 Bug。
+- **禅道同步**：以禅道为准，禅道里删除的任务 / Bug 会从插件移除；搜索直接查禅道全局搜索。
+- **报告**：日历查看每天的日报、每周周报、每月月报，分「我的」与「全员」，AI 按人、按项目总结；可推送到企业微信 / 钉钉 / 飞书机器人。
+- **AI 解析**：一句话新建任务 / Bug，自动识别执行、优先级、时间；任务解析与报告总结可分别选模型，支持测速推荐。
+- **账号**：首次打开弹出禅道登录卡片，右上角头像显示连接状态；配置可加密导出 / 导入，换电脑不用重新配置。
 
-### 🐛 Bug 管理
-- **Bug 创建与跟踪** - 支持创建 Bug，记录详细信息
-- **Bug 状态管理** - 未确认 → 已激活 → 已解决 → 已关闭
-- **禅道 Bug 同步** - 双向同步 Bug 数据到禅道
-- **Bug 详情查看** - 查看 Bug 完整信息和操作历史
-- **截图与附件** - 新建任务 / Bug 时粘贴截图、拖入文件；截图同时插入禅道正文；详情里预览、下载、追加、删除；完成任务、解决 Bug 时可附验证截图；禅道不可达时先存本地，恢复后自动补传
+## 系统要求
 
-### 🐉 禅道集成
-- **双向同步** - 任务和 Bug 与禅道实时同步
-- **一键打开禅道** - 卡片上点禅道 ID，用配置的账号自动登录浏览器并打开对应任务 / Bug 页面
-- **换执行** - 卡片上点所属执行即可修改；同项目内直接移动，跨项目确认后在新执行中重建（复制字段与附件，旧任务取消）
-- **报告页** - 与任务、Bug 同级的「📊 报告」标签：按日历查看每天的日报、每周的周报、每月的月报，每份分「我的」和「全员」；全员再按人、按项目由 AI 分别总结。数据来自禅道的工时记录与任务（日报每天晚间、周报周五 17:00、月报当月最后一个工作日自动生成）
-- **自动登录** - 禅道自动登录，无需手动输入账号密码
-- **用户管理** - 自动缓存禅道用户列表，方便指派
-- **工时记录** - 自动计算和记录工时到禅道
-- **状态同步** - 本地状态变更自动同步到禅道
-- **去重机制** - 基于 zentaoId 智能去重，避免重复创建
+- macOS（Intel 或 Apple 芯片）。Windows 版本还在开发中。
+- Chromium 内核的浏览器：Chrome、Edge、Brave、Helium、Arc、Vivaldi 等。
+- 能访问你们的禅道（公司内网 / VPN）。
+- 不需要预先安装 Node.js：安装器会自带。
 
-### 🤖 AI 汇总
-- **日报生成** - 每晚自动生成工作日报
-- **周报生成** - 每周生成工作总结
-- **月报生成** - 每月生成工作汇总
-- **智能分析** - AI 分析任务完成情况和工作内容
-- **多模型支持** - 智谱 AI / OpenAI / 自定义 API
+## 安装（macOS）
 
-### ☁️ 数据备份
-- **坚果云备份** - 支持坚果云 WebDAV 备份
-- **智能过滤** - 自动排除已同步到禅道的数据
-- **完整备份** - 备份配置、报告、本地任务、草稿等
-- **一键恢复** - 换设备后快速恢复所有数据
+### 1. 运行安装命令
 
-### 🔔 通知提醒
-- **系统通知** - 早 9 点提醒今日待办
-- **Webhook 推送** - 支持飞书/钉钉/企业微信
-- **工时提醒** - 实时显示今日工作时长
+打开「终端」，粘贴运行：
 
-### 🎨 用户体验
-- **新标签页集成** - 打开新标签页即工作助手
-- **右键菜单** - 选中网页文字直接添加为任务
-- **进度 Toast** - 透明的进度提示，不遮挡操作
-- **按钮防重复** - 防止重复提交，保护数据安全
-
-## 🛠 技术栈
-
-- **后端**: Node.js + Express
-- **前端**: Chrome/Edge 扩展 (Manifest V3)
-- **AI**: 智谱 AI / OpenAI API
-- **数据存储**: 本地 JSON 文件
-- **数据备份**: WebDAV (坚果云/NextCloud/iCloud)
-- **跨平台**: Windows / macOS / Linux
-
-## 🚀 快速开始
-
-### ⚠️ 重要提示
-**首次使用必须先运行安装脚本！** 直接运行 `start.sh` 会因依赖未安装而报错。
-
-### 一键安装（推荐）
-
-#### Windows
 ```bash
-install.bat
+curl -fsSL https://github.com/rskdwypy-pixel/workAssistant/releases/latest/download/install.sh | bash
 ```
 
-#### Mac / Linux
+安装器不问任何问题，大约 1～3 分钟（主要是下载）。它会：
+
+1. 下载并校验 Node 运行环境（官方源，连不上自动换国内镜像）和最新版的工作助手安装包；
+2. 安装到 `~/Library/Application Support/WorkAssistant`；
+3. 注册开机自启（登录 macOS 后自动在后台运行）和浏览器宿主（插件需要时可拉起后台）；
+4. 启动后台服务并核对版本；
+5. 打开浏览器扩展页，并把扩展目录复制到剪贴板。
+
+看到 `✓ 安装完成：工作助手 x.y.z` 即成功。
+
+### 2. 在浏览器里加载扩展（只需一次）
+
+1. 在浏览器的扩展页（地址 `chrome://extensions`，安装器已自动打开）打开右上角的 **开发者模式**；
+2. 如果以前装过「工作助手」，先把旧的 **移除**；
+3. 点 **加载已解压的扩展程序**，在弹出的选择框里按 `⌘ ⇧ G`，粘贴下面的目录（已在剪贴板里），回车后点「选择」：
+
+   ```
+   ~/Library/Application Support/WorkAssistant/extension
+   ```
+
+### 3. 首次使用
+
+打开一个新标签页：
+
+- **登录禅道**：在登录卡片里填禅道地址（例如 `http://10.x.x.x:8088`，粘贴浏览器地址栏里的整串网址也可以）、账号、密码。登录前会先验证，成功后自动同步执行、团队成员、你的任务和 Bug。
+- **从旧电脑搬配置**：点登录卡片上的「已有配置文件？导入」，选择在旧电脑「设置 → 数据迁移」里加密导出的文件，输入导出时设的口令。禅道账号密码、AI Key、推送地址等会一起恢复。
+- **配置 AI（可选）**：「设置 → AI 配置」。不配也能用，新建任务会改用本地规则解析。
+- 也可以先点「稍后再说」进入本地模式，之后随时点右上角「登录禅道」。
+
+## 更新
+
+重新运行一次安装命令即可，会自动：
+
+- 下载新版本，保留上一个版本（可回滚），只保留最近两个版本；
+- 沿用现有的配置和数据（数据和程序分开存放，更新不会碰数据）；
+- 重启后台服务。
+
+更新后在浏览器扩展页点「工作助手」上的刷新按钮，重新加载扩展。
+
+> 自动静默更新正在开发中，完成后不再需要手动执行。
+
+## 卸载
+
 ```bash
-chmod +x install.sh
-./install.sh
+curl -fsSL https://github.com/rskdwypy-pixel/workAssistant/releases/latest/download/install.sh | bash -s -- --uninstall
 ```
 
-安装脚本会自动：
-1. ✅ 检查运行环境（Node.js、npm）
-2. ✅ 安装项目依赖
-3. ✅ 创建配置文件
-4. ✅ 初始化数据目录
-5. ✅ **创建全局命令**（wa、wastop、walog）
-6. ✅ 提供扩展安装指引
-7. ✅ 启动后端服务
+- 默认 **保留数据和配置**（重新安装后自动使用）；
+- 连数据一起删除：把末尾的 `--uninstall` 换成 `--uninstall --purge`；
+- 最后在浏览器扩展页移除「工作助手」。
 
-**安装后可用命令：**
-```bash
-wa              # 启动服务（任何位置）
-wastop          # 停止服务
-walog           # 查看日志
+## 文件都在哪里
+
+```
+~/Library/Application Support/WorkAssistant/
+├─ runtime/node/      自带的 Node 运行环境
+├─ versions/<版本>/   程序（保留上一个版本用于回滚）
+├─ current.txt        当前使用的版本
+├─ extension/         浏览器加载的扩展目录（更新时替换里面的文件）
+├─ bin/               开机自启、浏览器宿主的固定入口
+├─ data/              配置（.env）、任务、Bug、报告、附件（只有你自己可读）
+└─ backups/           迁移 / 升级前的备份
+
+~/Library/Logs/WorkAssistant/backend.log   后台服务日志
 ```
 
-**首次使用需要加载 PATH：**
-```bash
-# Mac
-source ~/.zshrc
+配置（禅道密码、AI Key 等）只保存在本机 `data/.env` 里，不会上传到任何地方；只有在「数据迁移」里用你设置的口令加密导出时才会离开这台电脑。
 
-# Linux
-source ~/.bashrc
+## 常见问题
+
+**插件提示连不上本地服务**
+看后台服务是否在运行：
+
+```bash
+curl -s http://127.0.0.1:3721/health
 ```
 
-### 🔧 手动安装（如果一键安装失败）
+没有输出就重启它：
 
-#### 1. 安装依赖
 ```bash
+launchctl kickstart -k gui/$(id -u)/com.workassistant.backend
+```
+
+仍然不行，查看日志 `~/Library/Logs/WorkAssistant/backend.log`，或重新运行安装命令。
+
+**登录禅道提示「无法连接」**
+确认已连公司内网 / VPN，地址填禅道首页的地址（带端口）。
+
+**右上角头像是灰点**
+连不上禅道（多半是没连 VPN），连上后会自动恢复。红点表示禅道密码已失效，按提示重新输入密码。
+
+**旧版本（从仓库目录运行的）怎么升级**
+直接运行安装命令。安装器会认出旧的开机自启项，把仓库里的 `.env` 和 `data/` 先完整备份、再迁移到新位置（仓库目录不动）。然后按「加载扩展」一节在浏览器里移除旧插件、加载新目录。
+
+**提示「端口 3721 上还有另一个工作助手在运行」**
+说明有一个手动启动的后台服务没有关掉（例如在仓库里运行过 `npm start`）。关掉它后重新运行安装命令。
+
+## 开发
+
+```bash
+git clone https://github.com/rskdwypy-pixel/workAssistant.git
+cd workAssistant
 npm install
+npm test                       # 全部测试（jsdom 前端测试 + 后端测试 + 安装器测试）
+npm start                      # 在仓库里直接运行后台服务（使用仓库里的 data/ 和 .env）
 ```
 
-#### 2. 创建配置文件
-```bash
-cp .env.example .env
-# 编辑 .env 文件，配置你的 API Key
-```
+开发时在浏览器里加载仓库里的 `extension/` 目录即可（扩展 ID 是固定的，与目录无关）。注意同一台电脑上不要同时运行安装版和仓库版：两者都用 3721 端口。
 
-#### 3. 启动服务
-```bash
-./start.sh
-```
-
-### 手动安装
-
-#### 1. 安装依赖
-```bash
-npm install
-```
-
-#### 2. 配置环境变量
-```bash
-cp .env.example .env
-```
-
-编辑 `.env` 文件：
+**打包与本地安装测试**
 
 ```bash
-# AI 配置 - 智谱 AI（推荐）
-OPENAI_API_KEY=your_zhipu_api_key
-OPENAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
-OPENAI_MODEL=glm-4-flash
-
-# 或使用 OpenAI 官方
-# OPENAI_API_KEY=sk-your-api-key
-# OPENAI_BASE_URL=https://api.openai.com/v1
-# OPENAI_MODEL=gpt-4o-mini
-
-# 服务配置
-PORT=3721
-MORNING_HOUR=9
-EVENING_HOUR=21
-
-# Webhook 通知（可选）
-WEBHOOK_URL=
-WEBHOOK_TYPE=generic
-
-# 禅道集成（可选）
-ZENTAO_ENABLED=false
-ZENTAO_URL=http://your-zentao.com
-ZENTAO_USERNAME=your-account
-ZENTAO_PASSWORD=your-password
+node scripts/build-package.mjs                                        # 生成 dist/workassistant-<版本>.tar.gz 和 .sha256
+bash installer/install-mac.sh --package dist/workassistant-<版本>.tar.gz   # 用本地安装包安装 / 升级
 ```
 
-#### 3. 启动服务
+版本号以 `package.json` 为准，打包时会同步到 `extension/manifest.json`。
 
-**Windows:**
-```bash
-npm start
-```
-
-**Mac / Linux:**
-```bash
-./start.sh
-```
-
-**使用 PM2（生产环境）:**
-```bash
-pm2 start ecosystem.config.js
-pm2 save
-pm2 startup  # 开机自启
-```
-
-#### 4. 安装浏览器扩展
-
-1. 打开 Chrome/Edge，访问 `chrome://extensions/`
-2. 开启"开发者模式"
-3. 点击"加载已解压的扩展程序"
-4. 选择项目的 `extension/` 目录
-5. 固定扩展图标到工具栏
-
-## ⚙️ 配置说明
-
-### AI 配置
-
-**智谱 AI（推荐）:**
-1. 访问 [智谱AI开放平台](https://open.bigmodel.cn/)
-2. 获取 API Key
-3. 使用 `glm-4-flash` 模型（免费/低价，速度快）
-
-**OpenAI:**
-1. 使用 OpenAI API Key
-2. 推荐使用 `gpt-4o-mini` 模型
-
-### 禅道配置
-
-1. 在插件设置中配置禅道账号、密码
-2. 执行 ID 为**选填**：留空时「添加任务」会自动拉取该账号下的全部执行让你现选
-3. 开启"启用禅道同步"开关
-4. 首次使用会自动登录禅道
-
-### 数据备份配置
-
-1. 在插件设置中选择"坚果云"或"自定义 WebDAV"
-2. 填写账号和应用密码（⚠️ 非登录密码）
-3. 点击"测试连接"验证配置
-4. 开启"定期自动备份"
-
-**坚果云配置步骤：**
-1. 登录坚果云网页版 → 头像 → 账户信息
-2. 安全选项 → 勾选"启用第三方应用管理"
-3. 生成应用密码
-
-## 📖 使用指南
-
-### 任务管理
-
-**添加任务:**
-1. 在输入框输入任务内容
-2. 点击"添加任务"或按 Enter
-3. 支持 Shift+Enter 换行输入多行内容
-
-**管理任务:**
-- 🖱️ **拖拽** - 鼠标按住任务卡片可拖拽调整顺序或状态
-- ⌨️ **快捷键** - 选中后按 Delete 删除，Esc 取消选中
-- 📅 **日历** - 点击日历日期查看/创建该日任务
-- 📊 **进度** - 拖动进度条调整任务完成度
-
-**右键菜单:**
-- 选中网页文字 → 右键 → "添加到任务"
-
-### Bug 管理
-
-**创建 Bug:**
-1. 切换到 "Bug" 标签页
-2. 填写 Bug 信息（标题、步骤、严重程度等）
-3. 选择指派人和抄送
-4. 点击"提交 Bug"
-
-**Bug 操作:**
-- **激活** - 将 Bug 状态改为"已激活"并同步到禅道
-- **解决** - 填写解决方案并标记为"已解决"
-- **关闭** - 关闭已解决的 Bug
-- **删除** - 删除本地 Bug（同步到禅道的需要先在禅道删除）
-
-### 禅道同步
-
-**自动同步:**
-- 创建任务/Bug 时自动同步到禅道
-- 更新状态时自动同步到禅道
-- 获取用户列表并缓存
-
-**手动同步:**
-- 点击设置页面的"立即同步"按钮
-- 可跳过 24 小时时间限制
-
-**同步内容:**
-- ✅ 任务和 Bug 数据
-- ✅ 状态变更
-- ✅ 工时记录
-- ✅ 指派信息
-
-### 数据备份
-
-**备份内容:**
-- ✅ 配置文件（AI、Webhook、提醒时间等）
-- ✅ 历史报告（日报、周报、月报）
-- ✅ 本地任务（排除已同步到禅道的）
-- ✅ 草稿数据
-- ✅ 用户偏好设置
-
-**不备份:**
-- ❌ 禅道任务和 Bug（已在禅道中）
-- ❌ 禅道会话令牌
-
-**恢复数据:**
-1. 换设备后配置相同的 WebDAV 信息
-2. 点击"恢复数据"按钮
-3. 确认后自动恢复所有数据
-
-### AI 汇总
-
-**日报:**
-- 每晚 21 点自动生成
-- 包含今日完成任务、工时统计、明日计划
-- 可通过 Webhook 推送到飞书/钉钉
-
-**周报/月报:**
-- 每周一上午生成周报
-- 每月一号上午生成月报
-- 统计周期内的任务完成情况
-
-## 🔧 常用命令
-
-### 全局命令（推荐）
-
-运行 `install.sh` 后，可在任何位置使用以下命令：
-
-| 命令 | 说明 | 等同于 |
-|------|------|--------|
-| `wa` | 启动服务 | `./start.sh` |
-| `wastop` | 停止服务 | `./stop.sh` |
-| `walog` | 查看实时日志 | `tail -f logs/service.log` |
-
-**首次使用需要加载 PATH：**
-```bash
-# Mac
-source ~/.zshrc
-
-# Linux
-source ~/.bashrc
-```
-
-### 启动/停止服务
-
-**Windows:**
-```bash
-npm start        # 启动
-npm stop         # 停止
-```
-
-**Mac / Linux:**
-```bash
-./start.sh       # 启动
-./stop.sh        # 停止
-```
-
-**使用 PM2:**
-```bash
-pm2 start ecosystem.config.js    # 启动
-pm2 restart work-assistant       # 重启
-pm2 stop work-assistant          # 停止
-pm2 logs work-assistant          # 查看日志
-pm2 status                       # 查看状态
-```
-
-### 查看日志
-
-**使用全局命令：**
-```bash
-walog            # 实时日志（Ctrl+C 退出）
-```
-
-**Mac / Linux:**
-```bash
-./start.sh       # 实时日志
-./stop.sh        # 停止后查看日志
-```
-
-**直接查看:**
-```bash
-tail -f logs/service.log
-```
-
-## 📡 API 接口
-
-### 任务管理
-```
-POST   /api/task              # 添加任务
-GET    /api/tasks             # 获取所有任务
-GET    /api/tasks/today       # 获取今日任务
-GET    /api/tasks/date/:date  # 获取指定日期任务
-GET    /api/tasks/search?q=   # 搜索任务
-PUT    /api/task/:id/status   # 更新任务状态
-PUT    /api/task/:id          # 更新任务
-DELETE /api/task/:id          # 删除任务
-```
-
-### Bug 管理
-```
-POST   /api/bug               # 创建 Bug
-GET    /api/bugs              # 获取所有 Bug
-PUT    /api/bug/:id/status    # 更新 Bug 状态
-DELETE /api/bug/:id           # 删除 Bug
-GET    /api/bug/stats         # 获取 Bug 统计
-```
-
-### 禅道集成
-```
-GET    /api/zentao/config     # 获取禅道配置
-POST   /api/zentao/config     # 保存禅道配置
-POST   /api/zentao/sync/tasks # 同步禅道任务
-POST   /api/zentao/sync/bugs  # 同步禅道 Bug
-GET    /api/zentao/users      # 获取禅道用户列表
-```
-
-### 数据备份
-```
-POST   /api/backup            # 立即备份
-POST   /api/restore           # 恢复数据
-GET    /api/history/restore   # 恢复历史报告
-```
-
-### AI 汇总
-```
-POST   /api/report/generate/daily   # 生成日报
-POST   /api/report/generate/weekly  # 生成周报
-POST   /api/report/generate/monthly # 生成月报
-GET    /api/history                 # 获取历史报告
-```
-
-## 🔔 Webhook 配置
-
-### 飞书机器人
-```bash
-WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/xxx
-WEBHOOK_TYPE=feishu
-```
-
-### 钉钉机器人
-```bash
-WEBHOOK_URL=https://oapi.dingtalk.com/robot/send?access_token=xxx
-WEBHOOK_TYPE=dingtalk
-```
-
-### 企业微信机器人
-```bash
-WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
-WEBHOOK_TYPE=wecom
-```
-
-## 📂 项目结构
+**目录结构**
 
 ```
-workAssistant/
-├── extension/              # Chrome 扩展
-│   ├── newtab.html        # 新标签页
-│   ├── newtab.js          # 主逻辑
-│   ├── background.js      # 后台服务
-│   ├── sync.js            # 数据同步
-│   ├── backupManager.js   # 备份管理
-│   └── manifest.json      # 扩展配置
-├── src/                   # 后端服务
-│   ├── routes/            # API 路由
-│   ├── services/          # 业务逻辑
-│   └── index.js           # 入口文件
-├── data/                  # 数据存储
-│   ├── tasks.json         # 任务数据
-│   ├── history.json       # 历史报告
-│   └── backups/           # 备份文件
-├── install.sh             # Mac/Linux 安装脚本（创建全局命令）
-├── install.bat            # Windows 安装脚本
-├── start.sh               # 启动脚本
-├── stop.sh                # 停止脚本
-├── ecosystem.config.js    # PM2 配置
-└── ~/bin/                 # 全局命令（安装后自动创建）
-    ├── wa                 # 启动服务
-    ├── wastop             # 停止服务
-    └── walog              # 查看日志
+src/          后台服务（Express）：禅道、AI、报告、附件、账号、配置迁移
+extension/    浏览器扩展（Manifest V3，新标签页）
+scripts/      启动器、开机自启、浏览器宿主注册、打包脚本与测试
+installer/    安装器（install-mac.sh）
+docs/         设计与审计文档
 ```
-
-## 🐛 常见问题
-
-### 1. 扩展无法连接后端服务
-
-**检查:**
-- 后端服务是否启动（访问 http://localhost:3721）
-- 浏览器控制台是否有错误
-- 端口 3721 是否被占用
-
-**解决:**
-```bash
-# 重启后端服务
-./stop.sh && ./start.sh
-```
-
-### 2. 禅道同步失败
-
-**检查:**
-- 禅道账号密码是否正确
-- 网络是否正常
-- 禅道地址是否可访问
-
-**解决:**
-- 清除浏览器缓存
-- 重新配置禅道信息
-- 手动点击"立即同步"
-
-### 3. AI 汇总失败
-
-**检查:**
-- API Key 是否正确
-- API 余额是否充足
-- 网络是否正常
-
-**解决:**
-- 更换 AI 模型
-- 检查 API 配置
-- 查看 `logs/service.log` 日志
-
-### 4. 数据备份失败
-
-**检查:**
-- WebDAV 配置是否正确
-- 应用密码是否正确（非登录密码）
-- 网络是否正常
-
-**解决:**
-- 点击"测试连接"验证配置
-- 重新生成应用密码
-- 检查坚果云账户状态
-
-### 5. 全局命令不可用
-
-**问题:**
-```bash
-wa: command not found
-```
-
-**原因:**
-- PATH 环境变量未生效
-- ~/bin 目录未创建
-
-**解决:**
-```bash
-# 1. 重新加载 PATH
-source ~/.zshrc    # Mac
-source ~/.bashrc   # Linux
-
-# 2. 如果还不行，手动添加到 PATH
-export PATH="$HOME/bin:$PATH"
-
-# 3. 验证命令是否可用
-which wa          # 应该显示 ~/bin/wa
-
-# 4. 如果 ~/bin 不存在，重新运行安装脚本
-./install.sh
-```
-
-## 🔧 故障排除
-
-### 问题 1: 服务启动失败，报错 "Cannot find package express"
-
-**错误信息:**
-```
-Error: Cannot find package '/path/to/node_modules/express/index.js'
-```
-
-**原因:**
-- 依赖未安装或安装不完整
-- 直接运行了 `start.sh` 而没有先运行 `install.sh`
-
-**解决:**
-```bash
-# 方案 1: 重新安装依赖（推荐）
-rm -rf node_modules package-lock.json
-npm install
-
-# 方案 2: 运行安装脚本
-./install.sh
-
-# 然后再启动服务
-./start.sh
-```
-
-### 问题 2: wa 命令不存在
-
-**错误信息:**
-```bash
-wa: command not found
-```
-
-**原因:**
-- PATH 环境变量未生效
-- ~/bin 目录未创建
-
-**解决:**
-```bash
-# 1. 重新加载 PATH
-source ~/.zshrc    # Mac
-source ~/.bashrc   # Linux
-
-# 2. 如果还不行，手动添加到 PATH
-export PATH="$HOME/bin:$PATH"
-
-# 3. 验证命令是否可用
-which wa          # 应该显示 ~/bin/wa
-
-# 4. 如果 ~/bin 不存在，重新运行安装脚本
-./install.sh
-```
-
-### 问题 3: 端口被占用
-
-**错误信息:**
-```
-Error: listen EADDRINUSE: address already in use :::3721
-```
-
-**解决:**
-```bash
-# 方案 1: 使用停止脚本
-./stop.sh
-
-# 方案 2: 手动杀死进程
-lsof -ti :3721 | xargs kill -9
-
-# 方案 3: 使用 walog 查看是否有其他服务在运行
-walog
-```
-
-### 问题 4: npm install 失败
-
-**常见原因:**
-- Node.js 版本过低（需要 >= 18.0.0）
-- 网络问题导致下载失败
-- npm 缓存损坏
-
-**解决:**
-```bash
-# 1. 检查 Node.js 版本
-node -v  # 应该 >= v18.0.0
-
-# 2. 清理 npm 缓存
-npm cache clean --force
-
-# 3. 使用淘宝镜像（如果网络有问题）
-npm config set registry https://registry.npmmirror.com
-
-# 4. 重新安装
-npm install
-```
-
-### 问题 5: AI 分析失败
-
-**可能原因:**
-- API Key 未配置或配置错误
-- 网络连接问题
-- API 服务异常
-
-**解决:**
-```bash
-# 1. 检查 .env 配置
-cat .env | grep API_KEY
-
-# 2. 确保已配置有效的 API Key
-# 编辑 .env 文件，配置 OPENAI_API_KEY
-
-# 3. 检查网络连接
-curl https://open.bigmodel.cn/api/paas/v4/
-
-# 4. 查看服务日志了解详细错误
-walog
-```
-
-## 📝 更新日志
-
-### v2.0.0 (2026-04-02)
-- ✨ 新增 Bug 管理功能
-- ✨ 实现禅道双向同步
-- ✨ 新增数据备份功能（坚果云/WebDAV）
-- ✨ 支持跨平台一键安装（Windows/Mac/Linux）
-- 🎨 优化 UI，添加进度 Toast 显示
-- 🐛 修复按钮重复提交问题
-- 🐛 修复 zentaoId 类型不一致问题
-- 📝 完善文档
-
-### v1.0.0
-- 🎉 初始版本
-- ✨ 任务管理功能
-- ✨ AI 日报生成
-- ✨ 禅道集成
-
-## 📄 许可证
-
-MIT License
-
----
-
-**💡 提示:** 首次使用建议先运行一键安装脚本，5 分钟内即可完成所有配置！

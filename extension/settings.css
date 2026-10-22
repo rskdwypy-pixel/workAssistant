@@ -551,3 +551,13 @@ body.debug-on .debug-only.block { display: block; }
 .report-member input { margin: 0; accent-color: var(--accent); }
 .report-member:has(input:checked) { border-color: var(--accent); background: var(--accent-soft-bg); color: var(--accent-soft-ink); }
 .report-member-role { color: var(--text-muted-warm); font-size: 11px; }
+
+/* ------------------------------------------------------------ 账号 / 重置 */
+.settings-modal-content .set-account { font-size: 13px; color: var(--ink); }
+.settings-modal-content .set-danger {
+  margin-top: var(--sp-6); padding: var(--sp-4); border: 1px solid rgba(185, 28, 28, .3); border-radius: var(--r-card);
+  background: rgba(185, 28, 28, .03); align-items: center; justify-content: space-between; gap: var(--sp-4);
+}
+body.debug-on .settings-modal-content .set-danger { display: flex; }
+.set-danger .sd-text { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--text-2); line-height: 1.6; }
+.set-danger .sd-text b { font-size: 13px; color: var(--st-danger); }

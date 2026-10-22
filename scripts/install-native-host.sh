@@ -33,6 +33,10 @@ LAUNCHER="$PROJECT_DIR/scripts/backend-launcher.sh"
 NODE_PATH_FILE="$PROJECT_DIR/scripts/.node-path"
 # shellcheck source=common.sh
 source "$PROJECT_DIR/scripts/common.sh"
+# 安装版：注册固定入口 bin/native-host（它再转到当前版本的启动器），切换版本不用重新注册
+if WA_HOME_DIR="$(wa_install_home "$PROJECT_DIR")"; then
+  LAUNCHER="$WA_HOME_DIR/bin/native-host"
+fi
 # Firefox 扩展 ID（about:debugging 中可见）；不提供则跳过 Firefox，避免写一个必然连不上的空授权清单
 FIREFOX_EXT_ID="${WORKASSISTANT_FIREFOX_EXT_ID:-}"
 
@@ -211,7 +215,18 @@ fi
 
 chmod +x "$LAUNCHER"
 
-NODE_BIN="$(wa_resolve_node_for_install || true)"
+NODE_BIN="$(wa_resolve_node_for_run "$PROJECT_DIR" || wa_resolve_node_for_install || true)"
+
+# manifest.json 带 key（公钥）时，扩展 ID 由公钥算出、与安装位置无关（与浏览器算法一致）
+compute_extension_id_from_key() {
+  [[ -n "$NODE_BIN" ]] || return 1
+  "$NODE_BIN" -e '
+    const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    if (!m.key) process.exit(1);
+    const h = require("crypto").createHash("sha256").update(Buffer.from(m.key, "base64")).digest("hex").slice(0, 32);
+    console.log([...h].map(c => String.fromCharCode(97 + parseInt(c, 16))).join(""));
+  ' "$1/manifest.json" 2>/dev/null
+}
 
 # ── 解析扩展 ID（Chromium 系授权必需；Firefox 分支不使用） ──
 if [[ -n "$EXT_ID_OVERRIDE" ]]; then
@@ -219,7 +234,7 @@ if [[ -n "$EXT_ID_OVERRIDE" ]]; then
 elif [[ -n "${WORKASSISTANT_EXT_ID:-}" ]]; then
   EXTENSION_ID="$WORKASSISTANT_EXT_ID"
 else
-  EXTENSION_ID="$(compute_extension_id "$PROJECT_DIR/extension")"
+  EXTENSION_ID="$(compute_extension_id_from_key "$PROJECT_DIR/extension" || compute_extension_id "$PROJECT_DIR/extension")"
 fi
 
 echo "════════════════════════════════════════════"
@@ -238,7 +253,7 @@ if [[ -z "$EXTENSION_ID" ]]; then
 fi
 
 echo "  扩展 ID:  $EXTENSION_ID"
-echo "    （unpacked 扩展 ID 由安装路径派生；若浏览器扩展管理页显示的 ID"
+echo "    （扩展带固定公钥时 ID 与安装位置无关；若浏览器扩展管理页显示的 ID"
 echo "      与此不同，请用 --extension-id <ID> 重新执行本脚本）"
 echo ""
 

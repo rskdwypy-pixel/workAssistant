@@ -16,8 +16,10 @@
  *   C1/E1 请求来源校验
  *   E3 .env 写入拒绝换行注入
  */
-import { mkdtempSync, readdirSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, readdirSync, writeFileSync, rmSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
+import { dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { join } from 'path';
 
 const results = [];
@@ -355,6 +357,15 @@ try {
   check('C1 命令行请求（无 Origin）放行', runGuard({ host: '127.0.0.1:3721' }).passed);
   check('C1 DNS rebinding（Host 非本机）被拒绝', !runGuard({ host: 'evil.example:3721' }).passed);
   check('C1 扩展 ID 算法与浏览器一致', extensionIdFromPath('/Users/itreenewbee/工作/代码/Github/workAssistant/extension') === 'mfnhmoaaclbpmmnbhbifigahbepenibl');
+  // 固定扩展 ID：manifest.json 带 key 后，ID 由公钥算出、与安装位置无关；旧的按路径算出的 ID 不再放行
+  const { projectExtensionId, extensionIdFromKey } = await import('../src/utils/requestGuard.js');
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const manifestKey = JSON.parse(readFileSync(join(repoRoot, 'extension', 'manifest.json'), 'utf8')).key;
+  const fixedId = projectExtensionId(repoRoot);
+  check('C1 扩展固定 ID：由 manifest 公钥算出，与目录无关', manifestKey && fixedId === extensionIdFromKey(manifestKey) && /^[a-p]{32}$/.test(fixedId) && fixedId !== extensionIdFromPath(join(repoRoot, 'extension')), fixedId);
+  const realGuard = createRequestGuard({ port: 3721, projectRoot: repoRoot });
+  const runReal = (origin) => { let ok = false; realGuard({ method: 'GET', path: '/api/zentao/config', headers: { host: '127.0.0.1:3721', origin } }, { status() { return this; }, json() { return this; }, header() {}, sendStatus() { return this; } }, () => { ok = true; }); return ok; };
+  check('C1 固定 ID 放行，旧的按路径算出的 ID 拒绝', runReal(`chrome-extension://${fixedId}`) && !runReal(`chrome-extension://${extensionIdFromPath(join(repoRoot, 'extension'))}`));
 
   // ============ E3：.env 换行注入 ============
   let envErr = null;

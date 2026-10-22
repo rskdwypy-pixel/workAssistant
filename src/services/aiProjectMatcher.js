@@ -2,10 +2,11 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { generateResponse } from '../ai/openai.js';
+import { config } from '../config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const LEARNING_FILE = join(__dirname, '../../data/projectLearning.json');
+const LEARNING_FILE = join(config.paths.data, 'projectLearning.json');
 
 /**
  * 确保学习文件存在

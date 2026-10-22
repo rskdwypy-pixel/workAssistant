@@ -6,6 +6,7 @@ import apiRouter from './routes/api.js';
 import adminRouter from './routes/admin.js';
 import attachmentsRouter from './routes/attachments.js';
 import reportsRouter from './routes/reports.js';
+import accountRouter from './routes/account.js';
 import { startAttachmentRetry } from './services/attachmentSync.js';
 import { startReminder } from './services/reminder.js';
 import { startSummary } from './services/summary.js';
@@ -34,10 +35,11 @@ app.use('/api', apiRouter);
 app.use('/api', adminRouter);
 app.use('/api', attachmentsRouter);
 app.use('/api', reportsRouter);
+app.use('/api', accountRouter);
 
 // 健康检查
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', app: APP_ID, pid: process.pid, timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', app: APP_ID, version: config.app.version, pid: process.pid, timestamp: new Date().toISOString() });
 });
 
 // 404处理

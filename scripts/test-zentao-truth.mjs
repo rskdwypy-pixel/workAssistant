@@ -6,6 +6,8 @@
  * 覆盖：
  *   L1 禅道里已删除的任务 / Bug（含看板任务、对象不存在），同步时删掉本地记录
  *   L1 查不了的（网络失败）、还在的，本地记录不动；还在的不按 ID 覆盖（本地有关联错的老记录）
+ *   L6 Bug 同步：指派给我 / 由我创建 / 抄送给我 / 由我指派 的激活 Bug 都同步；已解决、已关闭的不新增，本地已有的刷新状态
+ *   L7 禅道返回的标题是 HTML 转义过的（&#039; &quot; &gt;），同步、搜索时还原成原文
  *   L2 编辑任务可改截止日期（只取日期，空串清除，不传不改）；不传优先级不再改成 3
  *   L2 卡片「截止时间」保存后推送禅道；「提醒时间」、Bug、未同步的不推送
  *   N1 搜索任务 / Bug 走禅道全局搜索：按类型过滤、去掉已删除、按最后编辑时间排序；先列命中再补详情；搜索面板交互与本地退路
@@ -73,7 +75,8 @@ try {
     { id: 'i', type: 'bug', title: 'Bug 删了', status: 'unconfirmed', zentaoId: 496 },
     { id: 'j', type: 'bug', title: '列表里带删除标记', status: 'unconfirmed', zentaoId: 21 },
     // 任务 #11 删了，但同号 Bug #11 还在：不能误删
-    { id: 'k', type: 'bug', title: '同号 Bug', status: 'activated', zentaoId: 11 }
+    { id: 'k', type: 'bug', title: '同号 Bug', status: 'activated', zentaoId: 11 },
+    { id: 'm', type: 'bug', title: '本地已有、禅道里已解决', status: 'activated', zentaoId: 32 }
   ];
   writeFileSync(config.paths.tasks, JSON.stringify({ tasks: local }));
 
@@ -91,7 +94,16 @@ try {
         { id: '21', title: '列表里带删除标记', status: 'active', deleted: '1' }
       ] });
     }
-    if (url.includes('/my-bug-openedBy-')) return zentaoJson({ ...page, bugs: [] });
+    if (url.includes('/my-bug-openedBy-')) {
+      return zentaoJson({ ...page, bugs: [
+        { id: '30', title: '我创建的激活 Bug', status: 'active', confirmed: '0' },
+        { id: '35', title: '$waitTextList([&#039;搜索&#039;]) &quot;len&gt;4&quot; A&amp;B', status: 'active', confirmed: '0' },
+        { id: '31', title: '我创建的已关闭 Bug', status: 'closed' },
+        { id: '32', title: '本地已有、禅道里已解决', status: 'resolved' }
+      ] });
+    }
+    if (url.includes('/my-bug-mailto-')) return zentaoJson({ ...page, bugs: [{ id: '33', title: '抄送给我', status: 'active', confirmed: '1' }] });
+    if (url.includes('/my-bug-assignedBy-')) return zentaoJson({ ...page, bugs: [{ id: '34', title: '由我指派', status: 'active' }, { id: '30', title: '我创建的激活 Bug', status: 'active' }] });
     const m = url.match(/\/(task|bug)-view-(\d+)\.json/);
     if (m) {
       viewed.push(`${m[1]}#${m[2]}`);
@@ -114,14 +126,26 @@ try {
 
   const r = await syncMyTasks();
   const after = JSON.parse(readFileSync(config.paths.tasks, 'utf8')).tasks;
-  const ids = after.map(t => t.id).sort().join('');
+  const idList = after.map(t => t.id);
+  const ids = { includes: (id) => idList.includes(id), toString: () => idList.filter(id => id.length === 1).sort().join('') };
   check('L1 禅道里已删除 / 不存在的任务删掉本地记录（含看板任务）', !['b', 'd', 'f'].some(id => ids.includes(id)), ids);
   check('L1 禅道里已删除的 Bug 删掉本地记录（含列表里带删除标记的）', !['i', 'j'].some(id => ids.includes(id)), ids);
   check('L1 查不了、还在的、没同步过的、同号的另一类记录不动', ['a', 'c', 'e', 'g', 'h', 'k'].every(id => ids.includes(id)), ids);
   const c = after.find(t => t.id === 'c');
   check('L1 列表外还在的记录不按 ID 覆盖（关联错的老记录保持原样）', c && c.title === '本地标题（关联错的老记录）' && c.status === 'done', JSON.stringify(c));
   check('L1 同步结果带删除条数', r.removed === 3 && r.bugs && r.bugs.removed === 2, JSON.stringify({ removed: r.removed, bugs: r.bugs }));
-  check('L1 只查列表外的记录，列表里的不逐个查', !viewed.includes('task#10') && !viewed.includes('bug#20'), viewed.join(','));
+  check('L1 只查列表外的记录，列表里的不逐个查', !viewed.includes('task#10') && !viewed.includes('bug#20') && !viewed.includes('bug#32'), viewed.join(','));
+  const bugsAfter = after.filter(t => t.type === 'bug');
+  const bugIds = bugsAfter.map(t => String(t.zentaoId));
+  check('L6 指派给我 / 由我创建 / 抄送给我 / 由我指派 的激活 Bug 都同步进来（重复的只一条）',
+    ['20', '30', '33', '34'].every(id => bugIds.filter(x => x === id).length === 1), bugIds.join(','));
+  check('L6 已解决、已关闭的不新增', !bugIds.includes('31'));
+  const escaped = bugsAfter.find(t => String(t.zentaoId) === '35');
+  check('L7 同步时还原禅道转义过的标题', escaped && escaped.title === `$waitTextList(['搜索']) "len>4" A&B`, escaped && escaped.title);
+  const { decodeZentaoText } = await import('../src/utils/text.js');
+  check('L7 还原规则：&amp; 最后处理（原文就是 &lt; 的不多还原一层）、数字实体、空值原样',
+    decodeZentaoText('&amp;lt;b&amp;gt;') === '&lt;b&gt;' && decodeZentaoText('&#20013;&#039;') === "中'" && decodeZentaoText(undefined) === undefined && decodeZentaoText('普通标题') === '普通标题');
+  check('L6 本地已有的按禅道刷新状态（禅道已解决 → 已解决）', bugsAfter.find(t => t.id === 'm').status === 'resolved');
   check('L1 详情用 onlybody 版（看板任务才有数据）',
     mock.calls.filter(x => /-view-\d+\.json/.test(x.url)).every(x => x.url.includes('onlybody=yes')));
 

@@ -22,6 +22,13 @@ PLIST="$AGENT_DIR/$WA_LABEL.plist"
 FROM_BACKEND="${WORKASSISTANT_CALLED_FROM_BACKEND:-0}"
 
 # 选定 node 并固化到 .node-path（宿主启动器与 launchd 都不继承 shell 环境）
+# 安装版：登录项指向固定入口 bin/workassistant-run（它读 current.txt 启动当前版本、用自带的 node），
+# 切换版本不用重写登录项
+WA_HOME_DIR="$(wa_install_home "$PROJECT_DIR" || true)"
+
+if [[ -n "$WA_HOME_DIR" ]]; then
+  NODE_BIN="$WA_HOME_DIR/bin/workassistant-run"
+else
 NODE_BIN="$(wa_resolve_node_for_install || true)"
 if [[ -z "$NODE_BIN" ]]; then
   echo "❌ 找不到可用的 node（需要 18 及以上版本）。可设置 WORKASSISTANT_NODE=/path/to/node 后重试"
@@ -34,6 +41,7 @@ case "$NODE_BIN" in
     ;;
 esac
 echo "$NODE_BIN" > "$PROJECT_DIR/scripts/.node-path"
+fi
 
 mkdir -p "$AGENT_DIR"
 wa_prepare_log_dir
@@ -41,6 +49,12 @@ wa_prepare_log_dir
 X_NODE="$(wa_xml_escape "$NODE_BIN")"
 X_ENTRY="$(wa_xml_escape "$PROJECT_DIR/src/index.js")"
 X_DIR="$(wa_xml_escape "$PROJECT_DIR")"
+PROGRAM_ARGS="    <string>$X_NODE</string>
+    <string>$X_ENTRY</string>"
+if [[ -n "$WA_HOME_DIR" ]]; then
+  PROGRAM_ARGS="    <string>$X_NODE</string>"
+  X_DIR="$(wa_xml_escape "$WA_HOME_DIR")"
+fi
 X_LOG="$(wa_xml_escape "$WA_LOG_FILE")"
 
 NEW_PLIST="$(cat <<PLIST_EOF
@@ -53,8 +67,7 @@ NEW_PLIST="$(cat <<PLIST_EOF
 
   <key>ProgramArguments</key>
   <array>
-    <string>$X_NODE</string>
-    <string>$X_ENTRY</string>
+$PROGRAM_ARGS
   </array>
 
   <key>WorkingDirectory</key>
@@ -101,7 +114,11 @@ CHANGED=0
 
 printf '%s\n' "$NEW_PLIST" > "$PLIST"
 echo "✅ 已写入登录项: $PLIST"
-echo "   程序: $NODE_BIN $PROJECT_DIR/src/index.js"
+if [[ -n "$WA_HOME_DIR" ]]; then
+  echo "   程序: ${NODE_BIN}（运行 $WA_HOME_DIR/current.txt 记录的版本）"
+else
+  echo "   程序: $NODE_BIN $PROJECT_DIR/src/index.js"
+fi
 echo "   日志: $WA_LOG_FILE"
 echo ""
 

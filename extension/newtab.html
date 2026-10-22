@@ -234,8 +234,12 @@
         <button class="tab-btn active" data-mode="task">📋 任务</button>
         <button class="tab-btn" data-mode="bug">🐛 Bug</button>
         <button class="tab-btn" data-mode="report">📊 报告</button>
-        <!-- 设置放在标签栏：任务、Bug、报告页都能打开 -->
-        <button id="settingsBtn" class="tab-settings-btn" type="button" title="设置">⚙️ 设置</button>
+        <!-- 右上角：已登录显示头像（点开是用户信息与设置）；未登录显示「登录禅道」与设置 -->
+        <div class="account-area" id="accountArea">
+          <button id="accountLoginBtn" class="tab-login-btn" type="button" hidden>登录禅道</button>
+          <button id="settingsBtn" class="tab-settings-btn" type="button" title="设置">⚙️ 设置</button>
+          <button id="accountAvatarBtn" class="account-avatar" type="button" aria-haspopup="true" aria-expanded="false" hidden></button>
+        </div>
       </div>
 
       <!-- 报告模式（内容由 reports.js 渲染） -->
@@ -998,40 +1002,24 @@
             <h4>禅道集成</h4>
 
             <div class="set-row">
-              <div class="sr-label">启用同步</div>
-              <div class="sr-control">
-                <label class="checkbox-label">
-                  <input type="checkbox" id="zentaoEnabled">
-                  <span>任务与 Bug 状态变更时同步到禅道</span>
-                </label>
-              </div>
-            </div>
-
-            <div class="set-row">
-              <div class="sr-label">API 地址 <span class="req">*</span></div>
-              <div class="sr-control">
-                <input type="text" class="set-input" id="zentaoUrl" placeholder="http://your-zentao.com" spellcheck="false" style="max-width:340px">
-                <span class="input-hint">从浏览器地址栏复制，如 http://your-zentao-host:port</span>
-              </div>
-            </div>
-
-            <div class="set-row">
-              <div class="sr-label">账号 <span class="req">*</span></div>
-              <div class="sr-control">
-                <input type="text" class="set-input" id="zentaoUsername" placeholder="your-account" style="max-width:340px">
-              </div>
-            </div>
-
-            <div class="set-row">
-              <div class="sr-label">密码 <span class="req">*</span></div>
+              <div class="sr-label">登录账号</div>
               <div class="sr-control">
                 <div class="row">
-                  <input type="password" class="set-input" id="zentaoPassword" placeholder="your-password" autocomplete="off" style="max-width:340px">
-                  <button type="button" class="set-btn set-btn-secondary set-btn-sm" data-pw-toggle="zentaoPassword">
-                    <svg><use href="#si-eye"/></svg><span class="btn-label">显示</span>
+                  <span class="set-account" id="settingsAccountText">读取中…</span>
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="settingsSwitchAccountBtn">
+                    <span class="btn-label">切换账号</span>
                   </button>
                 </div>
+                <span class="input-hint">禅道地址、账号、密码在登录卡片里填写：登录前会先验证，验证通过才保存。</span>
               </div>
+            </div>
+
+            <!-- 以前直接在这里填的禅道配置：改由登录卡片填写；保留隐藏的输入框，保存设置时原样带回后端 -->
+            <div hidden>
+              <input type="checkbox" id="zentaoEnabled">
+              <input type="text" id="zentaoUrl">
+              <input type="text" id="zentaoUsername">
+              <input type="password" id="zentaoPassword" autocomplete="off">
             </div>
 
             <div class="set-row">
@@ -1171,6 +1159,14 @@
               </div>
             </div>
             <input type="file" id="importConfigFile" accept="application/json,.json" style="display:none">
+
+            <div class="set-danger debug-only" id="resetZone">
+              <div class="sd-text">
+                <b>重置为首次使用</b>
+                <span>清空禅道账号、AI Key、推送、提示词等全部配置，回到第一次打开插件的状态（调试用）。</span>
+              </div>
+              <button type="button" class="set-btn set-btn-danger set-btn-sm" id="resetAllBtn">重置为首次使用</button>
+            </div>
             <span id="configTransferResult" class="test-result"></span>
           </section>
 
@@ -1240,6 +1236,7 @@
   <!-- 任务 / Bug 附件 -->
   <script src="attachments.js"></script>
   <script src="reports.js"></script>
+  <script src="account.js"></script>
   <!-- 按钮状态管理器 -->
   <script src="buttonStateManager.js"></script>
   <!-- 乐观 UI：禅道操作先改界面，失败再回退 -->

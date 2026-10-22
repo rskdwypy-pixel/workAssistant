@@ -825,6 +825,8 @@ router.get('/config', async (req, res) => {
         webhook: {
           hasUrl: !!cfg.webhook.url,
           type: cfg.webhook.type || 'generic',
+          // 完整地址：设置页以后端为准回填（只有本插件能访问本接口，见 requestGuard）
+          url: cfg.webhook.url || '',
           urlPrefix: cfg.webhook.url ? cfg.webhook.url.substring(0, 30) + '...' : '(空)'
         },
         zentao: {
@@ -994,9 +996,10 @@ router.post('/zentao/config', async (req, res) => {
     // 更新运行时配置
     Object.assign(configModule.config.zentao, next);
 
-    // 账号或地址可能变了，作废旧会话
+    // 账号或地址可能变了，作废旧会话与登录状态缓存
     const { clearCookies } = await import('../services/zentaoService.js');
     clearCookies();
+    (await import('../services/account.js')).invalidateState();
 
     console.log('[API] 禅道配置已保存');
     res.json({ success: true, message: '禅道配置已保存' });
@@ -1015,11 +1018,11 @@ async function loadZentaoConfigOrError(res) {
   const configModule = await import('../config.js');
   const z = configModule.config.zentao || {};
   if (!z.enabled) {
-    res.status(400).json({ success: false, message: '禅道未启用（ZENTAO_ENABLED 未开启）' });
+    res.status(400).json({ success: false, message: '还没有登录禅道（点右上角「登录禅道」）' });
     return null;
   }
   if (!z.url || !z.username || !z.password) {
-    res.status(400).json({ success: false, message: '禅道配置不完整（缺少 URL / 账号 / 密码）' });
+    res.status(400).json({ success: false, message: '还没有登录禅道（点右上角「登录禅道」）' });
     return null;
   }
   return z;
@@ -1516,9 +1519,12 @@ router.put('/bug/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { updateBugStatus } = await import('../services/bugManager.js');
-    const { status, assignedTo, assignedToList, cc, comment } = req.body;
+    const { status, assignedTo, assignedToList, cc, comment, title, priority, severity } = req.body;
 
     const extraData = {};
+    if (title !== undefined) extraData.title = title;
+    if (priority !== undefined) extraData.priority = priority;
+    if (severity !== undefined) extraData.severity = severity;
     if (assignedTo !== undefined) extraData.assignedTo = assignedTo;
     if (assignedToList !== undefined) extraData.assignedToList = assignedToList;
     if (cc !== undefined) extraData.cc = cc;
@@ -1948,6 +1954,50 @@ router.post('/zentao/bug/activate', async (req, res) => {
     if (!(await loadZentaoConfigOrError(res))) return;
     const { activateBug } = await import('../services/zentaoService.js');
     res.json(await activateBug(req.body || {}));
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+/** POST /api/zentao/bug/edit - { bugId, title?, pri?, severity? } 只改给出的字段，提交后回读确认 */
+router.post('/zentao/bug/edit', async (req, res) => {
+  try {
+    if (!(await loadZentaoConfigOrError(res))) return;
+    const { editBug } = await import('../services/zentaoService.js');
+    const b = req.body || {};
+    if (!b.bugId) return res.status(400).json({ success: false, message: '缺少 bugId' });
+    res.json(await editBug(b));
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+/** POST /api/zentao/bug/assign - { bugId, assignedTo, comment? } 禅道「指派」动作 */
+router.post('/zentao/bug/assign', async (req, res) => {
+  try {
+    if (!(await loadZentaoConfigOrError(res))) return;
+    const { assignBug } = await import('../services/zentaoService.js');
+    const b = req.body || {};
+    if (!b.bugId) return res.status(400).json({ success: false, message: '缺少 bugId' });
+    res.json(await assignBug(b));
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+/** POST /api/zentao/bug/reactivate - { bugId, assignedTo?, comment? } 激活（重新打开）已解决的 Bug */
+router.post('/zentao/bug/reactivate', async (req, res) => {
+  try {
+    if (!(await loadZentaoConfigOrError(res))) return;
+    const { reactivateBug } = await import('../services/zentaoService.js');
+    const b = req.body || {};
+    if (!b.bugId) return res.status(400).json({ success: false, message: '缺少 bugId' });
+    res.json(await reactivateBug(b));
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+/** GET /api/zentao/bug/brief?bugId=1 - 关联前核对：禅道里有没有这个 Bug、标题是什么 */
+router.get('/zentao/bug/brief', async (req, res) => {
+  try {
+    if (!(await loadZentaoConfigOrError(res))) return;
+    const id = String(req.query.bugId || '');
+    if (!/^\d{1,10}$/.test(id)) return res.status(400).json({ success: false, message: 'Bug 编号应为数字' });
+    const { getBugBrief } = await import('../services/zentaoService.js');
+    res.json({ success: true, data: await getBugBrief(id) });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 

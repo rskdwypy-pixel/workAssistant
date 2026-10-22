@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { join } from 'path';
+import { readFileSync } from 'fs';
 
 /**
  * 请求来源校验
@@ -15,21 +16,36 @@ import { join } from 'path';
  *      但浏览器标记为跨站（Sec-Fetch-Site: cross-site / same-site）的一律拒绝
  */
 
+const toExtensionId = (hex) => [...hex.slice(0, 32)].map(ch => String.fromCharCode(97 + parseInt(ch, 16))).join('');
+
 /**
- * unpacked 扩展的 ID 由扩展目录绝对路径派生（与 scripts/install-native-host.sh 同一算法）：
- * SHA-256 前 32 个十六进制字符，0-9a-f 映射为 a-p
+ * 扩展 ID：manifest.json 里有 key（公钥）时，ID 由公钥算出、与安装位置无关
+ * （SHA-256(公钥 DER) 前 32 个十六进制字符，0-9a-f 映射为 a-p，与 Chrome 的算法一致）；
+ * 没有 key 的旧版本退回「由扩展目录路径派生」（换目录 ID 就变，这正是加 key 的原因）
  */
+function extensionIdFromKey(base64Key) {
+  return toExtensionId(createHash('sha256').update(Buffer.from(base64Key, 'base64')).digest('hex'));
+}
+
 function extensionIdFromPath(dir) {
-  const hex = createHash('sha256').update(dir).digest('hex').slice(0, 32);
-  return [...hex].map(ch => String.fromCharCode(97 + parseInt(ch, 16))).join('');
+  return toExtensionId(createHash('sha256').update(dir).digest('hex'));
+}
+
+/** 本项目扩展的 ID（读 extension/manifest.json） */
+function projectExtensionId(projectRoot) {
+  const dir = join(projectRoot, 'extension');
+  try {
+    const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf-8'));
+    if (manifest.key) return extensionIdFromKey(manifest.key);
+  } catch { /* 读不到 manifest 时按路径算 */ }
+  return extensionIdFromPath(dir);
 }
 
 /**
- * 允许访问后端的扩展 ID：按当前仓库路径计算 + WORKASSISTANT_EXT_IDS（逗号分隔）补充
- * （从其他目录加载插件、或使用打包后的固定 ID 时用环境变量补充）
+ * 允许访问后端的扩展 ID：本项目扩展 + WORKASSISTANT_EXT_IDS（逗号分隔）补充
  */
 function allowedExtensionIds(projectRoot) {
-  const ids = new Set([extensionIdFromPath(join(projectRoot, 'extension'))]);
+  const ids = new Set([projectExtensionId(projectRoot)]);
   String(process.env.WORKASSISTANT_EXT_IDS || process.env.WORKASSISTANT_EXT_ID || '')
     .split(',')
     .map(s => s.trim())
@@ -91,4 +107,4 @@ function createRequestGuard({ port, projectRoot }) {
   };
 }
 
-export { createRequestGuard, extensionIdFromPath };
+export { createRequestGuard, extensionIdFromPath, extensionIdFromKey, projectExtensionId };

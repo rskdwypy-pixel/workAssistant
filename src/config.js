@@ -6,15 +6,33 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'f
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// .env 文件路径（WA_ENV_FILE 仅供测试：读写临时文件，不碰真实配置）
-const envFilePath = process.env.WA_ENV_FILE || join(__dirname, '../.env');
+const ROOT_DIR = join(__dirname, '..');
+
+/**
+ * 数据目录与配置文件
+ *   安装版：程序在 WorkAssistant/versions/<版本>/，数据和配置在 WorkAssistant/data/（与程序分开，更新、回滚不碰数据），
+ *           由启动脚本通过 WA_DATA_DIR 传入，配置文件为 data/.env
+ *   开发时（在仓库里直接运行）：仓库里的 data/ 和 .env
+ *   WA_ENV_FILE 仅供测试：读写临时文件，不碰真实配置
+ */
+const DATA_DIR = process.env.WA_DATA_DIR || join(ROOT_DIR, 'data');
+const envFilePath = process.env.WA_ENV_FILE || (process.env.WA_DATA_DIR ? join(DATA_DIR, '.env') : join(ROOT_DIR, '.env'));
+
+/** 版本号（以 package.json 为准；扩展 manifest.json 的 version 与它保持一致） */
+const APP_VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync(join(ROOT_DIR, 'package.json'), 'utf-8')).version || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+})();
 
 // 加载 .env 文件
 dotenv.config({ path: envFilePath });
 
 // 加载禅道用户列表
 function loadZentaoUsers() {
-  const usersFilePath = join(__dirname, '../data/zentao-users.json');
+  const usersFilePath = join(DATA_DIR, 'zentao-users.json');
   try {
     if (existsSync(usersFilePath)) {
       const usersData = readFileSync(usersFilePath, 'utf-8');
@@ -40,6 +58,8 @@ function parseKeyring(raw) {
 }
 
 const config = {
+  app: { version: APP_VERSION },
+
   // AI 配置
   ai: {
     apiKey: process.env.OPENAI_API_KEY || '',
@@ -102,10 +122,10 @@ const config = {
 
   // 数据目录
   paths: {
-    root: join(__dirname, '..'),
-    data: join(__dirname, '../data'),
-    tasks: join(__dirname, '../data/tasks.json'),
-    history: join(__dirname, '../data/history.json')
+    root: ROOT_DIR,
+    data: DATA_DIR,
+    tasks: join(DATA_DIR, 'tasks.json'),
+    history: join(DATA_DIR, 'history.json')
   },
 
   // 提示词配置
