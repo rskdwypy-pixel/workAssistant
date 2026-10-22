@@ -43,6 +43,15 @@ if (manifest.version !== version) {
 }
 if (!manifest.key) throw new Error('extension/manifest.json 缺少 key（固定扩展 ID 需要）');
 
+// 同步 extension/newtab.html 中的静态版本兜底
+const htmlPath = join(ROOT, 'extension', 'newtab.html');
+const html = readFileSync(htmlPath, 'utf8');
+const updatedHtml = html.replace(/工作助手 v\d+\.\d+\.\d+/g, `工作助手 v${version}`);
+if (updatedHtml !== html) {
+  writeFileSync(htmlPath, updatedHtml);
+  console.log(`已把 extension/newtab.html 的版本号同步为 ${version}`);
+}
+
 const name = `workassistant-${version}`;
 const stage = join(OUT, 'stage', name);
 rmSync(join(OUT, 'stage'), { recursive: true, force: true });

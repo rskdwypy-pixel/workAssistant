@@ -82,6 +82,41 @@ stop_launch_agent() {
   done
 }
 
+# 端口上正在监听的进程（查不到返回空；末尾的 || true 不能省：set -e + pipefail 下，
+# 没有进程时 lsof 返回失败，`X="$(port_pid)"` 这样的赋值会让整个脚本静默退出）
+port_pid() { lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null | head -1 || true; }
+proc_cwd() { lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1 || true; }
+proc_cmd() { ps -o command= -p "$1" 2>/dev/null || true; }
+
+# 是不是旧方式（从仓库目录用 nohup / start.sh / npm start）启动的工作助手后台：
+# node 进程，工作目录里是工作助手的代码。旧版本的 /health 不带 "app":"workassistant"，只看健康检查认不出来
+is_old_workassistant() {
+  local pid="$1" cwd
+  proc_cmd "$pid" | grep -q node || return 1
+  cwd="$(proc_cwd "$pid")"
+  [[ -n "$cwd" && -f "$cwd/package.json" && -f "$cwd/src/index.js" ]] || return 1
+  grep -q '"name": *"work-assistant"' "$cwd/package.json"
+}
+
+# 安装失败时把排查信息直接打出来（日志末尾、端口占用），不用再去翻日志
+diagnose() {
+  local log="$HOME/Library/Logs/WorkAssistant/backend.log" pid
+  echo ""
+  echo "  —— 排查信息 ——"
+  pid="$(port_pid)"
+  if [[ -n "$pid" ]]; then
+    echo "  端口 $PORT 被占用：PID $pid  $(proc_cmd "$pid" | cut -c1-120)"
+    echo "    工作目录：$(proc_cwd "$pid")"
+  else
+    echo "  端口 $PORT 没有程序在监听"
+  fi
+  echo "  开机自启：$(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null | grep -E '^[[:space:]]*(state|last exit code)' | tr -s ' ' | tr '\n' ';' || true)"
+  if [[ -f "$log" ]]; then
+    echo "  日志末尾（${log}）："
+    tail -n 15 "$log" | sed 's/^/    /'
+  fi
+}
+
 # ==================== 卸载 ====================
 if [[ "$UNINSTALL" == "1" ]]; then
   step "卸载工作助手"
@@ -181,7 +216,13 @@ for d in "$WA_HOME/versions"/*; do
   v="$(basename "$d")"
   [[ "$v" == "$VERSION" || "$v" == "$KEEP_PREV" ]] || rm -rf "$d"
 done
-ok "版本 $VERSION${PREVIOUS:+（上一个版本 $PREVIOUS 保留，可回滚）}"
+if [[ -n "$PREVIOUS" && "$PREVIOUS" != "$VERSION" ]]; then
+  ok "版本 ${VERSION}（上一个版本 $PREVIOUS 保留，可回滚）"
+elif [[ "$PREVIOUS" == "$VERSION" ]]; then
+  ok "版本 ${VERSION}（重新安装）"
+else
+  ok "版本 $VERSION"
+fi
 
 # 扩展放在固定位置：更新时替换里面的文件，浏览器里不用重新加载另一个目录
 mkdir -p "$WA_HOME/extension"
@@ -212,10 +253,18 @@ step "数据与配置"
 if [[ -f "$WA_HOME/data/.env" || -f "$WA_HOME/data/tasks.json" ]]; then
   ok "沿用已有数据：$WA_HOME/data"
 else
-  # 从旧的仓库目录迁移：显式指定，或由旧的开机自启项认出（WorkingDirectory 指向仓库目录）
+  # 从旧的仓库目录迁移：显式指定，或由旧的开机自启项认出（WorkingDirectory 指向仓库目录），
+  # 或由正在运行的旧后台认出（旧版 install.sh / start.sh 用 nohup 启动，不经过开机自启）
   if [[ -z "$MIGRATE_FROM" && -f "$PLIST" ]]; then
     OLD_DIR="$(/usr/libexec/PlistBuddy -c 'Print :WorkingDirectory' "$PLIST" 2>/dev/null || true)"
     if [[ -n "$OLD_DIR" && "$OLD_DIR" != "$WA_HOME"* && -f "$OLD_DIR/src/index.js" ]]; then MIGRATE_FROM="$OLD_DIR"; fi
+  fi
+  if [[ -z "$MIGRATE_FROM" ]]; then
+    OLD_PID="$(port_pid)"
+    if [[ -n "$OLD_PID" ]] && is_old_workassistant "$OLD_PID"; then
+      OLD_DIR="$(proc_cwd "$OLD_PID")"
+      [[ "$OLD_DIR" != "$WA_HOME"* ]] && MIGRATE_FROM="$OLD_DIR"
+    fi
   fi
   if [[ -n "$MIGRATE_FROM" ]]; then
     [[ -d "$MIGRATE_FROM" ]] || die "找不到要迁移的目录：$MIGRATE_FROM"
@@ -245,15 +294,33 @@ if [[ "$NO_SERVICE" == "1" ]]; then
 else
   step "注册开机自启并启动后台服务"
   stop_launch_agent
-  for _ in $(seq 1 20); do backend_alive || break; sleep 0.25; done
-  backend_alive && die "端口 $PORT 上还有另一个工作助手在运行（可能是手动启动的），请先关掉它再重新安装"
+  for _ in $(seq 1 20); do [[ -z "$(port_pid)" ]] && break; sleep 0.25; done
+  # 端口还被占着：旧方式启动的工作助手后台就停掉它；别的程序不动它，说清楚是谁
+  PID_ON_PORT="$(port_pid)"
+  if [[ -n "$PID_ON_PORT" ]]; then
+    if is_old_workassistant "$PID_ON_PORT"; then
+      OLD_DIR="$(proc_cwd "$PID_ON_PORT")"
+      # 由 PM2 托管的会被自动拉起，先让 PM2 放手
+      if command -v pm2 >/dev/null 2>&1 && pm2 jlist 2>/dev/null | grep -q '"name":"work-assistant"'; then
+        pm2 delete work-assistant >/dev/null 2>&1 || true
+      fi
+      kill "$PID_ON_PORT" 2>/dev/null || true
+      for _ in $(seq 1 20); do [[ -z "$(port_pid)" ]] && break; sleep 0.25; done
+      [[ -n "$(port_pid)" ]] && kill -9 "$(port_pid)" 2>/dev/null || true
+      sleep 0.5
+      ok "已停止旧方式启动的工作助手后台（${OLD_DIR}）"
+    else
+      die "端口 $PORT 被另一个程序占用：PID $PID_ON_PORT  $(proc_cmd "$PID_ON_PORT" | cut -c1-120)。请关闭它后重新安装"
+    fi
+  fi
+  [[ -n "$(port_pid)" ]] && { diagnose; die "端口 $PORT 仍被占用，无法启动后台服务"; }
   bash "$WA_HOME/versions/$VERSION/scripts/install-launchagent.sh" >/dev/null
   ok "开机自启已注册"
   bash "$WA_HOME/versions/$VERSION/scripts/install-native-host.sh" >/dev/null && ok "浏览器宿主已注册（插件可按需拉起后台）" || warn "浏览器宿主注册失败（不影响使用，开机自启会拉起后台）"
   for _ in $(seq 1 60); do backend_alive && break; sleep 0.5; done
-  backend_alive || die "后台服务 30 秒内没有启动，日志：~/Library/Logs/WorkAssistant/backend.log"
+  backend_alive || { diagnose; die "后台服务 30 秒内没有启动（排查信息见上，日志：~/Library/Logs/WorkAssistant/backend.log）"; }
   RUNNING="$(curl -s -m 2 "http://127.0.0.1:${PORT}/health" | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).version||"")}catch{console.log("")}})')"
-  [[ "$RUNNING" == "$VERSION" ]] || die "后台服务版本是 ${RUNNING:-未知}，应为 ${VERSION}（日志：~/Library/Logs/WorkAssistant/backend.log）"
+  [[ "$RUNNING" == "$VERSION" ]] || { diagnose; die "后台服务版本是 ${RUNNING:-未知}，应为 ${VERSION}（日志：~/Library/Logs/WorkAssistant/backend.log）"; }
   ok "后台服务已启动（版本 ${VERSION}）"
 fi
 

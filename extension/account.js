@@ -16,6 +16,8 @@ const AccountApi = {
   async request(path, init) {
     const resp = await fetch(`${this.base()}${path}`, init);
     const json = await resp.json().catch(() => ({ success: false, message: `HTTP ${resp.status}` }));
+    // 403：后台在运行，但不认这个插件（多半是旧版本的后台，只认旧的扩展 ID）
+    if (resp.status === 403) json.rejected = true;
     return json;
   },
   post(path, body) {
@@ -28,6 +30,7 @@ const AccountApi = {
 };
 
 const ACCOUNT_SKIP_KEY = 'waLoginSkipped';
+const INSTALL_COMMAND = 'curl -fsSL https://github.com/rskdwypy-pixel/workAssistant/releases/latest/download/install.sh | bash';
 const ACCOUNT_AI_HINT_KEY = 'waAiHintPending';
 // 重置时清掉的浏览器数据（调试模式开关保留，方便连续测试）
 const ACCOUNT_RESET_STORAGE = ['workAssistantConfig', 'taskDraft', 'bug_draft', 'lastTabMode', 'zentao_users', ACCOUNT_SKIP_KEY, ACCOUNT_AI_HINT_KEY];
@@ -56,7 +59,8 @@ const Account = {
     this.bind();
     await this.refresh();
     const s = this.state;
-    if (!s) return; // 后端没启动：由本地服务的引导处理，不弹登录卡片
+    // 连不上后台 / 后台不认这个插件：明确提示（以前静默停在默认界面，看起来像旧版插件）
+    if (!s) return this.showBackendNotice();
     // 报告页可能在状态读回来之前就按已登录渲染了
     if (s.state === 'unconfigured' && typeof TabSwitcher !== 'undefined' && TabSwitcher.currentMode === 'report' && typeof ReportPage !== 'undefined') ReportPage.show();
     if (s.state === 'unconfigured' && storageGet(ACCOUNT_SKIP_KEY) !== '1') this.showLogin({ mode: 'first' });
@@ -79,9 +83,15 @@ const Account = {
   async refresh(force) {
     try {
       const res = await AccountApi.state(force);
-      if (res.success) this.state = res.data;
+      if (res.success) {
+        this.state = res.data;
+        this.backendProblem = null;
+      } else {
+        this.backendProblem = res.rejected ? 'rejected' : 'error';
+      }
     } catch {
       // 后端连不上：保持原状
+      this.backendProblem = 'down';
     }
     this.render();
     return this.state;
@@ -390,6 +400,42 @@ const Account = {
     }
     view.querySelector('.login-sub').textContent = '完成，正在打开…';
     setTimeout(() => this.reload(), 600);
+  },
+
+  // ==================== 连不上后台 ====================
+
+  /** 连不上本地后台 / 后台太旧不认这个插件：说清楚原因和怎么修，可一键复制安装命令、重试 */
+  showBackendNotice() {
+    document.getElementById('backendNotice')?.remove();
+    const kind = this.backendProblem || 'down';
+    const text = {
+      down: '连不上本地后台服务（127.0.0.1:3721）。请在终端重新运行安装命令；仍不行时查看日志 ~/Library/Logs/WorkAssistant/backend.log。',
+      rejected: '本地后台服务版本过旧，不认识当前插件（通常是以前用旧方式启动的后台还在运行）。请在终端重新运行安装命令，会自动停掉旧的后台并启动新的。',
+      error: '本地后台服务返回异常。请在终端重新运行安装命令；仍不行时查看日志 ~/Library/Logs/WorkAssistant/backend.log。'
+    }[kind];
+    const el = document.createElement('div');
+    el.id = 'backendNotice';
+    el.className = 'account-hint backend-notice';
+    el.setAttribute('role', 'alert');
+    el.innerHTML = `<div class="ah-text"><b>${kind === 'rejected' ? '后台服务版本过旧' : '连不上本地后台服务'}</b><span>${accountEsc(text)}</span>
+        <code class="bn-cmd">${accountEsc(INSTALL_COMMAND)}</code></div>
+      <div class="ah-actions bn-actions"><button type="button" class="ah-go" data-bn="copy">复制安装命令</button><button type="button" class="bn-retry" data-bn="retry">重试</button></div>`;
+    document.body.appendChild(el);
+    el.addEventListener('click', async (e) => {
+      const act = e.target.closest('[data-bn]') && e.target.closest('[data-bn]').dataset.bn;
+      if (act === 'copy') {
+        try {
+          await navigator.clipboard.writeText(INSTALL_COMMAND);
+          e.target.textContent = '已复制';
+        } catch { /* 复制失败时命令就在上面，可以手动选中 */ }
+      }
+      if (act === 'retry') {
+        e.target.textContent = '重试中…';
+        await this.refresh(true);
+        if (this.state) this.reload();
+        else { e.target.textContent = '重试'; this.showBackendNotice(); }
+      }
+    });
   },
 
   // ==================== AI 未配置提示 ====================

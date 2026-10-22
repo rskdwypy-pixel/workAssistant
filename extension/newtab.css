@@ -3129,3 +3129,10 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
 /* 任务详情：标题可点击编辑的提示 */
 #detailTaskTitle::after { content: ' ✎'; color: var(--text-muted); font-size: 13px; opacity: 0; transition: opacity .15s; }
 #detailTaskTitle:hover::after { opacity: 1; }
+
+/* 连不上本地后台的提示（位置同 AI 未配置提示，宽一些放得下安装命令） */
+.account-hint.backend-notice { width: min(460px, calc(100vw - 32px)); border-color: rgba(239, 68, 68, .35); flex-direction: column; }
+.backend-notice .ah-text b { color: #b91c1c; }
+.bn-cmd { display: block; margin-top: 8px; padding: 6px 8px; background: var(--bg-base); border-radius: 6px; font-size: 11px; color: var(--text-primary); word-break: break-all; user-select: all; }
+.bn-actions { align-self: flex-end; gap: 8px; }
+.bn-retry { border: 1px solid var(--border); background: var(--bg-surface); border-radius: 8px; padding: 6px 12px; cursor: pointer; font-size: 13px; }

@@ -43,8 +43,8 @@ fs.writeFileSync(path.join(SHIM, 'launchctl'), `#!/bin/bash
 echo "launchctl $*" >> "${shimLog}"
 case "$1" in
   print) [[ -f "${shimState}" ]] && exit 0 || exit 1 ;;
-  bootstrap) prog="$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$3")"; touch "${shimState}"; (PORT=${PORT} "$prog" >> "${shimLog}.run" 2>&1 &) ; exit 0 ;;
-  bootout) rm -f "${shimState}"; pid=$(lsof -ti tcp:${PORT}); [[ -n "$pid" ]] && kill $pid; exit 0 ;;
+  bootstrap) prog="$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$3")"; PORT=${PORT} "$prog" >> "${shimLog}.run" 2>&1 & echo $! > "${shimState}"; exit 0 ;;
+  bootout) [[ -f "${shimState}" ]] && { pkill -P "$(cat "${shimState}")" 2>/dev/null; kill "$(cat "${shimState}")" 2>/dev/null; }; rm -f "${shimState}"; exit 0 ;;
   *) exit 0 ;;
 esac
 `);
@@ -126,7 +126,8 @@ try {
   // ============ 完整安装（登录项、宿主、启动） ============
   r = install('--package', p110);
   const out = plain(r);
-  check('完整安装：服务启动且版本与安装包一致', r.status === 0 && /后台服务已启动（版本 1.1.0）/.test(out) && health() && health().version === '1.1.0', out.slice(-800));
+  if (process.env.WA_TEST_DEBUG) fs.writeFileSync(process.env.WA_TEST_DEBUG, out);
+  check('完整安装：服务启动且版本与安装包一致', r.status === 0 && /后台服务已启动（版本 1.1.0）/.test(out) && health() && health().version === '1.1.0', out.slice(-1500));
   const plist = path.join(HOME, 'Library', 'LaunchAgents', 'com.workassistant.backend.plist');
   const progArg = execFileSync('/usr/libexec/PlistBuddy', ['-c', 'Print :ProgramArguments:0', plist], { encoding: 'utf8' }).trim();
   check('登录项指向固定入口（切换版本不用改登录项）', progArg === path.join(WA, 'bin', 'workassistant-run'), progArg);
@@ -151,6 +152,44 @@ try {
     fs.readdirSync(WA).sort().join() === 'backups,data' && !health());
   r = install('--uninstall', '--purge');
   check('卸载 --purge：连数据一起删', r.status === 0 && !fs.existsSync(WA));
+
+  // ============ 旧方式启动的后台占着端口（旧版 install.sh / start.sh 用 nohup 启动，不经过开机自启） ============
+  // 健康检查不带 "app":"workassistant"（旧版本），安装器以前认不出它：新后台抢不到端口，30 秒后报失败，
+  // 浏览器连到的还是旧后台，新插件被它拒绝，界面看起来像旧版（实际发生在一台新 Mac 上）
+  const oldRepo = path.join(tmp, 'old-running');
+  fs.mkdirSync(path.join(oldRepo, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(oldRepo, 'package.json'), JSON.stringify({ name: 'work-assistant', version: '1.0.0' }, null, 2));
+  fs.writeFileSync(path.join(oldRepo, '.env'), 'ZENTAO_URL=http://old-running:1\n');
+  fs.writeFileSync(path.join(oldRepo, 'src', 'index.js'),
+    `require('http').createServer((q, s) => { s.setHeader('Content-Type', 'application/json'); s.end('{"status":"ok"}'); }).listen(${PORT}, '127.0.0.1');`);
+  const startOld = (cwd) => {
+    // 像 nohup 一样脱离测试进程在后台运行（spawnSync 调 bash -c "… &" 会一直等着不返回）
+    require('child_process').spawn(process.execPath, ['src/index.js'], { cwd, detached: true, stdio: 'ignore' }).unref();
+    for (let i = 0; i < 40; i++) {
+      if (spawnSync('lsof', ['-ti', `tcp:${PORT}`], { encoding: 'utf8' }).stdout.trim()) break;
+      spawnSync('sleep', ['0.1']);
+    }
+  };
+  startOld(oldRepo);
+  r = install('--package', p110);
+  const out2 = plain(r);
+  if (process.env.WA_TEST_DEBUG) fs.writeFileSync(process.env.WA_TEST_DEBUG + '.old', out2);
+  check('旧方式启动的后台：认出并停掉，新后台正常启动', r.status === 0 && /已停止旧方式启动的工作助手后台/.test(out2) && health() && health().version === '1.1.0', out2.slice(-900));
+  check('旧方式启动的后台：顺带从它的目录迁移配置', /从 .*old-running 迁移配置和数据/.test(out2) && fs.readFileSync(path.join(WA, 'data', '.env'), 'utf8').includes('old-running'));
+  check('重装同一版本：提示「重新安装」，不说「上一个版本 1.1.0」', /版本 1\.1\.0（重新安装）/.test(plain(install('--package', p110))));
+  install('--uninstall', '--purge');
+
+  // 端口被别的程序占着：不动它，说清楚是谁
+  const foreign = path.join(tmp, 'foreign');
+  fs.mkdirSync(path.join(foreign, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(foreign, 'src', 'index.js'), fs.readFileSync(path.join(oldRepo, 'src', 'index.js')));
+  startOld(foreign);
+  r = install('--package', p110);
+  if (process.env.WA_TEST_DEBUG) fs.writeFileSync(process.env.WA_TEST_DEBUG + '.foreign', plain(r));
+  const fpid = spawnSync('lsof', ['-ti', `tcp:${PORT}`], { encoding: 'utf8' }).stdout.trim();
+  check('端口被别的程序占用：不动它，提示是哪个程序', r.status !== 0 && /被另一个程序占用：PID \d+/.test(plain(r)) && !!fpid, plain(r).slice(-400));
+  if (fpid) spawnSync('kill', fpid.split('\n'));
+  install('--uninstall', '--purge');
 } catch (err) {
   check(`异常：${err.stack}`, false);
 } finally {

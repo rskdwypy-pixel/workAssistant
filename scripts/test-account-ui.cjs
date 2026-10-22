@@ -42,6 +42,8 @@ function setup(s) {
     const body = init.body ? JSON.parse(init.body) : null;
     s.requests.push({ method, url: u, body });
     const reply = (b, status = 200) => ({ ok: status < 400, status, json: async () => b });
+    if (s.down) throw new TypeError('Failed to fetch');
+    if (s.reject) return reply({ success: false, message: 'Forbidden' }, 403);
     if (u.startsWith('/api/account/login')) return reply(s.login ? s.login(body) : { success: false, message: 'x' });
     if (u.startsWith('/api/account/logout')) return reply({ success: true, data: stateOf('unconfigured') });
     if (u.startsWith('/api/account/reset')) return reply({ success: true, data: { cleared: [] } });
@@ -201,6 +203,22 @@ function setup(s) {
   const reset = s.requests.find(r => r.url === '/api/account/reset');
   check('重置：带上「同时清空本地数据」并刷新', reset && reset.body.includeData === true && s.reloads === 1);
   check('重置：清掉浏览器里的设置与草稿，保留调试模式', ['workAssistantConfig', 'taskDraft', 'lastTabMode', 'waLoginSkipped'].every(k => win.localStorage.getItem(k) === null) && win.localStorage.getItem('debugMode') === 'true');
+
+  // ============ 连不上后台 / 后台太旧 ============
+  s = { state: stateOf('unconfigured'), down: true };
+  ({ win, doc, $ } = setup(s));
+  await win.Account.init();
+  let notice = $('backendNotice');
+  check('连不上后台：明确提示并给出安装命令，不弹登录卡片', notice && /连不上本地后台服务/.test(notice.textContent) && /releases\/latest\/download\/install\.sh/.test(notice.querySelector('.bn-cmd').textContent) && !$('loginOverlay'));
+  s.down = false;
+  notice.querySelector('[data-bn="retry"]').click();
+  await tick(20);
+  check('后台恢复后点重试：刷新页面', s.reloads === 1);
+  s = { state: stateOf('unconfigured'), reject: true };
+  ({ win, doc, $ } = setup(s));
+  await win.Account.init();
+  notice = $('backendNotice');
+  check('后台不认这个插件（403，多半是旧后台还在跑）：提示后台版本过旧、重新运行安装命令', notice && /后台服务版本过旧/.test(notice.textContent) && /重新运行安装命令/.test(notice.textContent));
 
   // ============ 不用浏览器原生弹框 ============
   const native = [];

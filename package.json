@@ -1,6 +1,6 @@
 {
   "name": "work-assistant",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "AI工作助手 - 智能任务管理和日报生成",
   "main": "src/index.js",
   "type": "module",

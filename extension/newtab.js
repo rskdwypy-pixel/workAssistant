@@ -5823,6 +5823,15 @@ function loadSettings() {
     debugModeToggle.checked = debugMode;
   }
 
+  // 动态更新关于页面的版本号（以 manifest 真实版本为准）
+  const aboutVerEl = document.getElementById('aboutVersionDesc');
+  if (aboutVerEl) {
+    const manifestVer = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getManifest)
+      ? chrome.runtime.getManifest().version
+      : '1.1.0';
+    aboutVerEl.textContent = `工作助手 v${manifestVer} · 界面设计方案 v1.0`;
+  }
+
   // 提示词与主配置不在同一接口，单独拉取（完成后会刷新「已保存」基线）
   loadPrompts();
 
