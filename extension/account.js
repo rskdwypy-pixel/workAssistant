@@ -30,7 +30,10 @@ const AccountApi = {
 };
 
 const ACCOUNT_SKIP_KEY = 'waLoginSkipped';
-const INSTALL_COMMAND = 'curl -fsSL https://github.com/rskdwypy-pixel/workAssistant/releases/latest/download/install.sh | bash';
+// 安装命令随系统不同（platform.js）；单独测试本文件时退回 Mac 的命令
+const INSTALL_COMMAND = typeof WA_INSTALL_COMMAND !== 'undefined' ? WA_INSTALL_COMMAND : 'curl -fsSL https://github.com/rskdwypy-pixel/workAssistant/releases/latest/download/install.sh | bash';
+const ACCOUNT_LOG_PATH = typeof WA_LOG_PATH !== 'undefined' ? WA_LOG_PATH : '~/Library/Logs/WorkAssistant/backend.log';
+const ACCOUNT_TERMINAL = typeof WA_TERMINAL !== 'undefined' ? WA_TERMINAL : '终端';
 const ACCOUNT_AI_HINT_KEY = 'waAiHintPending';
 // 重置时清掉的浏览器数据（调试模式开关保留，方便连续测试）
 const ACCOUNT_RESET_STORAGE = ['workAssistantConfig', 'taskDraft', 'bug_draft', 'lastTabMode', 'zentao_users', ACCOUNT_SKIP_KEY, ACCOUNT_AI_HINT_KEY];
@@ -426,9 +429,9 @@ const Account = {
     if (loading) loading.hidden = true;
     const kind = this.backendProblem || 'down';
     const text = {
-      down: '连不上本地后台服务（127.0.0.1:3721）。请在终端重新运行安装命令；仍不行时查看日志 ~/Library/Logs/WorkAssistant/backend.log。',
-      rejected: '本地后台服务版本过旧，不认识当前插件（通常是以前用旧方式启动的后台还在运行）。请在终端重新运行安装命令，会自动停掉旧的后台并启动新的。',
-      error: '本地后台服务返回异常。请在终端重新运行安装命令；仍不行时查看日志 ~/Library/Logs/WorkAssistant/backend.log。'
+      down: `连不上本地后台服务（127.0.0.1:3721）。请在${ACCOUNT_TERMINAL}里重新运行安装命令；仍不行时查看日志 ${ACCOUNT_LOG_PATH}。`,
+      rejected: `本地后台服务版本过旧，不认识当前插件（通常是以前用旧方式启动的后台还在运行）。请在${ACCOUNT_TERMINAL}里重新运行安装命令，会自动停掉旧的后台并启动新的。`,
+      error: `本地后台服务返回异常。请在${ACCOUNT_TERMINAL}里重新运行安装命令；仍不行时查看日志 ${ACCOUNT_LOG_PATH}。`
     }[kind];
     const el = document.createElement('div');
     el.id = 'backendNotice';

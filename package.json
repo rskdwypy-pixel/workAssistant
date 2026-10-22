@@ -9,10 +9,6 @@
     "dev": "node --watch src/index.js",
     "zentao": "node scripts/zentao-push.mjs",
     "mcp": "node src/mcp/zentao-server.js",
-    "setup:auto-start": "bash scripts/install-native-host.sh && bash scripts/install-launchagent.sh",
-    "setup:chrome-host": "bash scripts/install-native-host.sh",
-    "setup:autostart": "bash scripts/install-launchagent.sh",
-    "teardown:auto-start": "bash scripts/uninstall-launchagent.sh",
     "test": "node scripts/run-all-tests.cjs",
     "test:real": "node scripts/test-script-scope.cjs && node scripts/test-progress-real.cjs && node scripts/test-priority-real.cjs",
     "version": "node scripts/sync-version.mjs && git add extension/manifest.json extension/newtab.html"

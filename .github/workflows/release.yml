@@ -14,7 +14,13 @@ permissions:
   contents: write
 
 jobs:
+  # Windows 实机测试（安装、启动、自动更新、回滚、卸载）通过了才发布
+  windows:
+    uses: ./.github/workflows/windows-test.yml
+    secrets: inherit
+
   release:
+    needs: windows
     # 安装器测试要用到 macOS 的 launchctl / PlistBuddy 等
     runs-on: macos-latest
     steps:
@@ -49,6 +55,7 @@ jobs:
           (cd release && shasum -a 256 workassistant.tar.gz > workassistant.tar.gz.sha256)
           node scripts/sign-package.mjs release/workassistant.tar.gz
           cp installer/install-mac.sh release/install.sh
+          cp installer/install.ps1 release/install.ps1
           ls -l release
 
       - name: 发布
@@ -59,6 +66,12 @@ jobs:
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
             --notes "已安装的电脑会自动更新（设置 → 关于 可查看或立即更新）。首次安装或手动更新：
+
+          Mac（终端）：
           \`\`\`
           curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/install.sh | bash
+          \`\`\`
+          Windows（PowerShell）：
+          \`\`\`
+          curl.exe -fsSL -o \"\$env:TEMP\\wa-install.ps1\" https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File \"\$env:TEMP\\wa-install.ps1\"
           \`\`\`"

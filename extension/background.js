@@ -5,6 +5,9 @@
 // 因此执行任何操作都不会再打开新的禅道标签页。
 // ============================================================================
 
+// 与系统有关的提示文字（安装命令、日志位置）
+importScripts('platform.js');
+
 // API配置（后端只监听 IPv4，必须用 127.0.0.1，不能用 localhost）
 const API_BASE_URL = 'http://127.0.0.1:3721';
 
@@ -75,7 +78,7 @@ async function launchBackendViaNativeOnce() {
         done({
           started: false,
           code: 'timeout',
-          reason: '宿主已请求但后端未就绪，请确认已执行 npm run setup:auto-start'
+          reason: '宿主已请求但后端未就绪，请重新运行一次安装命令'
         });
       }
     }, 20000);
@@ -155,23 +158,20 @@ function classifyLaunchError(message) {
 /** 各类失败对应的用户指引（中文、可直接展示） */
 const LAUNCH_ERROR_HELP = {
   host_not_registered:
-    '未找到后端宿主。通常是这台电脑没有注册过，或用的浏览器不是 Chrome。'
-    + '在项目目录执行 npm run setup:auto-start 即可（会自动探测本机浏览器），'
-    + '完成后重新加载插件。',
+    '未找到后端宿主。通常是这台电脑没有用安装命令安装过，或用的浏览器安装时还没装。'
+    + `在${WA_TERMINAL}里重新运行一次安装命令即可（会为本机的浏览器注册宿主），完成后重新加载插件。`,
   permission_denied:
-    '浏览器拒绝了宿主启动。宿主文件路径中的脚本需要可执行权限，'
-    + '可执行 chmod +x scripts/*.sh 后重试。',
+    `浏览器拒绝了宿主启动（宿主程序没有执行权限）。请在${WA_TERMINAL}里重新运行一次安装命令。`,
   bad_manifest:
-    '宿主配置文件格式有误，请重新执行 npm run setup:auto-start 覆盖它。',
+    `宿主配置文件格式有误，请在${WA_TERMINAL}里重新运行一次安装命令覆盖它。`,
   timeout:
     '宿主已拉起但后端未就绪。首次启动需加载配置与禅道登录，约需 3-8 秒；'
-    + '若持续失败请查看日志 ~/Library/Logs/WorkAssistant/backend.log。',
+    + `若持续失败请查看日志 ${WA_LOG_PATH}。`,
   unsupported:
-    '当前浏览器不支持 Native Messaging。建议改用开机自启：'
-    + '在项目目录执行 npm run setup:auto-start。',
-  disconnected: '宿主启动后立即断开，请查看 ~/Library/Logs/WorkAssistant/backend.log 中的错误。',
-  launch_failed: '宿主未能启动后端，请查看 ~/Library/Logs/WorkAssistant/backend.log 中的错误。',
-  unknown: '请在项目目录执行 npm run setup:auto-start 重新注册宿主后重试。'
+    `当前浏览器不支持 Native Messaging。后端由开机自启运行；没在运行时请在${WA_TERMINAL}里重新运行一次安装命令。`,
+  disconnected: `宿主启动后立即断开，请查看 ${WA_LOG_PATH} 中的错误。`,
+  launch_failed: `宿主未能启动后端，请查看 ${WA_LOG_PATH} 中的错误。`,
+  unknown: `请在${WA_TERMINAL}里重新运行一次安装命令（会重新注册宿主）后重试。`
 };
 
 const STORAGE_KEY_LAST_SYNC = 'zentao_last_sync_time';

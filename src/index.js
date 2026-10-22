@@ -143,7 +143,7 @@ function startServer() {
       }
       // 被别的程序占了：以非 0 退出，让 launchd 稍后重试，并在日志里说清楚
       console.error(`端口 ${server.port} 被其他程序占用，工作助手后端无法启动。` +
-        `可执行 lsof -nP -iTCP:${server.port} -sTCP:LISTEN 查看占用者，或在 .env 中修改 PORT`);
+        `可执行 ${process.platform === 'win32' ? `netstat -ano | findstr :${server.port}` : `lsof -nP -iTCP:${server.port} -sTCP:LISTEN`} 查看占用者，或在 .env 中修改 PORT`);
       process.exit(2);
     }
     console.error('服务启动失败:', err);

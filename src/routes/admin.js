@@ -38,6 +38,43 @@ function isLaunchAgentInstalled() {
   return existsSync(join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`));
 }
 
+// ==================== Windows：开机自启是当前用户的启动项（注册表 Run） ====================
+// 由安装器 installer/install.ps1 注册；值是「wscript.exe "<WorkAssistant>\bin\workassistant.vbs"」（隐藏窗口启动守护进程）
+const IS_WINDOWS = process.platform === 'win32';
+const WIN_RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
+const WIN_RUN_NAME = 'WorkAssistant';
+
+function reg(args) {
+  return new Promise((resolve) => {
+    execFile('reg', args, { timeout: 10000, windowsHide: true }, (err, stdout, stderr) => {
+      resolve({ ok: !err, output: [String(stdout || ''), String(stderr || '')].join('\n').trim() });
+    });
+  });
+}
+
+async function isWinAutostartInstalled() {
+  const r = await reg(['query', WIN_RUN_KEY, '/v', WIN_RUN_NAME]);
+  return r.ok && /REG_SZ/.test(r.output);
+}
+
+async function setWinAutostart(enabled) {
+  if (!enabled) return reg(['delete', WIN_RUN_KEY, '/v', WIN_RUN_NAME, '/f']);
+  if (!process.env.WA_HOME) return { ok: false, output: '开发版（在仓库里运行）不支持开机自启，请用安装命令安装' };
+  const vbs = join(process.env.WA_HOME, 'bin', 'workassistant.vbs');
+  return reg(['add', WIN_RUN_KEY, '/v', WIN_RUN_NAME, '/t', 'REG_SZ', '/d', `wscript.exe "${vbs}"`, '/f']);
+}
+
+/** 开机自启是否已注册（Mac：LaunchAgent 文件；Windows：启动项） */
+async function autostartInstalled() {
+  return IS_WINDOWS ? isWinAutostartInstalled() : isLaunchAgentInstalled();
+}
+
+/** 开机自启是否已生效（Mac：launchd 已加载；Windows：注册了就会在下次登录生效，守护进程已在跑） */
+async function autostartLoaded(installed) {
+  if (!installed) return false;
+  return IS_WINDOWS ? true : isLaunchAgentLoaded();
+}
+
 /**
  * launchd 是否真的认识这个 job（已 bootstrap / 已加载）
  *
@@ -67,8 +104,8 @@ function isLaunchAgentLoaded() {
 router.get('/admin/status', async (req, res) => {
   try {
     const launchedBy = detectLauncher();
-    const launchAgentInstalled = isLaunchAgentInstalled();
-    const launchAgentLoaded = launchAgentInstalled ? await isLaunchAgentLoaded() : false;
+    const launchAgentInstalled = await autostartInstalled();
+    const launchAgentLoaded = await autostartLoaded(launchAgentInstalled);
 
     res.json({
       success: true,
@@ -81,6 +118,7 @@ router.get('/admin/status', async (req, res) => {
         uptimeSeconds: Math.floor((Date.now() - START_TIME) / 1000),
         startedAt: new Date(START_TIME).toISOString(),
         launchedBy,
+        platform: process.platform,
         launchAgentInstalled,
         launchAgentLoaded,
         // 只有常驻服务（登录项）才需要先停用才能真正关闭
@@ -115,9 +153,9 @@ router.post('/admin/shutdown', async (req, res) => {
     const notes = [];
 
     // 用户显式要求「关闭并停用开机自启」时才动登录项配置（脚本在后端调用时不会 bootout 本进程）
-    if (disableAutoStart && isLaunchAgentInstalled()) {
-      const r = await runScript('uninstall-launchagent.sh');
-      notes.push(isLaunchAgentInstalled()
+    if (disableAutoStart && await autostartInstalled()) {
+      const r = IS_WINDOWS ? await setWinAutostart(false) : await runScript('uninstall-launchagent.sh');
+      notes.push(await autostartInstalled()
         ? `停用开机自启失败: ${r.output.split('\n').pop()}`
         : '已停用开机自启');
     }
@@ -186,14 +224,15 @@ router.post('/admin/autostart', async (req, res) => {
     }
 
     const enabled = !!(req.body && req.body.enabled);
-    const script = enabled ? 'install-launchagent.sh' : 'uninstall-launchagent.sh';
-    const r = await runScript(script);
+    const r = IS_WINDOWS
+      ? await setWinAutostart(enabled)
+      : await runScript(enabled ? 'install-launchagent.sh' : 'uninstall-launchagent.sh');
 
-    // 不信任脚本的退出码，以「文件是否真的在」为准
-    const installed = isLaunchAgentInstalled();
+    // 不信任脚本的退出码，以「文件 / 启动项是否真的在」为准
+    const installed = await autostartInstalled();
     // 顺带回报 launchd 是否已加载，前端据此区分
     // 「已加载、马上生效」与「已注册、下次登录生效」
-    const loaded = installed ? await isLaunchAgentLoaded() : false;
+    const loaded = await autostartLoaded(installed);
     const ok = r.ok && installed === enabled;
 
     if (enabled && installed) {
@@ -213,7 +252,8 @@ router.post('/admin/autostart', async (req, res) => {
       output: r.output,
       message: enabled
         ? (installed
-            ? (loaded ? '已开启开机自启（launchd 已加载，下次登录会自动启动）'
+            ? (IS_WINDOWS ? '已开启开机自启（登录 Windows 时自动启动）'
+              : loaded ? '已开启开机自启（launchd 已加载，下次登录会自动启动）'
                       : '已开启开机自启（已注册，下次登录生效）')
             : '未能开启开机自启，请查看详情')
         : (installed ? '未能关闭开机自启，请查看详情' : '已关闭开机自启')

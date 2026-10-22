@@ -3,7 +3,7 @@
  * 打安装包：dist/workassistant-<版本>.tar.gz（+ .sha256）
  *
  * 包里是一个版本目录（安装后放在 WorkAssistant/versions/<版本>/）：
- *   src/  extension/  scripts/（启动器、开机自启、宿主注册；bin/ 是安装目录 bin/ 下固定入口的模板）  package.json  package-lock.json
+ *   src/  extension/  scripts/（启动器、开机自启、宿主注册；bin/ 是安装目录 bin/ 下固定入口的模板，Mac 与 Windows 的都在）  package.json  package-lock.json
  *   node_modules/（只含运行依赖；没有原生模块，Mac / Windows / Linux 通用）
  *   .wa-package（标记：脚本据此认出安装版目录结构；记录版本和需要的 Node 版本）
  * Node 运行环境不在包里，由安装器按系统和芯片单独下载。自动更新不换 Node：
@@ -39,6 +39,8 @@ if (changed.length) console.log(`已把版本号同步为 ${version}：${changed
 // 安装器自带的 Node 版本：写进 .wa-package，自动更新时据此判断能不能直接换
 const NODE_VERSION = (readFileSync(join(ROOT, 'installer', 'install-mac.sh'), 'utf8').match(/^NODE_VERSION="([\d.]+)"/m) || [])[1];
 if (!NODE_VERSION) throw new Error('installer/install-mac.sh 里找不到 NODE_VERSION');
+const NODE_VERSION_WIN = (readFileSync(join(ROOT, 'installer', 'install.ps1'), 'utf8').match(/^\$NodeVersion = '([\d.]+)'/m) || [])[1];
+if (NODE_VERSION_WIN !== NODE_VERSION) throw new Error(`两个安装器自带的 Node 版本不一致：install-mac.sh ${NODE_VERSION}，install.ps1 ${NODE_VERSION_WIN}`);
 
 const name = `workassistant-${version}`;
 const stage = join(OUT, 'stage', name);

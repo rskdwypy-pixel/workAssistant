@@ -1,0 +1,4 @@
+# Windows 专用文件保持 CRLF（cmd / wscript / Windows PowerShell 按 CRLF 读）；install.ps1 另外必须是 UTF-8 带 BOM
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.vbs text eol=crlf

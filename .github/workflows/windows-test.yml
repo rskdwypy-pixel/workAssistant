@@ -1,0 +1,75 @@
+# Windows 实机测试：在 GitHub 的 Windows 虚拟机上安装、启动、自动更新、回滚、卸载（scripts/test-windows.cjs）
+#
+# 推送到任何分支都会运行；发版流水线（release.yml）也会先跑它，通过了才发布。
+name: Windows 测试
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  build:
+    # 打三个安装包：当前版本、更新用的 99.0.0、装上就启动失败的 99.0.1（后两个用真实密钥签名）
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.20.0'
+          cache: npm
+      - run: npm ci
+      - name: 打测试用安装包
+        env:
+          WA_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          OUT="$PWD/dist-test"
+          V="$(node -p 'require("./package.json").version')"
+          node scripts/build-package.mjs --out "$OUT/stage-base"
+          mkdir -p "$OUT/base"
+          cp "$OUT/stage-base/workassistant-$V.tar.gz" "$OUT/base/workassistant.tar.gz"
+          (cd "$OUT/base" && shasum -a 256 workassistant.tar.gz > workassistant.tar.gz.sha256)
+          echo "$V" > "$OUT/base/VERSION"
+          for T in 99.0.0 99.0.1; do
+            R="$RUNNER_TEMP/repo-$T"
+            mkdir -p "$R"
+            git ls-files | rsync -a --files-from=- . "$R/"
+            ln -s "$PWD/node_modules" "$R/node_modules"
+            (cd "$R" && node -e 'const f=require("fs");const p=JSON.parse(f.readFileSync("package.json"));p.version=process.argv[1];f.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n")' "$T")
+            if [ "$T" = 99.0.1 ]; then echo 'throw new Error("测试用：启动失败的版本")' > "$R/src/index.js"; fi
+            (cd "$R" && node scripts/build-package.mjs --out "$OUT/stage-$T")
+            mkdir -p "$OUT/v$T"
+            cp "$OUT/stage-$T/workassistant-$T.tar.gz" "$OUT/v$T/workassistant.tar.gz"
+            (cd "$OUT/v$T" && shasum -a 256 workassistant.tar.gz > workassistant.tar.gz.sha256)
+            node scripts/sign-package.mjs "$OUT/v$T/workassistant.tar.gz"
+          done
+          rm -rf "$OUT"/stage-*
+          ls -lR "$OUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-packages
+          path: dist-test
+          retention-days: 3
+
+  windows:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.20.0'
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-test-packages
+          path: dist-test
+      - name: 安装、启动、自动更新、回滚、卸载
+        run: node scripts/test-windows.cjs dist-test
+      - name: 失败时打印日志
+        if: failure()
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:SystemDrive '工作 助手测试\WorkAssistant\logs\backend.log'
+          if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 120 -Encoding UTF8 }

@@ -73,10 +73,23 @@ async function checkTaskReminders() {
   }
 }
 
+
 /**
- * 发送系统通知 (macOS)
+ * 发送系统通知（macOS：通知中心；Windows：操作中心）
  */
 async function sendSystemNotification(title, message) {
+  if (process.platform === 'win32') {
+    const { execFile } = await import('child_process');
+    const { WIN_TOAST_SCRIPT, windowsPowerShellEnv } = await import('../utils/winToast.js');
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', WIN_TOAST_SCRIPT], {
+      windowsHide: true,
+      timeout: 15000,
+      env: windowsPowerShellEnv({ WA_NOTIFY_TITLE: String(title), WA_NOTIFY_MESSAGE: String(message) })
+    }, (error) => {
+      if (error) console.error('系统通知发送失败:', error.message);
+    });
+    return;
+  }
   try {
     // 使用 macOS osascript 发送通知。
     // 必须用 execFile 传参、不经过 shell：标题/内容里有任务名（可能来自禅道里别人建的任务），

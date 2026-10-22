@@ -25,8 +25,6 @@ data/backups/
 data/attachments/
 data/*.backup
 
-# 服务运行时 PID 文件
-.service.pid
 
 # 本机工作记忆与运行时数据
 .workbuddy/
@@ -44,8 +42,6 @@ TEST_REPORT.md
 # macOS
 .DS_Store
 
-# PM2
-.pm2/
 
 # 打包产物
 dist/

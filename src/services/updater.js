@@ -20,7 +20,7 @@
 import { execFile, spawn } from 'child_process';
 import { createHash, verify as verifySignature } from 'crypto';
 import {
-  chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readFileSync,
+  chmodSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync,
   readdirSync, renameSync, rmSync, unlinkSync, writeFileSync
 } from 'fs';
 import { devNull } from 'os';
@@ -49,13 +49,27 @@ export function compareVersions(a, b) {
   return 0;
 }
 
+/**
+ * 递归复制目录。不用 fs.cpSync：Node 22 在 Windows 上遇到含中文的路径会让进程直接崩溃（0xC0000409），
+ * 用户名是中文时安装目录就含中文。
+ */
+export function copyDir(src, dst) {
+  mkdirSync(dst, { recursive: true });
+  for (const e of readdirSync(src, { withFileTypes: true })) {
+    const from = join(src, e.name);
+    const to = join(dst, e.name);
+    if (e.isDirectory()) copyDir(from, to);
+    else copyFileSync(from, to);
+  }
+}
+
 const readText = (file) => {
   try { return readFileSync(file, 'utf8').trim(); } catch { return ''; }
 };
 
-function run(cmd, args, timeout) {
+function run(cmd, args, timeout, cwd) {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { timeout, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(cmd, args, { timeout, cwd, maxBuffer: 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
       if (err) {
         const detail = String(stderr || '').trim().split('\n').pop();
         return reject(new Error(detail || err.message));
@@ -178,7 +192,8 @@ export function createUpdater(opts = {}) {
 
     const unpack = join(work, 'unpack');
     mkdirSync(unpack, { recursive: true });
-    await run('tar', ['-xzf', tgz, '-C', unpack], 120 * 1000);
+    // Windows 自带的 tar.exe 打不开含中文的路径（用户名是中文时安装目录就含中文）：在下载目录里运行、只传相对路径
+    await run('tar', ['-xzf', 'workassistant.tar.gz', '-C', 'unpack'], 120 * 1000, work);
     const top = readdirSync(unpack, { withFileTypes: true }).filter(e => e.isDirectory());
     if (top.length !== 1) throw new Error('安装包结构不对');
     const pkgDir = join(unpack, top[0].name);
@@ -246,29 +261,40 @@ export function createUpdater(opts = {}) {
     }
     log(`安装 ${version}（当前 ${currentVersion}）`);
 
-    // 固定入口
-    for (const name of ['workassistant-run', 'native-host']) {
-      const src = join(dir, 'scripts', 'bin', name);
-      if (!existsSync(src)) continue;
-      const dst = join(waHome, 'bin', name);
-      copyFileSync(src, `${dst}.next`);
-      chmodSync(`${dst}.next`, 0o755);
-      renameSync(`${dst}.next`, dst);
-    }
-
-    // 扩展：先完整复制到旁边，再整体换掉（浏览器读到的始终是完整的一份）
+    // 1. 新扩展先完整复制到旁边（不影响正在用的）
     const ext = join(waHome, 'extension');
     rmSync(`${ext}.next`, { recursive: true, force: true });
     rmSync(`${ext}.old`, { recursive: true, force: true });
-    cpSync(join(dir, 'extension'), `${ext}.next`, { recursive: true });
-    if (existsSync(ext)) renameSync(ext, `${ext}.old`);
-    renameSync(`${ext}.next`, ext);
-    rmSync(`${ext}.old`, { recursive: true, force: true });
+    copyDir(join(dir, 'extension'), `${ext}.next`);
 
+    // 2. 切换版本：从这里起即使中途出错，launchd / 守护进程也会按新版本拉起，启动自检兜底
     writeFileSync(join(waHome, 'previous.txt'), `${currentVersion}\n`);
     writeFileSync(join(waHome, 'current.txt'), `${version}\n`);
     writeFileSync(pendingFile, `${version} 0\n`);
     saveSettings({ lastUpdate: { from: currentVersion, to: version, at: now().toISOString() } });
+
+    // 3. 扩展整体换掉（浏览器读到的始终是完整的一份）
+    try {
+      if (existsSync(ext)) renameSync(ext, `${ext}.old`);
+      renameSync(`${ext}.next`, ext);
+    } catch (err) {
+      // Windows 上目录里有文件正被占用（浏览器、资源管理器）时不能改名：就地覆盖
+      log(`扩展目录不能整体替换（${err.code || err.message}），改为就地覆盖`);
+      if (!existsSync(ext) && existsSync(`${ext}.old`)) renameSync(`${ext}.old`, ext);
+      for (const name of readdirSync(ext)) rmSync(join(ext, name), { recursive: true, force: true });
+      copyDir(`${ext}.next`, ext);
+      rmSync(`${ext}.next`, { recursive: true, force: true });
+    }
+    rmSync(`${ext}.old`, { recursive: true, force: true });
+
+    // 4. 固定入口（Mac：workassistant-run、native-host；Windows：workassistant.vbs、supervisor.cjs、native-host.cmd/.cjs）
+    const binSrc = join(dir, 'scripts', 'bin');
+    for (const name of existsSync(binSrc) ? readdirSync(binSrc) : []) {
+      const dst = join(waHome, 'bin', name);
+      copyFileSync(join(binSrc, name), `${dst}.next`);
+      chmodSync(`${dst}.next`, 0o755);
+      renameSync(`${dst}.next`, dst);
+    }
 
     // 只保留新版本和当前（即将成为上一个）版本
     for (const v of readdirSync(join(waHome, 'versions'))) {
@@ -336,12 +362,21 @@ export function createUpdater(opts = {}) {
 }
 
 /**
- * 重启后台：开机自启（launchd）拉起的进程以非 0 退出，launchd 会马上按新的 current.txt 重新拉起；
- * 其他方式启动的，先拉起一个新进程（bin/workassistant-run 会等端口空出来后再监听），再退出自己。
+ * 重启后台：由 launchd（Mac）或守护进程（Windows，bin/supervisor.cjs）拉起的进程以 75 退出，
+ * 它们会马上按新的 current.txt 重新拉起；
+ * 其他方式启动的，先拉起一个新进程（新进程会等端口空出来后再监听），再退出自己。
  */
 function defaultRestart({ waHome }) {
   setTimeout(() => {
-    if (process.env.WORKASSISTANT_LAUNCHED_BY === 'launchd') process.exit(75);
+    if (['launchd', 'supervisor'].includes(process.env.WORKASSISTANT_LAUNCHED_BY)) process.exit(75);
+    if (process.platform === 'win32') {
+      // Windows 上统一交给守护进程（它会等端口空出来）
+      spawn('wscript.exe', [join(waHome, 'bin', 'workassistant.vbs')], {
+        detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, WA_RESTART_WAIT_PORT: '1' }
+      }).unref();
+      setTimeout(() => process.exit(0), 300);
+      return;
+    }
     try {
       const logFile = process.env.WORKASSISTANT_LOG_FILE;
       const fd = logFile ? openSync(logFile, 'a', 0o600) : 'ignore';

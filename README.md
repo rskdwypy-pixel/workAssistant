@@ -13,14 +13,16 @@
 
 ## 系统要求
 
-- macOS（Intel 或 Apple 芯片）。Windows 版本还在开发中。
+- macOS（Intel 或 Apple 芯片），或 Windows 10（1803 及以上）/ Windows 11。不需要管理员权限。
 - Chromium 内核的浏览器：Chrome、Edge、Brave、Helium、Arc、Vivaldi 等。
 - 能访问你们的禅道（公司内网 / VPN）。
 - 不需要预先安装 Node.js：安装器会自带。
 
-## 安装（macOS）
+## 安装
 
-### 1. 运行安装命令
+### macOS
+
+#### 1. 运行安装命令
 
 打开「终端」，粘贴运行：
 
@@ -38,7 +40,7 @@ curl -fsSL https://github.com/rskdwypy-pixel/workAssistant/releases/latest/downl
 
 看到 `✓ 安装完成：工作助手 x.y.z` 即成功。
 
-### 2. 在浏览器里加载扩展（只需一次）
+#### 2. 在浏览器里加载扩展（只需一次）
 
 1. 在浏览器的扩展页（地址 `chrome://extensions`，安装器已自动打开）打开右上角的 **开发者模式**；
 2. 如果以前装过「工作助手」，先把旧的 **移除**；
@@ -48,7 +50,21 @@ curl -fsSL https://github.com/rskdwypy-pixel/workAssistant/releases/latest/downl
    ~/Library/Application Support/WorkAssistant/extension
    ```
 
-### 3. 首次使用
+### Windows
+
+打开「PowerShell」（开始菜单搜索 PowerShell），粘贴运行：
+
+```powershell
+curl.exe -fsSL -o "$env:TEMP\wa-install.ps1" https://github.com/rskdwypy-pixel/workAssistant/releases/latest/download/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\wa-install.ps1"
+```
+
+与 Mac 一样不问任何问题、不需要管理员权限，装到 `%LOCALAPPDATA%\WorkAssistant`，注册开机自启（当前用户的启动项）和浏览器宿主（Chrome、Edge、Brave、Chromium、Vivaldi），启动后台并打开扩展页、把扩展目录复制到剪贴板。然后在扩展页打开 **开发者模式** → **加载已解压的扩展程序** → 在选择框的地址栏粘贴目录：
+
+```
+%LOCALAPPDATA%\WorkAssistant\extension
+```
+
+### 首次使用（Mac / Windows 相同）
 
 打开一个新标签页：
 
@@ -76,12 +92,20 @@ curl -fsSL https://github.com/rskdwypy-pixel/workAssistant/releases/latest/downl
 
 ## 卸载
 
+Mac：
+
 ```bash
 curl -fsSL https://github.com/rskdwypy-pixel/workAssistant/releases/latest/download/install.sh | bash -s -- --uninstall
 ```
 
+Windows（PowerShell）：
+
+```powershell
+curl.exe -fsSL -o "$env:TEMP\wa-install.ps1" https://github.com/rskdwypy-pixel/workAssistant/releases/latest/download/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\wa-install.ps1" -Uninstall
+```
+
 - 默认 **保留数据和配置**（重新安装后自动使用）；
-- 连数据一起删除：把末尾的 `--uninstall` 换成 `--uninstall --purge`；
+- 连数据一起删除：Mac 把末尾的 `--uninstall` 换成 `--uninstall --purge`，Windows 在 `-Uninstall` 后面加 `-Purge`；
 - 最后在浏览器扩展页移除「工作助手」。
 
 ## 文件都在哪里
@@ -101,6 +125,8 @@ curl -fsSL https://github.com/rskdwypy-pixel/workAssistant/releases/latest/downl
 ~/Library/Logs/WorkAssistant/backend.log   后台服务日志
 ```
 
+Windows 在 `%LOCALAPPDATA%\WorkAssistant\`，结构相同；日志在其中的 `logs\backend.log`。后台由守护进程（`bin\supervisor.cjs`，隐藏窗口）运行：崩溃自动拉起，自动更新后的启动自检与回滚也由它完成。
+
 配置（禅道密码、AI Key 等）只保存在本机 `data/.env` 里，不会上传到任何地方；只有在「数据迁移」里用你设置的口令加密导出时才会离开这台电脑。
 
 ## 常见问题
@@ -112,13 +138,14 @@ curl -fsSL https://github.com/rskdwypy-pixel/workAssistant/releases/latest/downl
 curl -s http://127.0.0.1:3721/health
 ```
 
-没有输出就重启它：
+（Windows 在 PowerShell 里用 `curl.exe`。）没有输出就重启它：
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.workassistant.backend
+launchctl kickstart -k gui/$(id -u)/com.workassistant.backend      # Mac
+wscript "$env:LOCALAPPDATA\WorkAssistant\bin\workassistant.vbs"    # Windows（PowerShell）
 ```
 
-仍然不行，查看日志 `~/Library/Logs/WorkAssistant/backend.log`，或重新运行安装命令。
+仍然不行，查看日志（Mac：`~/Library/Logs/WorkAssistant/backend.log`；Windows：`%LOCALAPPDATA%\WorkAssistant\logs\backend.log`），或重新运行安装命令。
 
 **登录禅道提示「无法连接」**
 确认已连公司内网 / VPN，地址填禅道首页的地址（带端口）。

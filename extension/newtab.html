@@ -821,7 +821,7 @@
             </div>
 
             <div class="set-row" id="autoStartRow">
-              <div class="sr-label">开机自启<small>登录 macOS 时自动启动</small></div>
+              <div class="sr-label">开机自启<small>登录系统时自动启动</small></div>
               <div class="sr-control">
                 <div class="row">
                   <label class="set-switch" id="autoStartSwitch">
@@ -837,7 +837,7 @@
 
             <div class="set-callout info">
               <svg><use href="#si-info"/></svg>
-              <div>如果浏览器无法自动拉起后端，可在终端执行一次 <code>npm run setup:auto-start</code> 注册 Native Messaging 宿主并安装开机自启——此后后端由系统直接管理，与浏览器和加载位置是否变化无关。</div>
+              <div>如果浏览器无法自动拉起后端，重新运行一次安装命令即可：它会重新注册浏览器宿主和开机自启，并启动后端。</div>
             </div>
           </section>
 
@@ -1260,6 +1260,7 @@
   <!-- 任务 / Bug 附件 -->
   <script src="attachments.js"></script>
   <script src="reports.js"></script>
+  <script src="platform.js"></script>
   <script src="account.js"></script>
   <script src="update-ui.js"></script>
   <!-- 按钮状态管理器 -->

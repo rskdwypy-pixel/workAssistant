@@ -56,7 +56,7 @@ if wa_backend_alive; then
   exit 0
 fi
 
-[[ -n "$NODE_BIN" ]] || fail "找不到可用的 node（需要 18 及以上版本），请重新执行 npm run setup:auto-start"
+[[ -n "$NODE_BIN" ]] || fail "找不到可用的 node（需要 18 及以上版本），请重新运行一次安装命令"
 
 wa_prepare_log_dir
 PLIST="$HOME/Library/LaunchAgents/$WA_LABEL.plist"

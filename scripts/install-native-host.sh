@@ -277,7 +277,7 @@ if [[ -z "$DETECTED" ]]; then
   echo "   💡 但其实不必依赖浏览器 —— 后端本质是常驻服务（日报定时任务需要它一直跑），"
   echo "      用开机自启更省心，且与用哪个浏览器无关："
   echo ""
-  echo "        npm run setup:auto-start"
+  echo "        重新运行一次安装命令（见 README）"
   echo ""
   exit 0
 fi
@@ -366,4 +366,4 @@ echo "启动/停止：插件「设置 → 本地服务」里有「启动服务 /
 echo "命令行停止：curl -X POST http://127.0.0.1:3721/api/admin/shutdown"
 echo ""
 echo "💡 若浏览器启动后端仍不生效，改用开机自启（与浏览器无关，最稳）："
-echo "     npm run setup:auto-start"
+echo "     重新运行一次安装命令（见 README）"

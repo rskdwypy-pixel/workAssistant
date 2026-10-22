@@ -4124,7 +4124,7 @@ function showBackendOfflineBanner() {
         hint.style.cssText = 'flex-basis:100%;text-align:center;margin-top:4px;font-size:12px;opacity:.92;';
         const cmd = (code === 'host_not_registered' || code === 'bad_manifest'
           || code === 'permission_denied' || code === 'unsupported')
-          ? '（在项目目录执行：npm run setup:auto-start）'
+          ? '（重新运行一次安装命令即可）'
           : '';
         hint.textContent = help + cmd;
         banner.appendChild(hint);
@@ -4217,6 +4217,7 @@ async function checkServiceStatus() {
     const sourceMap = {
       native: '由插件自动拉起',
       launchd: '开机自启',
+      supervisor: '开机自启（守护进程）',
       manual: '手动启动'
     };
 
@@ -4253,7 +4254,7 @@ async function checkServiceStatus() {
     if (detail) {
       detail.textContent = resp && resp.reason
         ? `原因：${resp.reason}`
-        : '点击「启动服务」拉起（需已执行 npm run setup:auto-start）';
+        : '点击「启动服务」拉起（需已用安装命令安装）';
     }
   }
 
@@ -4311,8 +4312,10 @@ function syncAutoStartToggle(installed, opts) {
       // macOS 对 LaunchAgent 不会弹任何「要添加开机自启项吗」的确认框，
       // 系统设置里的列表也只在 job 真正被 launchd 加载后才出现 ——
       // 不写清楚，用户只能得出「这个开关是假的」。
-      hint.textContent = '已注册为 macOS 登录项（LaunchAgent）。系统不会弹窗确认；'
-        + '可执行 launchctl print gui/$(id -u)/com.workassistant.backend 核对。';
+      hint.textContent = (typeof WA_IS_WINDOWS !== 'undefined' && WA_IS_WINDOWS)
+        ? '已注册为 Windows 启动项（任务管理器的「启动应用」里显示为 Windows Based Script Host）。'
+        : '已注册为 macOS 登录项（LaunchAgent）。系统不会弹窗确认；'
+          + '可执行 launchctl print gui/$(id -u)/com.workassistant.backend 核对。';
     } else {
       hint.textContent = '开启后无需打开浏览器，早间提醒与晚间日报也会准时生成';
     }
@@ -4332,7 +4335,7 @@ async function setAutoStart(enabled) {
 
   if (!enabled && !(await Confirm.show(
     '关闭开机自启',
-    '关闭后，下次登录 macOS 不会再自动启动后端，早间提醒与晚间日报需要后端在运行才能触发。\n当前正在运行的服务不会受影响。',
+    `关闭后，下次登录 ${typeof WA_OS_NAME !== 'undefined' ? WA_OS_NAME : 'macOS'} 不会再自动启动后端，早间提醒与晚间日报需要后端在运行才能触发。\n当前正在运行的服务不会受影响。`,
     '关闭自启'
   ))) {
     toggle.checked = true; // 撤销这次勾选
@@ -4453,7 +4456,7 @@ async function startBackendService() {
         // 宿主未注册时，把要执行的命令直接给出来，用户照抄即可
         if (code === 'host_not_registered' || code === 'bad_manifest' || code === 'permission_denied') {
           const cmd = document.createElement('div');
-          cmd.textContent = 'npm run setup:auto-start';
+          cmd.textContent = typeof WA_INSTALL_COMMAND !== 'undefined' ? WA_INSTALL_COMMAND : 'curl -fsSL https://github.com/rskdwypy-pixel/workAssistant/releases/latest/download/install.sh | bash';
           cmd.style.cssText = 'margin-top:6px;padding:4px 8px;background:var(--bg-secondary,#f3f4f6);'
             + 'border-radius:4px;font-family:monospace;font-size:11px;display:inline-block;'
             + 'user-select:all;cursor:pointer;';
