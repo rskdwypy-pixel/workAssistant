@@ -34,7 +34,9 @@ const SUITES = [
   'test-account.mjs',
   'test-account-ui',
   'test-bug-board-ui',
-  'test-installer'
+  'test-installer',
+  'test-updater.mjs',
+  'test-update-ui'
 ];
 
 // 让子进程能解析到项目本地的 node_modules（jsdom / acorn）

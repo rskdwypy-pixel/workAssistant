@@ -69,6 +69,7 @@ function makePackage(version) {
   for (const f of ['common.sh', 'backend-launcher.sh', 'install-launchagent.sh', 'uninstall-launchagent.sh', 'install-native-host.sh', 'uninstall-native-host.sh']) {
     fs.cpSync(path.join(ROOT, 'scripts', f), path.join(dir, 'scripts', f));
   }
+  fs.cpSync(path.join(ROOT, 'scripts', 'bin'), path.join(dir, 'scripts', 'bin'), { recursive: true });
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ ...pkg, version }, null, 2));
   fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(dir, 'node_modules'));
@@ -131,6 +132,9 @@ try {
   const plist = path.join(HOME, 'Library', 'LaunchAgents', 'com.workassistant.backend.plist');
   const progArg = execFileSync('/usr/libexec/PlistBuddy', ['-c', 'Print :ProgramArguments:0', plist], { encoding: 'utf8' }).trim();
   check('登录项指向固定入口（切换版本不用改登录项）', progArg === path.join(WA, 'bin', 'workassistant-run'), progArg);
+  check('固定入口来自安装包的 scripts/bin（自动更新时同样刷新），可执行',
+    fs.readFileSync(path.join(WA, 'bin', 'workassistant-run'), 'utf8') === fs.readFileSync(path.join(ROOT, 'scripts', 'bin', 'workassistant-run'), 'utf8') &&
+    (fs.statSync(path.join(WA, 'bin', 'workassistant-run')).mode & 0o111) !== 0 && (fs.statSync(path.join(WA, 'bin', 'native-host')).mode & 0o111) !== 0);
   // Background 会被系统限制 CPU / 磁盘 IO，后端启动从 1 秒拖到 20～45 秒
   const procType = execFileSync('/usr/libexec/PlistBuddy', ['-c', 'Print :ProcessType', plist], { encoding: 'utf8' }).trim();
   check('登录项不用 Background 进程类型（否则启动被系统限速）', procType === 'Standard', procType);

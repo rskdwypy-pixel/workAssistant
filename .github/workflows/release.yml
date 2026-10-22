@@ -1,0 +1,64 @@
+# 发版：推送 v* 标签后自动测试、打包、签名并发布到 GitHub Releases
+#
+#   npm version 1.2.0        # 改 package.json、同步扩展版本号，提交并打标签 v1.2.0
+#   git push --follow-tags   # 触发本流程
+#
+# 签名私钥放在仓库 Secret：RELEASE_SIGNING_KEY（PEM）。已安装的电脑只自动安装签名对得上的包。
+name: 发布
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # 安装器测试要用到 macOS 的 launchctl / PlistBuddy 等
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.20.0'
+          cache: npm
+
+      - name: 核对版本号
+        run: |
+          V="$(node -p 'require("./package.json").version')"
+          if [ "v$V" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::标签 $GITHUB_REF_NAME 与 package.json 的版本 $V 不一致"
+            exit 1
+          fi
+          node scripts/sync-version.mjs --check
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+
+      - run: npm ci
+
+      - run: npm test
+
+      - name: 打包并签名
+        env:
+          WA_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          node scripts/build-package.mjs
+          mkdir release
+          cp "dist/workassistant-$VERSION.tar.gz" release/workassistant.tar.gz
+          (cd release && shasum -a 256 workassistant.tar.gz > workassistant.tar.gz.sha256)
+          node scripts/sign-package.mjs release/workassistant.tar.gz
+          cp installer/install-mac.sh release/install.sh
+          ls -l release
+
+      - name: 发布
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --notes "已安装的电脑会自动更新（设置 → 关于 可查看或立即更新）。首次安装或手动更新：
+          \`\`\`
+          curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/install.sh | bash
+          \`\`\`"

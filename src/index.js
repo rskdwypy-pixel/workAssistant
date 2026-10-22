@@ -10,9 +10,16 @@ import accountRouter from './routes/account.js';
 import { startAttachmentRetry } from './services/attachmentSync.js';
 import { startReminder } from './services/reminder.js';
 import { startSummary } from './services/summary.js';
+import updateRouter from './routes/update.js';
+import { getUpdater } from './services/updater.js';
 
 const app = express();
 const { server } = config;
+
+// 自动更新：避开早晚提醒、日报、周五周报的时间段重启
+const updater = getUpdater({
+  scheduleHours: (d) => [config.schedule.morningHour, config.schedule.eveningHour, ...(d.getDay() === 5 ? [17] : [])]
+});
 
 // /health 返回的应用标识：端口被占用时据此判断「占着端口的是不是我们自己」
 const APP_ID = 'workassistant';
@@ -27,6 +34,8 @@ app.use(express.json({ limit: '1mb' })); // 加密的配置文件（含长提示
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] ${req.method} ${req.path}`);
+  // 有人在用就不重启安装更新（插件定时查的状态接口不算）
+  if (req.path !== '/health' && req.path !== '/api/update/status') updater.touch();
   next();
 });
 
@@ -36,6 +45,7 @@ app.use('/api', adminRouter);
 app.use('/api', attachmentsRouter);
 app.use('/api', reportsRouter);
 app.use('/api', accountRouter);
+app.use('/api', updateRouter);
 
 // 健康检查
 app.get('/health', (req, res) => {
@@ -114,9 +124,16 @@ function startServer() {
     startSummary();
     // 已同步到禅道、仍有待上传附件的记录：定时补传
     startAttachmentRetry();
+    updater.start();
   });
 
+  let portRetries = 0;
   httpServer.on('error', async (err) => {
+    // 自动更新后重启（非开机自启拉起的情况）：旧进程正在退出，等它让出端口
+    if (err.code === 'EADDRINUSE' && process.env.WA_RESTART_WAIT_PORT && portRetries < 20) {
+      portRetries++;
+      return setTimeout(() => httpServer.listen(server.port, server.host), 500);
+    }
     if (err.code === 'EADDRINUSE') {
       // 已有本项目后端在跑 = 正常让位，以 0 退出：
       // LaunchAgent 的 KeepAlive 只对异常退出重启，不会因此陷入重启循环。

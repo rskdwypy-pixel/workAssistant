@@ -59,15 +59,20 @@ curl -fsSL https://github.com/rskdwypy-pixel/workAssistant/releases/latest/downl
 
 ## 更新
 
-重新运行一次安装命令即可，会自动：
+**自动更新（1.2.0 起）**：不用做任何事。
 
-- 下载新版本，保留上一个版本（可回滚），只保留最近两个版本；
-- 沿用现有的配置和数据（数据和程序分开存放，更新不会碰数据）；
-- 重启后台服务。
+- 后台每 6 小时检查一次 GitHub 上的新版本，下载后校验哈希和发版签名，签名对不上的包不会安装；
+- 等你没在用的时候安装（3 分钟没有操作，并避开早晚提醒、日报、周报的时间段），后台重启一两秒；
+- 浏览器里的插件发现文件变了会自动重新加载，已打开的新标签页会自动刷新成新版本；
+- 新版本如果启动不起来，会自动退回上一个版本，并且不再自动安装这个版本；
+- 「设置 → 关于」里可以看当前版本、检查更新、立即更新，或关掉自动更新。
 
-更新后在浏览器扩展页点「工作助手」上的刷新按钮，重新加载扩展。
+**手动更新**：重新运行一次安装命令。以下情况需要手动更新：
 
-> 自动静默更新正在开发中，完成后不再需要手动执行。
+- 1.1.x 升级到 1.2.0（1.2.0 才有自动更新）；
+- 「设置 → 关于」提示「需要更新运行环境」（新版本需要更高的 Node）。
+
+手动更新同样保留上一个版本、沿用现有的配置和数据；更新后在浏览器扩展页点「工作助手」上的刷新按钮。
 
 ## 卸载
 
@@ -88,8 +93,10 @@ curl -fsSL https://github.com/rskdwypy-pixel/workAssistant/releases/latest/downl
 ├─ current.txt        当前使用的版本
 ├─ extension/         浏览器加载的扩展目录（更新时替换里面的文件）
 ├─ bin/               开机自启、浏览器宿主的固定入口
-├─ data/              配置（.env）、任务、Bug、报告、附件（只有你自己可读）
-└─ backups/           迁移 / 升级前的备份
+├─ data/              配置（.env）、任务、Bug、报告、附件（只有你自己可读）；update.json 是自动更新的设置
+├─ backups/           迁移 / 升级前的备份
+├─ downloads/         自动更新下载中的临时文件
+└─ update-bad.txt     启动失败、已自动退回的版本（不再自动安装）
 
 ~/Library/Logs/WorkAssistant/backend.log   后台服务日志
 ```
@@ -149,12 +156,26 @@ bash installer/install-mac.sh --package dist/workassistant-<版本>.tar.gz   # �
 
 版本号以 `package.json` 为准，打包时会同步到 `extension/manifest.json`。
 
+**发版**
+
+```bash
+npm version 1.2.0          # 改版本号并同步到扩展，提交并打标签 v1.2.0
+git push --follow-tags     # 推送标签后，GitHub Actions 自动测试、打包、签名并发布
+```
+
+发版流水线见 `.github/workflows/release.yml`。安装包用 Ed25519 签名，已安装的电脑只自动安装签名对得上的包：
+
+- 公钥在 `src/services/releaseKey.js`；
+- 私钥不在仓库里：仓库 Secret `RELEASE_SIGNING_KEY`（流水线用），维护者本机 `~/.config/workassistant/release-signing-key.pem`（手动签名：`node scripts/sign-package.mjs <安装包>`）；
+- 换密钥要同时改公钥和 Secret，已安装的电脑需要重新运行一次安装命令。
+
 **目录结构**
 
 ```
 src/          后台服务（Express）：禅道、AI、报告、附件、账号、配置迁移
 extension/    浏览器扩展（Manifest V3，新标签页）
-scripts/      启动器、开机自启、浏览器宿主注册、打包脚本与测试
+scripts/      启动器、开机自启、浏览器宿主注册、打包 / 签名脚本与测试；scripts/bin/ 是安装目录 bin/ 下固定入口的模板
 installer/    安装器（install-mac.sh）
+.github/      发版流水线
 docs/         设计与审计文档
 ```

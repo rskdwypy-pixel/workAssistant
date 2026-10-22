@@ -1,0 +1,5 @@
+#!/bin/bash
+# 浏览器宿主程序（插件需要时拉起后台）：转给当前版本的启动器
+WA_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+VERSION="$(cat "$WA_HOME/current.txt")"
+exec "$WA_HOME/versions/$VERSION/scripts/backend-launcher.sh" "$@"

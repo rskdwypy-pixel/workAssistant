@@ -3,12 +3,14 @@
  * 打安装包：dist/workassistant-<版本>.tar.gz（+ .sha256）
  *
  * 包里是一个版本目录（安装后放在 WorkAssistant/versions/<版本>/）：
- *   src/  extension/  scripts/（启动器、开机自启、宿主注册）  package.json  package-lock.json
+ *   src/  extension/  scripts/（启动器、开机自启、宿主注册；bin/ 是安装目录 bin/ 下固定入口的模板）  package.json  package-lock.json
  *   node_modules/（只含运行依赖；没有原生模块，Mac / Windows / Linux 通用）
- *   .wa-package（标记：脚本据此认出安装版目录结构）
- * Node 运行环境不在包里，由安装器按系统和芯片单独下载。
+ *   .wa-package（标记：脚本据此认出安装版目录结构；记录版本和需要的 Node 版本）
+ * Node 运行环境不在包里，由安装器按系统和芯片单独下载。自动更新不换 Node：
+ * 新版本需要更高的 Node 时，后台会提示重新运行安装命令。
  *
  * 版本号以 package.json 为准，打包时同步到 extension/manifest.json。
+ * 签名另外做：node scripts/sign-package.mjs dist/workassistant-<版本>.tar.gz（发版流水线自动完成）。
  *
  * 用法：node scripts/build-package.mjs [--out dist]
  */
@@ -17,6 +19,7 @@ import { createHash } from 'crypto';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { syncVersion } from './sync-version.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const outArg = process.argv.indexOf('--out');
@@ -29,28 +32,13 @@ const SCRIPTS = [
   'install-native-host.sh', 'uninstall-native-host.sh'
 ];
 
-const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
-const version = pkg.version;
-if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`package.json 的版本号不合法：${version}`);
+// 版本号以 package.json 为准，同步到扩展（manifest.json、newtab.html）
+const { version, changed } = syncVersion();
+if (changed.length) console.log(`已把版本号同步为 ${version}：${changed.join('、')}`);
 
-// 扩展版本号与 package.json 保持一致
-const manifestPath = join(ROOT, 'extension', 'manifest.json');
-const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-if (manifest.version !== version) {
-  manifest.version = version;
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
-  console.log(`已把 extension/manifest.json 的版本号同步为 ${version}`);
-}
-if (!manifest.key) throw new Error('extension/manifest.json 缺少 key（固定扩展 ID 需要）');
-
-// 同步 extension/newtab.html 中的静态版本兜底
-const htmlPath = join(ROOT, 'extension', 'newtab.html');
-const html = readFileSync(htmlPath, 'utf8');
-const updatedHtml = html.replace(/工作助手 v\d+\.\d+\.\d+/g, `工作助手 v${version}`);
-if (updatedHtml !== html) {
-  writeFileSync(htmlPath, updatedHtml);
-  console.log(`已把 extension/newtab.html 的版本号同步为 ${version}`);
-}
+// 安装器自带的 Node 版本：写进 .wa-package，自动更新时据此判断能不能直接换
+const NODE_VERSION = (readFileSync(join(ROOT, 'installer', 'install-mac.sh'), 'utf8').match(/^NODE_VERSION="([\d.]+)"/m) || [])[1];
+if (!NODE_VERSION) throw new Error('installer/install-mac.sh 里找不到 NODE_VERSION');
 
 const name = `workassistant-${version}`;
 const stage = join(OUT, 'stage', name);
@@ -60,9 +48,10 @@ mkdirSync(join(stage, 'scripts'), { recursive: true });
 cpSync(join(ROOT, 'src'), join(stage, 'src'), { recursive: true });
 cpSync(join(ROOT, 'extension'), join(stage, 'extension'), { recursive: true, filter: (p) => !/\/\.DS_Store$/.test(p) });
 for (const f of SCRIPTS) cpSync(join(ROOT, 'scripts', f), join(stage, 'scripts', f));
+cpSync(join(ROOT, 'scripts', 'bin'), join(stage, 'scripts', 'bin'), { recursive: true });
 cpSync(join(ROOT, 'package.json'), join(stage, 'package.json'));
 cpSync(join(ROOT, 'package-lock.json'), join(stage, 'package-lock.json'));
-writeFileSync(join(stage, '.wa-package'), JSON.stringify({ app: 'workassistant', version, builtAt: new Date().toISOString() }, null, 2) + '\n');
+writeFileSync(join(stage, '.wa-package'), JSON.stringify({ app: 'workassistant', version, node: NODE_VERSION, builtAt: new Date().toISOString() }, null, 2) + '\n');
 
 // 只装运行依赖（不跑依赖的安装脚本：本项目的依赖都是纯 JS）
 console.log('安装运行依赖…');

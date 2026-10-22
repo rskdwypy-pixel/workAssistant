@@ -132,7 +132,7 @@ if [[ "$UNINSTALL" == "1" ]]; then
     rm -rf "$WA_HOME"
     ok "已删除 ${WA_HOME}（含数据）"
   else
-    rm -rf "$WA_HOME/runtime" "$WA_HOME/versions" "$WA_HOME/bin" "$WA_HOME/extension" "$WA_HOME/current.txt" "$WA_HOME/previous.txt"
+    rm -rf "$WA_HOME/runtime" "$WA_HOME/versions" "$WA_HOME/bin" "$WA_HOME/extension" "$WA_HOME/downloads" "$WA_HOME/current.txt" "$WA_HOME/previous.txt" "$WA_HOME/update-pending" "$WA_HOME/update-bad.txt"
     ok "程序已删除；数据和配置保留在 $WA_HOME/data（重新安装后自动使用）"
   fi
   echo ""
@@ -226,26 +226,12 @@ fi
 
 # 扩展放在固定位置：更新时替换里面的文件，浏览器里不用重新加载另一个目录
 mkdir -p "$WA_HOME/extension"
-rsync -a --delete "$WA_HOME/versions/$VERSION/extension/" "$WA_HOME/extension/"
+rsync -a --checksum --delete "$WA_HOME/versions/$VERSION/extension/" "$WA_HOME/extension/"
 ok "扩展文件：$WA_HOME/extension"
 
-# 固定入口：切换版本只改 current.txt，开机自启和浏览器宿主注册都不用改
-cat > "$WA_HOME/bin/workassistant-run" <<'RUN'
-#!/bin/bash
-# 由开机自启（launchd）启动：运行 current.txt 记录的版本，数据在 data/
-WA_HOME="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="$(cat "$WA_HOME/current.txt")"
-export WA_HOME WA_DATA_DIR="$WA_HOME/data" WORKASSISTANT_LAUNCHED_BY="${WORKASSISTANT_LAUNCHED_BY:-launchd}"
-cd "$WA_HOME/versions/$VERSION" || exit 1
-exec "$WA_HOME/runtime/node/bin/node" src/index.js
-RUN
-cat > "$WA_HOME/bin/native-host" <<'HOST'
-#!/bin/bash
-# 浏览器宿主程序（插件需要时拉起后台）：转给当前版本的启动器
-WA_HOME="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="$(cat "$WA_HOME/current.txt")"
-exec "$WA_HOME/versions/$VERSION/scripts/backend-launcher.sh" "$@"
-HOST
+# 固定入口：切换版本只改 current.txt，开机自启和浏览器宿主注册都不用改（模板在安装包的 scripts/bin/，自动更新时同样会刷新）
+cp "$WA_HOME/versions/$VERSION/scripts/bin/workassistant-run" "$WA_HOME/versions/$VERSION/scripts/bin/native-host" "$WA_HOME/bin/"
+rm -f "$WA_HOME/update-pending"
 chmod +x "$WA_HOME/bin/workassistant-run" "$WA_HOME/bin/native-host"
 
 # ==================== 3. 数据与配置 ====================
@@ -263,7 +249,8 @@ else
     OLD_PID="$(port_pid)"
     if [[ -n "$OLD_PID" ]] && is_old_workassistant "$OLD_PID"; then
       OLD_DIR="$(proc_cwd "$OLD_PID")"
-      [[ "$OLD_DIR" != "$WA_HOME"* ]] && MIGRATE_FROM="$OLD_DIR"
+      # 安装版（目录里有 .wa-package）的数据在它自己的 data/ 里，不是从仓库目录迁移的对象
+      [[ "$OLD_DIR" != "$WA_HOME"* && ! -f "$OLD_DIR/.wa-package" ]] && MIGRATE_FROM="$OLD_DIR"
     fi
   fi
   if [[ -n "$MIGRATE_FROM" ]]; then

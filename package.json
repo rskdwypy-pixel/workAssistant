@@ -14,7 +14,8 @@
     "setup:autostart": "bash scripts/install-launchagent.sh",
     "teardown:auto-start": "bash scripts/uninstall-launchagent.sh",
     "test": "node scripts/run-all-tests.cjs",
-    "test:real": "node scripts/test-script-scope.cjs && node scripts/test-progress-real.cjs && node scripts/test-priority-real.cjs"
+    "test:real": "node scripts/test-script-scope.cjs && node scripts/test-progress-real.cjs && node scripts/test-priority-real.cjs",
+    "version": "node scripts/sync-version.mjs && git add extension/manifest.json extension/newtab.html"
   },
   "keywords": [
     "ai",

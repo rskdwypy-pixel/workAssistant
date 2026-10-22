@@ -1,0 +1,34 @@
+#!/bin/bash
+# 由开机自启（launchd）启动：运行 current.txt 记录的版本，数据在 data/
+#
+# 自动更新后的自检：更新时写下 update-pending（「新版本 已启动次数」），新版本正常运行 30 秒后由后台删掉。
+# 新版本连续启动 3 次都没撑过 30 秒（崩溃后 launchd 会反复拉起）→ 退回上一个版本，并记进 update-bad.txt 不再自动装它。
+WA_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+VERSION="$(cat "$WA_HOME/current.txt")"
+PENDING="$WA_HOME/update-pending"
+if [[ -f "$PENDING" ]]; then
+  read -r P_VERSION P_TRIES < "$PENDING" || true
+  P_TRIES="${P_TRIES:-0}"
+  if [[ "$P_VERSION" != "$VERSION" ]]; then
+    rm -f "$PENDING"
+  elif (( P_TRIES >= 3 )); then
+    PREV="$(cat "$WA_HOME/previous.txt" 2>/dev/null || true)"
+    if [[ -n "$PREV" && -f "$WA_HOME/versions/$PREV/src/index.js" ]]; then
+      echo "[Update] ${VERSION} 连续 ${P_TRIES} 次启动失败，退回 ${PREV}"
+      printf '%s\n' "$VERSION" >> "$WA_HOME/update-bad.txt"
+      printf '%s\n' "$PREV" > "$WA_HOME/current.txt"
+      # 扩展整个换回去（不用 rsync：大小和修改时间相同的文件会被它跳过）
+      rm -rf "$WA_HOME/extension.next"
+      if cp -R "$WA_HOME/versions/$PREV/extension" "$WA_HOME/extension.next"; then
+        rm -rf "$WA_HOME/extension" && mv "$WA_HOME/extension.next" "$WA_HOME/extension"
+      fi
+      VERSION="$PREV"
+    fi
+    rm -f "$PENDING"
+  else
+    printf '%s %s\n' "$VERSION" "$((P_TRIES + 1))" > "$PENDING"
+  fi
+fi
+export WA_HOME WA_DATA_DIR="$WA_HOME/data" WORKASSISTANT_LAUNCHED_BY="${WORKASSISTANT_LAUNCHED_BY:-launchd}"
+cd "$WA_HOME/versions/$VERSION" || exit 1
+exec "$WA_HOME/runtime/node/bin/node" src/index.js

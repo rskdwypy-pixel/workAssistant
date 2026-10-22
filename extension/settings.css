@@ -223,6 +223,8 @@
 .settings-modal-content .set-hint {
   font-size: 11px; color: var(--text-muted-warm); line-height: 1.6;
 }
+.settings-modal-content .input-hint.is-ok { color: var(--st-success); }
+.settings-modal-content .input-hint.is-warn { color: var(--st-warning); }
 .settings-modal-content .set-hint code,
 .settings-modal-content .input-hint code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

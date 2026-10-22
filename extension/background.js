@@ -658,6 +658,11 @@ const ACTION_HANDLERS = {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   const { action } = request;
 
+  if (action === 'checkSelfUpdate') {
+    checkSelfUpdate().then(sendResponse).catch(err => sendResponse({ updated: false, reason: err.message }));
+    return true;
+  }
+
   if (action === 'manualSyncFromZentao') {
     syncFromZentaoViaBackend()
       .then(sendResponse)
@@ -826,3 +831,50 @@ chrome.runtime.onInstalled.addListener(() => {
   bootstrapBackend();
 });
 
+// ============================================================================
+// 自动更新：后台把安装目录里的扩展文件换成新版本后，扩展重新加载自己
+// ============================================================================
+// 扩展从 WorkAssistant/extension 以「已解压」方式加载：文件被换掉后，浏览器仍在运行旧代码，
+// 但读 manifest.json 拿到的是磁盘上的新版本号，据此判断要不要重新加载。
+// 重新加载会让打开着的新标签页变成空白，所以先记下这些标签页，加载完再把它们导航回新标签页。
+const SELF_UPDATE_ALARM = 'wa-self-update';
+const RELOAD_TABS_KEY = 'waReloadTabs';
+// 页面上最近有操作（打字、点击）就先不重新加载，免得打断正在填的内容
+const SELF_UPDATE_IDLE_MS = 3 * 60 * 1000;
+
+async function checkSelfUpdate() {
+  const loaded = chrome.runtime.getManifest().version;
+  let onDisk = '';
+  try {
+    const resp = await fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' });
+    onDisk = (await resp.json()).version || '';
+  } catch {
+    return { updated: false, reason: 'manifest_unreadable' };
+  }
+  if (!onDisk || onDisk === loaded) return { updated: false };
+  const { waLastInteraction = 0 } = await chrome.storage.session.get('waLastInteraction').catch(() => ({}));
+  if (Date.now() - waLastInteraction < SELF_UPDATE_IDLE_MS) return { updated: false, reason: 'busy', version: onDisk };
+  const contexts = chrome.runtime.getContexts ? await chrome.runtime.getContexts({ contextTypes: ['TAB'] }) : [];
+  const tabs = [...new Set(contexts.filter(c => /\/newtab\.html/.test(c.documentUrl || '') && c.tabId >= 0).map(c => c.tabId))];
+  await chrome.storage.local.set({ [RELOAD_TABS_KEY]: tabs });
+  console.log(`[SelfUpdate] ${loaded} → ${onDisk}，重新加载扩展`);
+  chrome.runtime.reload();
+  return { updated: true, version: onDisk };
+}
+
+chrome.runtime.onInstalled.addListener(async (details) => {
+  chrome.alarms.create(SELF_UPDATE_ALARM, { periodInMinutes: 5 });
+  if (details.reason !== 'update') return;
+  const { [RELOAD_TABS_KEY]: tabs } = await chrome.storage.local.get(RELOAD_TABS_KEY);
+  await chrome.storage.local.remove(RELOAD_TABS_KEY);
+  if (!Array.isArray(tabs) || !tabs.length) return;
+  // 刚加载完时新标签页的替换还没生效，稍等再导航（直接 reload 会停在空白页）
+  await new Promise(r => setTimeout(r, 1000));
+  for (const id of tabs) chrome.tabs.update(id, { url: 'chrome://newtab/' }).catch(() => { /* 标签页已关闭 */ });
+});
+
+chrome.runtime.onStartup.addListener(() => chrome.alarms.create(SELF_UPDATE_ALARM, { periodInMinutes: 5 }));
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === SELF_UPDATE_ALARM) checkSelfUpdate();
+});
+checkSelfUpdate();
