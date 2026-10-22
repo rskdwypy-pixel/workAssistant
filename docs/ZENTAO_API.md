@@ -1,6 +1,6 @@
 # 禅道 18.3 开源版 API 接口文档
 
-**基础地址**: `http://10.128.1.8:8088`
+**基础地址**: `http://zentao.example.com:8088`
 
 **接口格式**: `/zentao/{module}-{action}-{params}.json`
 
@@ -414,19 +414,19 @@
 
 ```bash
 # 获取产品列表
-GET http://10.128.1.8:8088/zentao/product-index-yes---id-20-1.json
+GET http://zentao.example.com:8088/zentao/product-index-yes---id-20-1.json
 
 # 查看产品详情
-GET http://10.128.1.8:8088/zentao/product-view-1.json
+GET http://zentao.example.com:8088/zentao/product-view-1.json
 
 # 创建任务
-POST http://10.128.1.8:8088/zentao/task-create-167---.json
+POST http://zentao.example.com:8088/zentao/task-create-167---.json
 Content-Type: application/x-www-form-urlencoded
 
 execution=167&type=devel&name=测试任务&pri=3
 
 # 创建 Bug
-POST http://10.128.1.8:8088/zentao/bug-create-1--.json
+POST http://zentao.example.com:8088/zentao/bug-create-1--.json
 Content-Type: application/x-www-form-urlencoded
 
 product=1&title=测试Bug&openedBuild=trunk&type=codeerror&severity=3

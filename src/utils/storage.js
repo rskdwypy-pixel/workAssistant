@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
-import { join } from 'path';
+import { join, basename } from 'path';
 
 const BACKUP_DIR = 'backups';
 const MAX_BACKUPS = 10;
@@ -19,19 +19,24 @@ async function ensureDir(dirPath) {
 
 /**
  * 创建备份
+ *
+ * 备份文件名带上源文件名前缀，并按源文件各自保留 MAX_BACKUPS 份。
+ * 旧实现所有 JSON 共用一个 10 份的池子、文件名只有时间戳，
+ * 每晚写 history.json 的备份会把 tasks.json 的备份挤掉，出事时无备份可恢复。
  */
 async function createBackup(filePath) {
   try {
     const dir = join(filePath, '..', BACKUP_DIR);
     await ensureDir(dir);
 
+    const prefix = basename(filePath, '.json');
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupPath = join(dir, `${timestamp}.json`);
+    const backupPath = join(dir, `${prefix}__${timestamp}.json`);
 
     await fs.copyFile(filePath, backupPath);
 
-    // 清理旧备份
-    const files = await fs.readdir(dir);
+    // 只清理同一源文件的旧备份
+    const files = (await fs.readdir(dir)).filter(f => f.startsWith(`${prefix}__`));
     if (files.length > MAX_BACKUPS) {
       files.sort();
       const oldBackups = files.slice(0, files.length - MAX_BACKUPS);
@@ -133,11 +138,31 @@ async function readTasks() {
 
 /**
  * 写入任务数据
+ *
+ * 不要在锁外直接调用（读-改-写请用 updateTasks），否则会和并发写互相覆盖。
  */
 async function writeTasks(data) {
   const { config } = await import('../config.js');
+  data.version = data.version || '1.0';
   data.lastUpdated = new Date().toISOString();
   return await writeJSON(config.paths.tasks, data);
+}
+
+/**
+ * 禅道记录的去重键：类型 + 禅道 ID
+ *
+ * 禅道里任务和 Bug 是两套独立编号，任务 #496 与 Bug #496 是两条不同的记录。
+ * 只按 zentaoId 去重会把其中一条当成重复删掉（曾真实发生），所以必须带上类型。
+ *
+ * @param {Object} record
+ * @returns {string|null} 没有 zentaoId 时返回 null
+ */
+function zentaoKeyOf(record) {
+  if (!record || record.zentaoId === null || record.zentaoId === undefined || record.zentaoId === '') {
+    return null;
+  }
+  const type = record.type === 'bug' ? 'bug' : 'task';
+  return `${type}:${String(record.zentaoId)}`;
 }
 
 /**
@@ -218,9 +243,12 @@ function getTasksByDateRange(tasks, startDate, endDate) {
 }
 
 export {
+  readJSON,
+  writeJSON,
   readTasks,
   writeTasks,
   updateTasks,
+  zentaoKeyOf,
   readHistory,
   writeHistory,
   readTodayWorkHours,

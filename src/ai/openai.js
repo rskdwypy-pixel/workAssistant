@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { config } from '../config.js';
+import { config, aiModelFor } from '../config.js';
 import {
   lookupLearned,
   recordMatch,
@@ -22,8 +22,17 @@ function createOpenAIClient() {
   });
 }
 
-// 创建 OpenAI 客户端（模块级复用，保持原有调用方式可用）
-const client = createOpenAIClient();
+/**
+ * 每次调用按当前配置创建客户端
+ *
+ * 以前在模块加载时创建一次并复用：设置页改了 Key / 接口地址后，执行匹配、Bug 分析、
+ * 旧版报告仍用旧的 Key 和地址，直到重启后端。
+ */
+function currentClient() {
+  const c = createOpenAIClient();
+  if (!c) throw new Error('未配置 AI Key');
+  return c;
+}
 
 /**
  * 任务分析提示词
@@ -244,82 +253,6 @@ function buildUserPrompt(todoTasks, inProgressTasks, doneTasks, type, workTimeIn
 }
 
 /**
- * 分析任务（AI自动解析用户输入）
- */
-async function analyzeTask(userInput) {
-  try {
-    const promptTemplate = config.prompts.addTask || TASK_ANALYSIS_PROMPT;
-
-    // 获取当前日期信息
-    const now = new Date();
-    const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-    const currentWeekday = weekdays[now.getDay()];
-    const dateStr = now.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
-    const fullDateStr = `${dateStr} (${currentWeekday}) ${now.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' })}`;
-
-    const prompt = promptTemplate
-      .replace('{userInput}', userInput)
-      .replace('{currentDate}', fullDateStr);
-
-    const response = await client.chat.completions.create({
-      model: config.ai.model,
-      messages: [
-        { role: 'system', content: '你是专业的任务管理助手，擅长从自然语言中提取结构化信息。计算日期时请准确：今天是' + fullDateStr + '，请基于此计算"明天"、"后天"、"周五"、"下周"等相对时间。' },
-        { role: 'user', content: prompt }
-      ],
-      temperature: 0.3,
-      max_tokens: 500
-    });
-
-    let content = response.choices[0].message.content.trim();
-
-    // 清理可能的 markdown 代码块标记
-    if (content.startsWith('```')) {
-      content = content.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
-    }
-
-    const result = JSON.parse(content);
-
-    // —— 代码层兜底：不凭空给进度 ——
-    // 部分模型会忽略提示词自行给"进行中→10%"这类估值。
-    // 这里把 progress 归一到 0-100 并与 status 对齐：
-    // 进度为 0 却标 in_progress 的，退回 todo（原文大概率没提进度）。
-    let progress = Number(result.progress);
-    if (!Number.isFinite(progress)) progress = 0;
-    progress = Math.max(0, Math.min(100, Math.round(progress)));
-    if (progress > 0 && progress < 100) result.status = 'in_progress';
-    if (progress >= 100) {
-      progress = 100;
-      result.status = 'done';
-    }
-    if (progress === 0 && result.status === 'in_progress') result.status = 'todo';
-    result.progress = progress;
-
-    return {
-      success: true,
-      data: result
-    };
-  } catch (err) {
-    console.error('[AI] analyzeTask 解析失败:', err.message);
-
-    // 失败时返回基础解析，但必须带 failed 标记，
-    // 否则前端会把「AI 失败降级」误认为「AI 正常解析」，用户无法察觉问题
-    return {
-      success: false,
-      failed: true,
-      error: err.message,
-      data: {
-        title: userInput.slice(0, 30),
-        status: 'todo',
-        priority: 3,
-        reminderTime: null,
-        progress: 0
-      }
-    };
-  }
-}
-
-/**
  * 格式化任务信息（包含时间和进度）- 旧版，保留兼容
  */
 function formatTaskInfo(task, status) {
@@ -525,7 +458,7 @@ async function generateSummary(todoTasks, inProgressTasks, doneTasks, type = 'da
 
     let messages;
     let requestOptions = {
-      model: config.ai.model,
+      model: aiModelFor('report'),
       temperature: 0.2,  // 降低随机性
       max_tokens: 1000   // 减少最大 tokens
     };
@@ -540,8 +473,8 @@ async function generateSummary(todoTasks, inProgressTasks, doneTasks, type = 'da
       requestOptions.messages = messages;
 
       // ✅ 如果模型支持，使用 JSON Schema 约束输出
-      if (supportsStructuredOutput(config.ai.model)) {
-        console.log(`[generateSummary] 模型 ${config.ai.model} 支持 Structured Outputs，使用 JSON Schema`);
+      if (supportsStructuredOutput(aiModelFor('report'))) {
+        console.log(`[generateSummary] 模型 ${aiModelFor('report')} 支持 Structured Outputs，使用 JSON Schema`);
         requestOptions.response_format = {
           type: 'json_schema',
           json_schema: {
@@ -577,7 +510,7 @@ async function generateSummary(todoTasks, inProgressTasks, doneTasks, type = 'da
         };
       } else {
         // 兼容旧模型：使用 JSON mode
-        console.log(`[generateSummary] 模型 ${config.ai.model} 不支持 Structured Outputs，使用 JSON mode`);
+        console.log(`[generateSummary] 模型 ${aiModelFor('report')} 不支持 Structured Outputs，使用 JSON mode`);
         requestOptions.response_format = { type: 'json_object' };
       }
 
@@ -614,7 +547,7 @@ async function generateSummary(todoTasks, inProgressTasks, doneTasks, type = 'da
       console.log(`[generateSummary] 使用自定义提示词`);
     }
 
-    const response = await client.chat.completions.create(requestOptions);
+    const response = await currentClient().chat.completions.create(requestOptions);
 
     let content = response.choices[0].message.content.trim();
 
@@ -791,7 +724,7 @@ function ruleBasedMatch(taskContent, executions) {
     console.log('[规则引擎] ? 多个匹配，需要AI抉择:', matches.map(m => `${m.id}(${m.matchedBy})`).join(', '));
     return null;
   } else {
-    console.log('[规则引擎] ✗ 无匹配，进入AI分析');
+    console.log('[规则引擎] ✗ 无唯一匹配');
     return null;
   }
 }
@@ -911,15 +844,15 @@ ${learningHint}
 
     console.log('[Routing] 发送请求到 OpenAI...');
 
-    const response = await client.chat.completions.create({
-      model: config.ai.model,
+    const response = await currentClient().chat.completions.create({
+      model: aiModelFor('task'),
       response_format: { type: "json_object" },  // JSON Mode
       messages: [
         { role: 'system', content: '你是任务分类路由引擎，擅长理解任务内容并将其分配到合适的执行中。严格按照JSON格式返回结果。' },
         { role: 'user', content: prompt }
       ],
       temperature: 0.1,  // 降低温度，提高稳定性
-      max_tokens: 50
+      max_tokens: 800    // 上限：推理模型先思考，给 50 时正文为空
     });
 
     const content = response.choices[0].message.content.trim();
@@ -975,8 +908,8 @@ ${learningHint}
  */
 async function generateResponse(prompt, maxTokens = 500) {
   try {
-    const response = await client.chat.completions.create({
-      model: config.ai.model,
+    const response = await currentClient().chat.completions.create({
+      model: aiModelFor('task'),
       messages: [
         { role: 'system', content: '你是专业的助手，擅长分析和处理各种任务。' },
         { role: 'user', content: prompt }
@@ -1001,8 +934,8 @@ async function generateResponse(prompt, maxTokens = 500) {
 
 export {
   createOpenAIClient,
-  analyzeTask,
   analyzeTaskForExecution,
+  ruleBasedMatch,
   generateSummary,
   generateResponse,
   SUMMARY_PROMPT,

@@ -1,6 +1,6 @@
 # 禅道 Bug 接口文档
 
-**基础地址**: `http://10.128.1.8:8088`
+**基础地址**: `http://zentao.example.com:8088`
 
 ---
 
@@ -31,7 +31,7 @@ Content-Type: multipart/form-data
 ### 示例
 
 ```bash
-curl 'http://10.128.1.8:8088/zentao/bug-edit-456.html' \
+curl 'http://zentao.example.com:8088/zentao/bug-edit-456.html' \
   -H 'Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryXA7KBlaCnpVTMGoG' \
   --data-raw $'------WebKitFormBoundaryXA7KBlaCnpVTMGoG\r\n
 Content-Disposition: form-data; name="title"\r\n\r\n
@@ -64,7 +64,7 @@ Content-Type: application/x-www-form-urlencoded
 ### 示例
 
 ```bash
-curl 'http://10.128.1.8:8088/zentao/bug-confirmBug-456.html?onlybody=yes' \
+curl 'http://zentao.example.com:8088/zentao/bug-confirmBug-456.html?onlybody=yes' \
   -H 'Content-Type: application/x-www-form-urlencoded' \
   --data-raw 'assignedTo=lijc&type=codeerror&pri=3&status=active&comment=&uid=69c5f6142a637'
 ```
@@ -95,7 +95,7 @@ Content-Type: multipart/form-data
 ### 示例
 
 ```bash
-curl 'http://10.128.1.8:8088/zentao/bug-resolve-456.html?onlybody=yes' \
+curl 'http://zentao.example.com:8088/zentao/bug-resolve-456.html?onlybody=yes' \
   -H 'Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryteMvfRyOPUJqL2TO' \
   --data-raw $'------WebKitFormBoundaryteMvfRyOPUJqL2TO\r\n
 Content-Disposition: form-data; name="resolution"\r\n\r\n
@@ -121,7 +121,7 @@ GET {baseUrl}/zentao/bug-delete-{bugId}-yes-.html
 ### 示例
 
 ```bash
-curl 'http://10.128.1.8:8088/zentao/bug-delete-456-yes-.html'
+curl 'http://zentao.example.com:8088/zentao/bug-delete-456-yes-.html'
 ```
 
 ---

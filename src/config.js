@@ -1,13 +1,13 @@
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// .env 文件路径
-const envFilePath = join(__dirname, '../.env');
+// .env 文件路径（WA_ENV_FILE 仅供测试：读写临时文件，不碰真实配置）
+const envFilePath = process.env.WA_ENV_FILE || join(__dirname, '../.env');
 
 // 加载 .env 文件
 dotenv.config({ path: envFilePath });
@@ -28,6 +28,17 @@ function loadZentaoUsers() {
   return {};
 }
 
+/** OPENAI_API_KEYS：base64 编码的 {主机: Key}（.env 一行，避免 JSON 里的引号与等号） */
+function parseKeyring(raw) {
+  if (!raw) return {};
+  try {
+    const obj = JSON.parse(Buffer.from(String(raw), 'base64').toString('utf-8'));
+    return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {};
+  } catch {
+    return {};
+  }
+}
+
 const config = {
   // AI 配置
   ai: {
@@ -36,7 +47,12 @@ const config = {
     // 推荐使用 gpt-4o-mini 以获得最佳性能和成本平衡
     // gpt-4o-mini 支持 Structured Outputs，输出更稳定，速度更快，成本更低
     // 如果使用旧模型（如 gpt-3.5-turbo），将自动降级到 JSON mode
-    model: process.env.OPENAI_MODEL || 'gpt-4o-mini'
+    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    // 报告总结（日报 / 周报 / 月报）用的模型；留空与 model（任务解析）相同。
+    // 报告不赶时间，可以用推理更强但更慢的模型；任务解析要在 8 秒内返回，需要快的模型
+    reportModel: process.env.OPENAI_REPORT_MODEL || '',
+    // 各个接口地址（按主机）各自保存的 Key：切换服务商再切回来不用重填
+    keys: parseKeyring(process.env.OPENAI_API_KEYS)
   },
 
   // 服务配置
@@ -52,6 +68,11 @@ const config = {
   schedule: {
     morningHour: parseInt(process.env.MORNING_HOUR || '9', 10),
     eveningHour: parseInt(process.env.EVENING_HOUR || '21', 10)
+  },
+
+  // 报告页：全员部分只统计这些账号（逗号分隔；空 = 团队全员）
+  reports: {
+    members: parseAccountList(process.env.REPORT_MEMBERS)
   },
 
   // Webhook 配置
@@ -134,7 +155,22 @@ function validateConfig() {
  * @param {Object} updates - 要更新的配置键值对
  * @returns {boolean} 是否成功
  */
+/** 逗号分隔的禅道账号 → 去重后的数组（只保留账号里可能出现的字符） */
+function parseAccountList(value) {
+  return [...new Set(String(value || '').split(',').map(s => s.trim()).filter(s => /^[\w.@-]{1,64}$/.test(s)))];
+}
+
 function updateEnvFile(updates) {
+  // 值里带换行就能往 .env 里「多写一行」任意配置（如改掉 ZENTAO_URL），必须拒绝
+  for (const [key, value] of Object.entries(updates)) {
+    if (!/^[A-Z][A-Z0-9_]*$/.test(key)) {
+      throw new Error(`非法的配置项名: ${key}`);
+    }
+    if (/[\r\n\0]/.test(String(value ?? ''))) {
+      throw new Error(`配置项 ${key} 的值不能包含换行符`);
+    }
+  }
+
   try {
     let envContent = '';
     try {
@@ -174,8 +210,9 @@ function updateEnvFile(updates) {
       }
     }
 
-    // 写回文件
-    writeFileSync(envFilePath, updatedLines.join('\n') + '\n');
+    // 写回文件（含密钥，仅本人可读写）
+    writeFileSync(envFilePath, updatedLines.join('\n') + '\n', { mode: 0o600 });
+    chmodSync(envFilePath, 0o600);
     console.log('[Config] .env 文件已更新');
     return true;
   } catch (err) {
@@ -184,4 +221,84 @@ function updateEnvFile(updates) {
   }
 }
 
-export { config, validateConfig, updateEnvFile };
+/**
+ * 保存禅道用户列表到运行时配置与 data/zentao-users.json
+ * @param {Object} users - { account: realname }
+ */
+function saveZentaoUsers(users) {
+  config.zentao.users = users;
+  config.zentao.usersUpdatedAt = new Date().toISOString();
+  mkdirSync(config.paths.data, { recursive: true });
+  writeFileSync(join(config.paths.data, 'zentao-users.json'), JSON.stringify(users, null, 2), 'utf-8');
+  console.log('[Config] 禅道用户列表已更新，用户数量:', Object.keys(users).length);
+}
+
+/**
+ * 设置页保存禅道配置：计算要保存的值
+ *
+ * 密码、地址、账号留空都表示「不修改」：设置页不回显密码；地址曾因回填读错字段而为空，
+ * 一保存就把禅道地址清空，之后所有禅道操作都失败。要停用禅道请关掉开关。
+ * @param {{enabled:any, url?:string, username?:string, password?:string, createTaskUrl?:string}} body
+ * @param {{url?:string, username?:string, password?:string}} current
+ */
+function mergeZentaoSettings(body, current) {
+  const keepIfBlank = (v, old) => (String(v || '').trim() ? String(v).trim() : (old || ''));
+  return {
+    enabled: body.enabled === true || body.enabled === 'true',
+    url: keepIfBlank(body.url, current.url),
+    username: keepIfBlank(body.username, current.username),
+    password: body.password ? String(body.password) : (current.password || ''),
+    createTaskUrl: String(body.createTaskUrl || '')
+  };
+}
+
+/**
+ * AI 接口地址规整为 OpenAI SDK 需要的 base URL（SDK 会自己拼 /chat/completions）
+ *
+ * 中转 / 服务商文档常给完整的聊天地址（…/v1/chat/completions），原样填进去会变成
+ * …/chat/completions/chat/completions。这里去掉末尾的 /chat/completions、/models 和多余斜杠。
+ */
+function normalizeAiBaseUrl(url) {
+  return String(url || '').trim().replace(/\/+$/, '').replace(/\/(chat\/completions|completions|models)$/i, '').replace(/\/+$/, '');
+}
+
+/** 接口地址 → 保存 Key 用的键（主机 + 端口）；地址不合法返回空串 */
+function aiKeyHost(url) {
+  try {
+    return new URL(normalizeAiBaseUrl(url)).host.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 某个接口地址保存的 Key：先查按主机保存的，再看是不是当前使用的地址
+ * （升级前只保存了当前那一个 Key）
+ */
+function savedKeyFor(url) {
+  const host = aiKeyHost(url);
+  if (!host) return '';
+  if (config.ai.keys[host]) return config.ai.keys[host];
+  return host === aiKeyHost(config.ai.baseURL) ? config.ai.apiKey : '';
+}
+
+/** 把 Key 记到对应地址下，返回要写进 .env 的值 */
+function rememberKey(url, key) {
+  const host = aiKeyHost(url);
+  if (host && key) config.ai.keys = { ...config.ai.keys, [host]: key };
+  return Buffer.from(JSON.stringify(config.ai.keys), 'utf-8').toString('base64');
+}
+
+/**
+ * 某类 AI 调用用的模型
+ * @param {'task'|'report'} purpose - task：新建任务 / Bug 解析、执行匹配（交互中，要快）；report：日报 / 周报 / 月报
+ */
+function aiModelFor(purpose) {
+  if (purpose === 'report' && config.ai.reportModel) return config.ai.reportModel;
+  return config.ai.model;
+}
+
+export {
+  config, validateConfig, updateEnvFile, saveZentaoUsers, mergeZentaoSettings, normalizeAiBaseUrl,
+  aiKeyHost, savedKeyFor, rememberKey, aiModelFor, parseAccountList
+};

@@ -56,13 +56,13 @@ chmod +x install.sh
 是否配置禅道集成？[y/N]: y
 
 禅道配置
-禅道地址: http://10.128.1.8:8088
+禅道地址: http://zentao.example.com:8088
 禅道用户名: your-account
 禅道密码: ******
 默认执行 ID (execution ID, 选填): 167
 
 配置摘要：
-  禅道地址: http://10.128.1.8:8088
+  禅道地址: http://zentao.example.com:8088
   用户名: your-account
   执行 ID: 167
 

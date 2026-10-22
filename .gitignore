@@ -21,6 +21,8 @@ scripts/.node-path
 
 # 备份（含真实任务数据，勿入库）
 data/backups/
+# 附件待上传区（真实文件，上传到禅道后自动删除）
+data/attachments/
 data/*.backup
 
 # 服务运行时 PID 文件

@@ -67,7 +67,7 @@ node src/index.js
 
 你的 `.env` 文件中已配置：
 - ✅ ZENTAO_ENABLED=true
-- ✅ ZENTAO_URL=http://10.128.1.8:8088
+- ✅ ZENTAO_URL=http://zentao.example.com:8088
 - ✅ ZENTAO_USERNAME=lijc
 - ✅ ZENTAO_PASSWORD=***
 

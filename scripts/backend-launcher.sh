@@ -1,102 +1,100 @@
 #!/usr/bin/env bash
 # Native Messaging 宿主启动器
 #
- # 由 Chrome 在插件调用 connectNative() 时自动拉起。
- # Chrome 要求宿主必须通过 stdin/stdout 通信（type: stdio），
- # 但 Express 只监听 TCP 端口即可，因此这里把 node 后端放到后台，
- # 然后阻塞等待，保证 Chrome 认为宿主仍在运行。
+# 由浏览器在插件调用 connectNative() 时自动拉起，职责只有一个：确保后端在跑，然后退出。
 #
- # 后端本身不读写 stdio，日志写到 backend.log，避免污染宿主协议通道。
+#   1. 后端已在跑            → 回报 ready，退出
+#   2. 装了开机自启（LaunchAgent）→ 交给 launchd 启动（kickstart / bootstrap），
+#                                 后端归 launchd 管，崩溃自动拉起、不随浏览器退出
+#   3. 否则                  → 以独立会话（setsid）后台启动 node，脱离浏览器进程组
+#   4. 等端口就绪后按 Native Messaging 协议回报 {type:"ready"}，失败回报 {type:"error"}
+#
+# 旧实现的问题（见 docs/AUDIT-2026-10-21.md C2/C4/C5）：
+#   - 从不回报 ready，插件每次都要等满 6 秒超时
+#   - 宿主阻塞在 cat 上常驻，退出时顺手杀掉后端 → 后端跟着浏览器生死，晚间日报丢失
+#   - 并发拉起时多个宿主进程永久挂着
+#
+# 协议约束：stdout 是给浏览器的消息通道，只能写 Native Messaging 帧；诊断信息一律写 stderr。
 
 set -uo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PORT="${WORKASSISTANT_PORT:-3721}"
-LOG_FILE="/tmp/workassistant-backend.log"
+# shellcheck source=common.sh
+source "$PROJECT_DIR/scripts/common.sh"
 
-# node 路径查找顺序：
-#   1. install-native-host.sh 生成的 .node-path 文件（安装时固化，不依赖环境变量）
-#   2. 环境变量 WORKASSISTANT_NODE（手动调试时可用）
-#   3. PATH 中的 node
-#
-# 说明：Chrome 启动宿主时不继承用户 shell 的环境变量，
-# 因此不能只靠 WORKASSISTANT_NODE，必须在安装时把路径落盘。
-NODE_BIN=""
-if [[ -f "$PROJECT_DIR/scripts/.node-path" ]]; then
-  NODE_BIN="$(cat "$PROJECT_DIR/scripts/.node-path")"
-fi
-if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
-  NODE_BIN="${WORKASSISTANT_NODE:-$(command -v node || true)}"
-fi
+NODE_BIN="$(wa_resolve_node_for_run "$PROJECT_DIR" || true)"
 
-if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
-  echo "workassistant-backend: 找不到 node 可执行文件" >&2
-  echo "  请重新执行 scripts/install-native-host.sh" >&2
+# 按 Native Messaging 协议写一条消息：4 字节小端长度 + UTF-8 JSON
+send_message() {
+  local json="$1"
+  if [[ -n "$NODE_BIN" ]]; then
+    "$NODE_BIN" -e '
+      const b = Buffer.from(process.argv[1], "utf8");
+      const h = Buffer.alloc(4);
+      h.writeUInt32LE(b.length, 0);
+      process.stdout.write(Buffer.concat([h, b]));
+    ' "$json"
+  fi
+}
+
+fail() {
+  echo "workassistant-backend: $1" >&2
+  # 引号与反斜杠转义，保证 JSON 合法
+  local msg="${1//\\/\\\\}"
+  msg="${msg//\"/\\\"}"
+  send_message "{\"type\":\"error\",\"reason\":\"$msg\"}"
   exit 1
-fi
-
-# 端口探测：用 bash 内置 /dev/tcp，毫秒级完成。
-# 早期实现每次探测都 spawn 一次 node（~100ms 启动开销），
-# 20 次轮询的窗口内后端还没起来就误判为失败。
-# 环境若不支持 /dev/tcp（如 sh 而非 bash）则退回 node 探测。
-is_port_in_use() {
-  local port="$1"
-  if (: < /dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
-    return 0
-  fi
-  "$NODE_BIN" -e "
-    const net=require('net');
-    const s=net.connect({host:'127.0.0.1',port:$port},()=>{s.destroy();process.exit(0)});
-    s.on('error',()=>process.exit(1));
-    s.setTimeout(1000,()=>{s.destroy();process.exit(1)});
-  " 2>/dev/null
 }
 
-if is_port_in_use "$PORT"; then
-  echo "workassistant-backend: 端口 $PORT 已被占用，复用现有后端" >&2
-else
-  cd "$PROJECT_DIR"
-  nohup "$NODE_BIN" src/index.js >> "$LOG_FILE" 2>&1 &
-  BACKEND_PID=$!
-
-  # 给后端启动留足时间（首次启动要加载配置与用户列表，约需 2-3 秒）
-  READY=0
-  for _ in $(seq 1 60); do
-    if is_port_in_use "$PORT"; then
-      READY=1
-      break
-    fi
-    # 进程意外退出则不必继续等
-    if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
-      break
-    fi
-    sleep 0.25
-  done
-
-  if [[ "$READY" != "1" ]]; then
-    echo "workassistant-backend: 后端启动失败，详见 $LOG_FILE" >&2
-    exit 1
-  fi
-
-  echo "workassistant-backend: 已启动 pid=$BACKEND_PID port=$PORT" >&2
+if wa_backend_alive; then
+  echo "workassistant-backend: 后端已在运行，复用" >&2
+  send_message '{"type":"ready","reused":true}'
+  exit 0
 fi
 
-# 宿主进程退出时，一并结束后端，避免留下孤儿进程
-cleanup() {
-  if [[ -n "${BACKEND_PID:-}" ]] && kill -0 "$BACKEND_PID" 2>/dev/null; then
-    kill "$BACKEND_PID" 2>/dev/null || true
-  fi
-}
-trap cleanup EXIT INT TERM
+[[ -n "$NODE_BIN" ]] || fail "找不到可用的 node（需要 18 及以上版本），请重新执行 npm run setup:auto-start"
 
-# 阻塞等待：Chrome 认为宿主存活，后端就存活。
-# Chrome 结束宿主时会关闭 stdin，用它作为退出信号。
-#
-# 这里必须用 `cat > /dev/null`，不能用
-#     while read -r _ || [[ -n "${_:-}" ]]; do ...; done
-# 原因是 bash 的 read 在「EOF 且一个字节都没读到」时**不会清空目标变量**，
-# 于是 `[[ -n "${_:-}" ]]` 永远为真，循环退不出来 —— 表现为宿主进程 100% CPU
-# 空转，把一个后台进程变成隐形耗电大户。
-#
-# cat 在 EOF 时正常返回 0，且不解析内容，对二进制（含 NUL 的长度前缀）也安全。
-cat > /dev/null
+wa_prepare_log_dir
+PLIST="$HOME/Library/LaunchAgents/$WA_LABEL.plist"
+UID_NUM="$(id -u)"
+STARTED_BY=""
+
+if [[ -f "$PLIST" ]]; then
+  # 开机自启已安装：由 launchd 启动，后端生命周期与浏览器无关
+  if launchctl print "gui/$UID_NUM/$WA_LABEL" >/dev/null 2>&1; then
+    launchctl kickstart "gui/$UID_NUM/$WA_LABEL" >/dev/null 2>&1 && STARTED_BY="launchd"
+  else
+    launchctl bootstrap "gui/$UID_NUM" "$PLIST" >/dev/null 2>&1 && STARTED_BY="launchd"
+  fi
+fi
+
+if [[ -z "$STARTED_BY" ]]; then
+  # 未装开机自启（或 launchd 拒绝）：用 node 以 detached 方式启动，进入新会话，
+  # 浏览器结束宿主进程组时不会波及后端
+  WORKASSISTANT_LAUNCHED_BY=native WORKASSISTANT_LOG_FILE="$WA_LOG_FILE" \
+  "$NODE_BIN" -e '
+    const { spawn } = require("child_process");
+    const fs = require("fs");
+    const [nodeBin, projectDir, logFile] = process.argv.slice(1);
+    const fd = fs.openSync(logFile, "a", 0o600);
+    spawn(nodeBin, ["src/index.js"], {
+      cwd: projectDir,
+      detached: true,
+      stdio: ["ignore", fd, fd],
+      env: process.env
+    }).unref();
+  ' "$NODE_BIN" "$PROJECT_DIR" "$WA_LOG_FILE" || fail "启动 node 失败"
+  STARTED_BY="native"
+fi
+
+# 等后端就绪（首次启动需加载配置，一般 1~3 秒）
+for _ in $(seq 1 60); do
+  if wa_backend_alive; then
+    echo "workassistant-backend: 已启动（${STARTED_BY}） port=$WA_PORT" >&2
+    send_message "{\"type\":\"ready\",\"startedBy\":\"$STARTED_BY\"}"
+    exit 0
+  fi
+  sleep 0.25
+done
+
+fail "后端 15 秒内未就绪，详见日志 $WA_LOG_FILE"

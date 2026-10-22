@@ -84,6 +84,11 @@ function makeEnv() {
   const code = [
     `const env = globalThis.__zenv;`,
     extractFunction('isZentaoSubmitSuccess'),
+    extractFunction('extractZentaoError'),
+    extractFunction('toFormBody'),
+    extractFunction('readZentaoJson'),
+    extractFunction('fetchMyList'),
+    extractFunction('readMyTask'),
     extractFunction('readMyTaskStatus'),
     extractFunction('readMyTaskConsumed'),
     extractFunction('updateTaskStatus'),
@@ -95,10 +100,10 @@ function makeEnv() {
   ].join('\n');
 
   // 真函数里引用了 fetch / config / getZentaoCookies / cookiesToString /
-  // extractFormFields / nowDateTime，全部按参数注入
+  // extractFormFields / nowDateTime / zentaoBase / MY_LIST_PAGE_SIZE，全部按参数注入
   const fn = new Function(
     'fetch', 'config', 'getZentaoCookies', 'cookiesToString',
-    'extractFormFields', 'nowDateTime',
+    'extractFormFields', 'nowDateTime', 'zentaoBase', 'MY_LIST_PAGE_SIZE',
     code
   );
 
@@ -113,7 +118,7 @@ function makeEnv() {
   const forwardFetch = (...a) => globalThis.__zenv.fetch(...a);
 
   return fn(forwardFetch, stubs.config, stubs.getZentaoCookies, stubs.cookiesToString,
-    stubs.extractFormFields, stubs.nowDateTime);
+    stubs.extractFormFields, stubs.nowDateTime, () => 'http://z', 500);
 }
 
 // package.json 是 ESM，.cjs 不允许顶层 await，整体包一层
@@ -124,6 +129,11 @@ async function main() {
   check('识别 ajaxRefresh 收尾脚本（工时接口的真实返回）',
     env.isZentaoSubmitSuccess(REAL_AJAX_REFRESH) === true);
   check('识别 selfClose 收尾页', env.isZentaoSubmitSuccess(SELF_CLOSE) === true);
+  check('识别跳转详情页（编辑任务成功的真实返回）',
+    env.isZentaoSubmitSuccess("<html><script>parent.location='/zentao/task-view-952.html'; </script>") === true);
+  check('识别刷新父页面', env.isZentaoSubmitSuccess("<script>parent.location.reload();</script>") === true);
+  check('跳转登录页不算成功（会话失效）', env.isZentaoSubmitSuccess("<script>parent.location='/zentao/user-login-L3plbnRhby8=.html'</script>") === false);
+  check('跳转到其他页面（非详情/列表）不算成功', env.isZentaoSubmitSuccess("<script>parent.location='/zentao/my.html'</script>") === false);
   check('识别 alert-success', env.isZentaoSubmitSuccess('<div class="alert alert-success">ok</div>') === true);
   check('识别「保存成功」文案', env.isZentaoSubmitSuccess('<div>保存成功</div>') === true);
   check('退回表单判为失败（不能误放行）',
@@ -136,8 +146,8 @@ async function main() {
 {
   const env = makeEnv();
   env.fetch = async (url) => {
-    if (String(url).includes('my-task.json')) {
-      return { json: async () => ({ data: JSON.stringify({ tasks: [] }) }) };  // 列表里没有该任务
+    if (/\/zentao\/my-task[-.]/.test(String(url))) {
+      return { ok: true, json: async () => ({ data: JSON.stringify({ tasks: [] }) }) };  // 列表里没有该任务
     }
     if (String(url).includes('task-close-943')) {
       return { text: async () => REAL_AJAX_REFRESH };
@@ -154,8 +164,8 @@ async function main() {
   // 真的失败了：退回表单 + 回读状态不变
   const env = makeEnv();
   env.fetch = async (url) => {
-    if (String(url).includes('my-task.json')) {
-      return { json: async () => ({ data: JSON.stringify({ tasks: [{ id: '944', status: 'wait' }] }) }) };
+    if (/\/zentao\/my-task[-.]/.test(String(url))) {
+      return { ok: true, json: async () => ({ data: JSON.stringify({ tasks: [{ id: '944', status: 'wait' }] }) }) };
     }
     return { text: async () => BACK_TO_FORM };
   };
@@ -169,9 +179,9 @@ async function main() {
 {
   const env = makeEnv();
   env.fetch = async (url) => {
-    if (String(url).includes('my-task.json')) {
+    if (/\/zentao\/my-task[-.]/.test(String(url))) {
       // 任务已关闭 → 不在列表 → consumed 回读为 null
-      return { json: async () => ({ data: JSON.stringify({ tasks: [] }) }) };
+      return { ok: true, json: async () => ({ data: JSON.stringify({ tasks: [] }) }) };
     }
     return { text: async () => REAL_AJAX_REFRESH };
   };
@@ -185,8 +195,8 @@ async function main() {
   // 工时真的没记上：无收尾脚本、回读也没增长
   const env = makeEnv();
   env.fetch = async (url) => {
-    if (String(url).includes('my-task.json')) {
-      return { json: async () => ({ data: JSON.stringify({ tasks: [{ id: '885', consumed: 3 }] }) }) };
+    if (/\/zentao\/my-task[-.]/.test(String(url))) {
+      return { ok: true, json: async () => ({ data: JSON.stringify({ tasks: [{ id: '885', consumed: 3 }] }) }) };
     }
     return { text: async () => '<form>退回表单</form>' };
   };

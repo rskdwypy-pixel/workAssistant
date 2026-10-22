@@ -10,7 +10,7 @@
 3. [ProgressToast] 正在创建禅道 Bug...
 4. [Background] 获取普通执行的 productID, executionId: 167
 5. [ZentaoTabManager] ✓ 找到禅道标签页: 361196583
-6. [Background] 导航到执行页面: http://10.128.1.8:8088/zentao/execution-bug-167.html
+6. [Background] 导航到执行页面: http://zentao.example.com:8088/zentao/execution-bug-167.html
 7. [Background] 执行页面已加载，从 DOM 中提取 productID
 8. ❌ [BugManager] ✗ 获取 productID 失败: Frame with ID 0 is showing error page
 9. [Background] 登录超时，清理资源
@@ -44,7 +44,7 @@
 
 1. **手动访问执行页面**:
    ```
-   http://10.128.1.8:8088/zentao/execution-bug-167.html
+   http://zentao.example.com:8088/zentao/execution-bug-167.html
    ```
 
 2. **检查可能的错误**:
@@ -269,7 +269,7 @@ async function getProductWithRetry(executionId, maxRetries = 2) {
 
 1. **手动打开禅道执行页面**:
    ```
-   http://10.128.1.8:8088/zentao/execution-bug-167.html
+   http://zentao.example.com:8088/zentao/execution-bug-167.html
    ```
 
 2. **检查页面状态**:

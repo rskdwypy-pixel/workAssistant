@@ -2,27 +2,33 @@
 # 卸载后端登录项（对应 scripts/install-launchagent.sh）
 #
 # 用法：
-#   bash scripts/uninstall-launchagent.sh              关闭开机自启（不影响正在运行的实例）
-#   bash scripts/uninstall-launchagent.sh --stop-now   关闭开机自启 + 停掉当前登录项实例
+#   bash scripts/uninstall-launchagent.sh                关闭开机自启，并从 launchd 卸载 job
+#   bash scripts/uninstall-launchagent.sh --keep-running 关闭开机自启，但保留当前运行的后端
 #
-# ⚠️ 默认不 bootout 是刻意的：
-#    本脚本可能被「正在运行的插件后端」调用（设置页里的开机自启开关）。
-#    一旦 bootout，launchd 会当场杀掉发起请求的那个进程，
-#    用户看到的是请求中断、后端莫名消失。
-#    删除 plist 已足以阻止下次登录自动启动，不需要顺手杀进程。
-#    只有「停止服务」这种明确要停的场景才传 --stop-now。
+# 卸载 job（bootout）会停掉由 launchd 管理的后端实例：只删 plist 的话 job 仍留在 launchd 里，
+# 本次登录期间崩溃了还会被 KeepAlive 拉起来，等于没关干净。
+#
+# ⚠️ 被正在运行的插件后端调用时（WORKASSISTANT_CALLED_FROM_BACKEND=1）绝不 bootout：
+#    那会当场杀掉发起请求的进程。后端在「停止服务并停用自启」时会紧接着以 0 正常退出，
+#    KeepAlive(SuccessfulExit=false) 不会再拉起它。
 
 set -uo pipefail
 
-LABEL="com.workassistant.backend"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=common.sh
+source "$PROJECT_DIR/scripts/common.sh"
+
+PLIST="$HOME/Library/LaunchAgents/$WA_LABEL.plist"
 UID_NUM="$(id -u)"
-LABEL_TARGET="gui/$UID_NUM/$LABEL"
-STOP_NOW=0
+LABEL_TARGET="gui/$UID_NUM/$WA_LABEL"
+KEEP_RUNNING=0
+[[ "${WORKASSISTANT_CALLED_FROM_BACKEND:-0}" == "1" ]] && KEEP_RUNNING=1
 
 for arg in "$@"; do
   case "$arg" in
-    --stop-now) STOP_NOW=1 ;;
+    --keep-running) KEEP_RUNNING=1 ;;
+    # 兼容旧参数：现在默认就会停止
+    --stop-now) ;;
   esac
 done
 
@@ -41,14 +47,12 @@ else
   echo "ℹ️  未找到 $PLIST"
 fi
 
-if [[ "$STOP_NOW" == "1" ]]; then
-  if launchctl bootout "$LABEL_TARGET" 2>/dev/null; then
-    echo "✅ 已停止当前登录项实例"
-  else
-    echo "ℹ️  登录项未在运行"
-  fi
+if [[ "$KEEP_RUNNING" == "1" ]]; then
+  echo "ℹ️  当前运行中的实例不受影响"
+elif launchctl bootout "$LABEL_TARGET" 2>/dev/null; then
+  echo "✅ 已从 launchd 卸载（由 launchd 启动的后端实例已停止，需要时可在插件中点「启动服务」）"
 else
-  echo "ℹ️  当前运行中的实例不受影响（本操作只阻止下次登录自动启动）"
+  echo "ℹ️  launchd 中没有已加载的登录项"
 fi
 
 echo ""

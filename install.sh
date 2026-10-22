@@ -133,17 +133,19 @@ test_zentao_connection() {
     if [ -n "$username" ] && [ -n "$password" ]; then
         echo -e "${YELLOW}正在测试禅道登录...${NC}"
 
-        # 尝试登录
-        local login_response=$(curl -s -c /tmp/zentao_cookies.txt -X POST \
+        # 尝试登录（密码经 stdin 传给 curl，不出现在进程参数里；cookie 写私有临时文件）
+        local cookie_file
+        cookie_file=$(mktemp)
+        local login_response=$(printf 'account=%s&password=%s' "$username" "$password" | curl -s -c "$cookie_file" -X POST \
             "${url}/zentao/user-login.html" \
             -H "Content-Type: application/x-www-form-urlencoded" \
-            -d "account=${username}&password=${password}" \
+            --data-binary @- \
             -L 2>&1)
 
         # 检查是否登录成功（通过查找重定向或成功标志）
         if echo "$login_response" | grep -q "zentao/my\|zentao/index"; then
             echo -e "${GREEN}✓ 禅道登录成功！${NC}"
-            rm -f /tmp/zentao_cookies.txt
+            rm -f "$cookie_file"
             return 0
         else
             echo -e "${YELLOW}⚠️  禅道登录测试失败${NC}"
@@ -151,7 +153,7 @@ test_zentao_connection() {
             echo -e "${YELLOW}   1. 用户名或密码错误${NC}"
             echo -e "${YELLOW}   2. 禅道版本不兼容${NC}"
             echo -e "${YELLOW}   但配置已保存，请稍后在扩展中手动测试${NC}"
-            rm -f /tmp/zentao_cookies.txt
+            rm -f "$cookie_file"
             return 0  # 不阻止安装
         fi
     fi
@@ -512,7 +514,7 @@ if [[ $config_zentao =~ ^[Yy]$ ]]; then
         if validate_url "$ZENTAO_URL"; then
             break
         fi
-        echo -e "${RED}❌ URL 格式无效，请输入完整的 URL（如 http://10.128.1.8:8088）${NC}"
+        echo -e "${RED}❌ URL 格式无效，请输入完整的 URL（如 http://zentao.example.com:8088）${NC}"
     done
 
     # 输入用户名
@@ -604,9 +606,10 @@ cd "$SCRIPT_DIR" && exec ./stop.sh "\$@"
 EOF
 
 # 创建 walog 命令
+# 手动启动（wa / start.sh）写 logs/service.log；开机自启与插件拉起写 ~/Library/Logs/WorkAssistant/backend.log
 cat > "$BIN_DIR/walog" << EOF
 #!/bin/bash
-cd "$SCRIPT_DIR" && exec tail -f logs/service.log
+cd "$SCRIPT_DIR" && exec tail -F logs/service.log "\$HOME/Library/Logs/WorkAssistant/backend.log"
 EOF
 
 # 设置执行权限
@@ -635,7 +638,7 @@ if ! echo "$PATH" | grep -q "$BIN_DIR"; then
         PATH_UPDATED=true
         echo -e "${GREEN}✓ PATH 已在当前会话中生效${NC}"
     else
-        echo -e "${YELLOW}⚠️  未找到 $SHELL_RC，请手动添加 PATH${NC}"
+        echo -e "${YELLOW}⚠️  未找到 ${SHELL_RC}，请手动添加 PATH${NC}"
     fi
 else
     echo -e "${GREEN}✓ $BIN_DIR 已在 PATH 中${NC}"

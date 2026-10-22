@@ -1,123 +1,93 @@
 import { config } from '../config.js';
 
 /**
- * 发送飞书消息
+ * 发一条机器人消息，并按平台的返回体判断是否真的成功
+ *
+ * 企业微信 / 钉钉 / 飞书出错时 HTTP 状态码照样是 200，错误写在返回体里
+ * （企业微信、钉钉 errcode≠0，飞书 code / StatusCode≠0）。以前只看 HTTP 状态：
+ * 地址是企业微信、类型却选成「通用」时，企业微信拒收格式不对的消息，日志和界面都显示「推送成功」，实际什么都没收到。
+ * @returns {Promise<true>} 失败时抛出带平台原因的错误
  */
-async function sendFeishu(webhookUrl, content) {
+async function postMessage(webhookUrl, body) {
   const response = await fetch(webhookUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      msg_type: 'text',
-      content: { text: content }
-    })
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15000)
   });
-  return response.ok;
+  const text = await response.text();
+  if (!response.ok) throw new Error(`HTTP ${response.status}${text ? `：${text.slice(0, 200)}` : ''}`);
+  let data = null;
+  try { data = JSON.parse(text); } catch { /* 通用 Webhook 可能不返回 JSON */ }
+  if (data && typeof data === 'object') {
+    const code = data.errcode ?? data.code ?? data.StatusCode;
+    if (code !== undefined && code !== null && Number(code) !== 0) {
+      throw new Error(`${data.errmsg || data.msg || data.StatusMessage || '平台拒收'}（错误码 ${code}）`);
+    }
+  }
+  return true;
 }
 
-/**
- * 发送飞书卡片消息（富文本）
- */
-async function sendFeishuCard(webhookUrl, title, items) {
-  const card = {
+/** 按地址认出平台（地址是谁家的就用谁家的格式，避免类型选错导致平台拒收） */
+function detectWebhookType(url) {
+  let host = '';
+  try { host = new URL(url).host.toLowerCase(); } catch { return ''; }
+  if (host === 'qyapi.weixin.qq.com') return 'wecom';
+  if (host === 'oapi.dingtalk.com') return 'dingtalk';
+  if (host.endsWith('feishu.cn') || host.endsWith('larksuite.com')) return 'feishu';
+  return '';
+}
+
+/** 按 UTF-8 字节数截断（企业微信 markdown 正文上限 4096 字节） */
+function clipBytes(text, maxBytes) {
+  const buf = Buffer.from(text, 'utf8');
+  if (buf.length <= maxBytes) return text;
+  const suffix = '\n…（内容过长，已截断）';
+  let out = buf.subarray(0, maxBytes - Buffer.byteLength(suffix)).toString('utf8');
+  out = out.replace(/\uFFFD$/, '');
+  return out + suffix;
+}
+
+/** 飞书文本消息 */
+function sendFeishu(webhookUrl, content) {
+  return postMessage(webhookUrl, { msg_type: 'text', content: { text: content } });
+}
+
+/** 飞书卡片消息（富文本） */
+function sendFeishuCard(webhookUrl, title, items) {
+  return postMessage(webhookUrl, {
     msg_type: 'interactive',
     card: {
-      header: {
-        title: {
-          tag: 'plain_text',
-          content: title
-        }
-      },
-      elements: items.map(item => ({
-        tag: 'div',
-        text: {
-          tag: 'plain_text',
-          content: item
-        }
-      }))
+      header: { title: { tag: 'plain_text', content: title } },
+      elements: items.map(item => ({ tag: 'div', text: { tag: 'plain_text', content: item } }))
     }
-  };
-
-  const response = await fetch(webhookUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(card)
   });
-  return response.ok;
 }
 
-/**
- * 发送钉钉消息
- */
-async function sendDingtalk(webhookUrl, content) {
-  const response = await fetch(webhookUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      msgtype: 'text',
-      text: { content: content }
-    })
-  });
-  return response.ok;
+/** 钉钉文本消息 */
+function sendDingtalk(webhookUrl, content) {
+  return postMessage(webhookUrl, { msgtype: 'text', text: { content } });
 }
 
-/**
- * 发送钉钉Markdown消息
- */
-async function sendDingtalkMarkdown(webhookUrl, title, items) {
+/** 钉钉 Markdown 消息 */
+function sendDingtalkMarkdown(webhookUrl, title, items) {
   const text = `### ${title}\n\n${items.map(i => `${i}`).join('\n')}`;
-
-  const response = await fetch(webhookUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      msgtype: 'markdown',
-      markdown: { text, title }
-    })
-  });
-  return response.ok;
+  return postMessage(webhookUrl, { msgtype: 'markdown', markdown: { text, title } });
 }
 
-/**
- * 发送企业微信消息
- */
-async function sendWecom(webhookUrl, content) {
-  const response = await fetch(webhookUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      msgtype: 'text',
-      text: { content: content }
-    })
-  });
-  return response.ok;
+/** 企业微信文本消息（上限 2048 字节） */
+function sendWecom(webhookUrl, content) {
+  return postMessage(webhookUrl, { msgtype: 'text', text: { content: clipBytes(content, 2048) } });
 }
 
-/**
- * 发送企业微信Markdown消息
- */
-async function sendWecomMarkdown(webhookUrl, content) {
-  const response = await fetch(webhookUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      msgtype: 'markdown',
-      markdown: { content }
-    })
-  });
-  return response.ok;
+/** 企业微信 Markdown 消息（上限 4096 字节） */
+function sendWecomMarkdown(webhookUrl, content) {
+  return postMessage(webhookUrl, { msgtype: 'markdown', markdown: { content: clipBytes(content, 4096) } });
 }
 
-/**
- * 发送通用Webhook
- */
-async function sendGeneric(webhookUrl, data) {
-  const response = await fetch(webhookUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
-  return response.ok;
+/** 通用 Webhook */
+function sendGeneric(webhookUrl, data) {
+  return postMessage(webhookUrl, data);
 }
 
 /**
@@ -132,8 +102,10 @@ async function sendNotification(title, content, items = [], overrideConfig = nul
     return { success: true, message: 'Webhook未配置' };
   }
 
-  console.log(`[Webhook] webhook配置:`, { type: webhook.type, hasUrl: !!webhook.url, urlPrefix: webhook.url?.substring(0, 20) + '...' });
-  console.log(`[Webhook] 准备推送: ${title}, 类型: ${webhook.type}, URL: ${webhook.url?.substring(0, 30)}...`);
+  // 地址能认出平台时以地址为准（设置里类型选错时照样能推）
+  const type = detectWebhookType(webhook.url) || webhook.type;
+  if (type !== webhook.type) console.log(`[Webhook] 地址是 ${type}，设置里的类型是 ${webhook.type}，按 ${type} 格式发送`);
+  console.log(`[Webhook] 准备推送: ${title}, 类型: ${type}, URL: ${webhook.url?.substring(0, 30)}...`);
 
   try {
     let success = false;
@@ -141,7 +113,7 @@ async function sendNotification(title, content, items = [], overrideConfig = nul
 
     console.log(`[Webhook] 推送内容项数:`, items.length);
 
-    switch (webhook.type) {
+    switch (type) {
       case 'feishu':
         if (items.length > 0) {
           console.log('[Webhook] 使用飞书卡片格式');
@@ -180,16 +152,11 @@ async function sendNotification(title, content, items = [], overrideConfig = nul
         break;
     }
 
-    if (success) {
-      console.log(`[Webhook] 推送成功: ${title}`);
-      return { success: true, message: 'Webhook发送成功' };
-    } else {
-      console.error(`[Webhook] 推送失败: ${title}, success=false`);
-      throw new Error('Webhook发送失败');
-    }
+    if (!success) throw new Error('Webhook发送失败');
+    console.log(`[Webhook] 推送成功: ${title}`);
+    return { success: true, message: 'Webhook发送成功' };
   } catch (err) {
-    console.error('[Webhook] 发送错误:', err.message);
-    console.error('[Webhook] 错误堆栈:', err.stack);
+    console.error(`[Webhook] 推送失败: ${title}：${err.message}`);
     throw err;
   }
 }
@@ -281,6 +248,7 @@ async function testWebhook(webhookUrl, webhookType) {
 
 export {
   sendNotification,
+  detectWebhookType,
   sendMorningReminder,
   sendEveningSummary,
   sendTaskReminder,

@@ -2,68 +2,71 @@
 # 把后端注册为 macOS 登录项，开机自动启动
 #
 # 为什么还要这个方案：
-#   Chrome Native Messaging 是插件按需拉起后端的官方通道，但它要求
-#   1) 一次性把宿主注册文件写到浏览器读取的目录（扩展沙箱外，必须手动执行一次）
-#   2) Chrome 后续需要重启才识别新宿主
-#   而本插件的后端是「常驻服务」性质 —— 日报定时任务（早 9:00 / 晚 21:00 /
-#   周五周报）本身就需要后端一直在跑，与是否打开标签页无关。
+#   后端是「常驻服务」性质 —— 日报定时任务（早 9:00 / 晚 21:00 / 周五周报）
+#   本身就需要后端一直在跑，与是否打开浏览器无关。LaunchAgent 让它开机自启，
+#   崩溃自动拉起。插件的「启动服务」（Native Messaging 宿主）在装了登录项时
+#   也会交给 launchd 启动，保证后端始终归 launchd 管。
 #
-#   因此用 LaunchAgent 让它开机自启，是更贴合实际使用场景的方案：
-#   装一次，之后完全无感，既满足定时任务，也不依赖插件是否打开。
-#
-#   两者可共存：LaunchAgent 保证常驻，Native Messaging 负责异常退出后的按需重启。
-#
-# ⚠️ 本脚本可能被「正在运行的插件后端」调用（设置页里的开机自启开关），
-#    因此有一条铁律：**绝不无条件 bootout 自己的 job**。
-#    无条件 bootout 会当场杀掉发起请求的那个进程，用户看到的是连接中断。
-#    下面所有 launchctl 操作都遵守这一点。
+# ⚠️ 本脚本可能被「正在运行的插件后端」调用（设置页里的开机自启开关，
+#    此时环境变量 WORKASSISTANT_CALLED_FROM_BACKEND=1）。
+#    铁律：后端调用时**绝不 bootout** 已加载的 job —— 那会当场杀掉发起请求的进程。
 
 set -euo pipefail
 
-LABEL="com.workassistant.backend"
-AGENT_DIR="$HOME/Library/LaunchAgents"
-PLIST="$AGENT_DIR/$LABEL.plist"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PORT="${WORKASSISTANT_PORT:-3721}"
+# shellcheck source=common.sh
+source "$PROJECT_DIR/scripts/common.sh"
 
-# node 路径查找顺序（与 install-native-host.sh / backend-launcher.sh 保持一致）：
-#   1. scripts/.node-path —— 安装时落盘，不依赖 shell 环境
-#   2. WORKASSISTANT_NODE 环境变量
-#   3. PATH 中的 node
-#
-# 注意：本脚本被 launchd 或插件后端调用时都没有用户 shell 环境，
-# 所以「安装时落盘」这条不能省。
-NODE_BIN=""
-if [[ -f "$PROJECT_DIR/scripts/.node-path" ]]; then
-  NODE_BIN="$(cat "$PROJECT_DIR/scripts/.node-path")"
-fi
-if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
-  NODE_BIN="${WORKASSISTANT_NODE:-$(command -v node || true)}"
-fi
+AGENT_DIR="$HOME/Library/LaunchAgents"
+PLIST="$AGENT_DIR/$WA_LABEL.plist"
+FROM_BACKEND="${WORKASSISTANT_CALLED_FROM_BACKEND:-0}"
 
-if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
-  echo "❌ 找不到 node，请先执行 scripts/install-native-host.sh 或设置 WORKASSISTANT_NODE"
+# 选定 node 并固化到 .node-path（宿主启动器与 launchd 都不继承 shell 环境）
+NODE_BIN="$(wa_resolve_node_for_install || true)"
+if [[ -z "$NODE_BIN" ]]; then
+  echo "❌ 找不到可用的 node（需要 18 及以上版本）。可设置 WORKASSISTANT_NODE=/path/to/node 后重试"
   exit 1
 fi
+case "$NODE_BIN" in
+  */.nvm/*|*/.fnm/*|*/.volta/*|*/.asdf/*|*/n/versions/*)
+    echo "⚠️  只找到版本管理器里的 node：$NODE_BIN"
+    echo "   卸载或切换该版本后开机自启会失效，建议安装一个固定路径的 node（如 brew install node）后重跑本脚本"
+    ;;
+esac
+echo "$NODE_BIN" > "$PROJECT_DIR/scripts/.node-path"
 
 mkdir -p "$AGENT_DIR"
+wa_prepare_log_dir
 
-cat > "$PLIST" <<PLIST_EOF
+X_NODE="$(wa_xml_escape "$NODE_BIN")"
+X_ENTRY="$(wa_xml_escape "$PROJECT_DIR/src/index.js")"
+X_DIR="$(wa_xml_escape "$PROJECT_DIR")"
+X_LOG="$(wa_xml_escape "$WA_LOG_FILE")"
+
+NEW_PLIST="$(cat <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>$LABEL</string>
+  <string>$WA_LABEL</string>
 
   <key>ProgramArguments</key>
   <array>
-    <string>$NODE_BIN</string>
-    <string>$PROJECT_DIR/src/index.js</string>
+    <string>$X_NODE</string>
+    <string>$X_ENTRY</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>$PROJECT_DIR</string>
+  <string>$X_DIR</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>WORKASSISTANT_LAUNCHED_BY</key>
+    <string>launchd</string>
+    <key>WORKASSISTANT_LOG_FILE</key>
+    <string>$X_LOG</string>
+  </dict>
 
   <key>RunAtLoad</key>
   <true/>
@@ -75,61 +78,67 @@ cat > "$PLIST" <<PLIST_EOF
   </dict>
 
   <key>StandardOutPath</key>
-  <string>/tmp/workassistant-backend.log</string>
+  <string>$X_LOG</string>
 
   <key>StandardErrorPath</key>
-  <string>/tmp/workassistant-backend.log</string>
+  <string>$X_LOG</string>
 
   <key>ProcessType</key>
   <string>Background</string>
 </dict>
 </plist>
 PLIST_EOF
+)"
 
+# KeepAlive 用 SuccessfulExit=false 而不是 true 是刻意的：
+#   正常退出（插件里点「停止服务」、端口已被本项目后端占用时让位）以 0 退出，不重启；
+#   崩溃（非 0 退出）才自动拉起。
+
+OLD_PLIST=""
+[[ -f "$PLIST" ]] && OLD_PLIST="$(cat "$PLIST")"
+CHANGED=0
+[[ "$OLD_PLIST" != "$NEW_PLIST" ]] && CHANGED=1
+
+printf '%s\n' "$NEW_PLIST" > "$PLIST"
 echo "✅ 已写入登录项: $PLIST"
 echo "   程序: $NODE_BIN $PROJECT_DIR/src/index.js"
-echo "   策略: 登录自启 + 异常退出自动重启（KeepAlive.SuccessfulExit=false）"
+echo "   日志: $WA_LOG_FILE"
 echo ""
 
-# ─────────────────────────────────────────────────────────────
-# 加载（让 launchd 认识它）
-#
-# KeepAlive 用 SuccessfulExit=false 而不是 true 是刻意的：
-#   端口被占时 src/index.js 会以 0 正常退出，
-#   若用 KeepAlive=true，launchd 会不停重启它，形成崩溃重启死循环。
-#   SuccessfulExit=false 只对「异常退出」重启 —— 崩溃照样能恢复，
-#   正常让位则安静退出。
-# ─────────────────────────────────────────────────────────────
 UID_NUM="$(id -u)"
-LABEL_TARGET="gui/$UID_NUM/$LABEL"
-
-port_in_use() {
-  (: < /dev/tcp/127.0.0.1/"$1") 2>/dev/null
-}
+LABEL_TARGET="gui/$UID_NUM/$WA_LABEL"
 
 # 清掉可能存在的 disable 覆盖（上次「关闭开机自启」留下的）
 launchctl enable "$LABEL_TARGET" 2>/dev/null || true
 
 if launchctl print "$LABEL_TARGET" >/dev/null 2>&1; then
-  echo "ℹ️  登录项已加载（launchd 已认识它），无需重复启动"
+  if [[ "$CHANGED" == "1" ]]; then
+    # launchd 只在 bootstrap 时读取 plist；只改文件不重载，新配置要等到下次登录才生效
+    if [[ "$FROM_BACKEND" == "1" ]]; then
+      echo "ℹ️  登录项配置已更新，将在下次「重启服务」或重新登录后生效"
+    else
+      echo "🔄 登录项配置有变化，重新加载..."
+      launchctl bootout "$LABEL_TARGET" 2>/dev/null || true
+      # bootout 是异步的，等 job 真正卸载后再 bootstrap
+      for _ in $(seq 1 20); do
+        launchctl print "$LABEL_TARGET" >/dev/null 2>&1 || break
+        sleep 0.25
+      done
+      if launchctl bootstrap "gui/$UID_NUM" "$PLIST" 2>/dev/null; then
+        echo "✅ 已按新配置重新加载（后端已由 launchd 重启）"
+      else
+        echo "⚠️  重新加载失败，可手动执行：launchctl bootstrap gui/$UID_NUM $PLIST"
+      fi
+    fi
+  else
+    echo "ℹ️  登录项已加载且配置未变，无需重复加载"
+  fi
 else
-  # 端口被占时**也要** bootstrap。
-  #
-  # 早期实现是「端口被占 → 跳过 bootstrap，只留 plist」，理由是避免两个实例
-  # 抢端口。但那会得到一个非常误导人的中间状态：文件在、launchd 里却没有这个
-  # job —— `launchctl print` 查不到（Bad request / Could not find service），
-  # 系统设置「通用 → 登录项与扩展 → 允许在后台」里也不会出现，
-  # 用户看到的现象就是「开关说是开了，可系统里什么都没有」。
-  #
-  # 直接 bootstrap 是安全的：
-  #   · 第二个实例绑端口失败 → src/index.js 里 EADDRINUSE 分支以 0 正常退出
-  #   · KeepAlive 是 SuccessfulExit=false → 正常退出不会触发重启，没有死循环
-  #   · 定时任务挂在 listen 成功回调里 → 让位的实例不会多跑一份调度
-  # 最终状态正好是我们要的：job 已注册进 launchd、此刻未运行，下次登录接管。
+  # 端口被占时也要 bootstrap：新实例检测到本项目后端已在服务会以 0 让位退出，
+  # KeepAlive(SuccessfulExit=false) 不会重启它；job 注册进 launchd，下次登录接管。
   if launchctl bootstrap "gui/$UID_NUM" "$PLIST" 2>/dev/null; then
-    if port_in_use "$PORT"; then
-      echo "✅ 登录项已注册并加载（端口 $PORT 已有后端在服务，新实例会让位退出）"
-      echo "   下一次登录将由 launchd 自动启动后端"
+    if wa_backend_alive; then
+      echo "✅ 登录项已注册并加载（端口 $WA_PORT 已有后端在服务，新实例会让位退出）"
     else
       echo "✅ 已启动登录项（立即生效）"
     fi
@@ -140,6 +149,6 @@ fi
 
 echo ""
 echo "常用命令："
-echo "  查看状态: launchctl print gui/$UID_NUM/$LABEL"
-echo "  立即停止: launchctl bootout gui/$UID_NUM/$LABEL"
+echo "  查看状态: launchctl print gui/$UID_NUM/$WA_LABEL"
+echo "  重启服务: launchctl kickstart -k gui/$UID_NUM/$WA_LABEL"
 echo "  卸载:    bash scripts/uninstall-launchagent.sh"

@@ -3,6 +3,15 @@ import { config } from '../config.js';
 import { getTodayTasks, getAllTasks, updateTask } from './taskManager.js';
 import { sendMorningReminder, sendTaskReminder } from '../utils/webhook.js';
 
+/** Webhook 推送失败不能挡住「已提醒」标记：否则每次检查都会再弹一遍系统通知、再推一遍 */
+async function safeTaskReminder(task, triggerType) {
+  try {
+    await sendTaskReminder(task, triggerType);
+  } catch (err) {
+    console.error(`[Reminder] 任务提醒推送失败（${task.title}）：${err.message}`);
+  }
+}
+
 let reminderTask = null;
 let customReminderInterval = null;
 
@@ -31,11 +40,11 @@ async function checkTaskReminders() {
           if (isDeadline) {
             console.log(`⏰ 任务即将截止提醒: ${task.title}`);
             await sendSystemNotification('⏰ 任务距离截止仅剩 3 小时', task.title);
-            await sendTaskReminder(task, 'deadline_3h');
+            await safeTaskReminder(task, 'deadline_3h');
           } else {
             console.log(`⏰ 任务提醒 (提前3小时): ${task.title}`);
             await sendSystemNotification('⏰ 任务将在 3 小时后提醒', task.title);
-            await sendTaskReminder(task, 'reminder_3h');
+            await safeTaskReminder(task, 'reminder_3h');
           }
           updates.reminder3hTriggered = true;
         }
@@ -45,11 +54,11 @@ async function checkTaskReminders() {
           if (isDeadline) {
             console.log(`⏰ 任务已到达截止时间: ${task.title}`);
             await sendSystemNotification('⏰ 任务已到达截止时间', task.title);
-            await sendTaskReminder(task, 'deadline_exact');
+            await safeTaskReminder(task, 'deadline_exact');
           } else {
             console.log(`⏰ 任务提醒触发: ${task.title}`);
             await sendSystemNotification('⏰ 任务提醒', task.title);
-            await sendTaskReminder(task, 'reminder_exact');
+            await safeTaskReminder(task, 'reminder_exact');
           }
           updates.reminderExactTriggered = true;
         }
@@ -69,11 +78,14 @@ async function checkTaskReminders() {
  */
 async function sendSystemNotification(title, message) {
   try {
-    // 使用 macOS osascript 发送通知
-    const { exec } = await import('child_process');
-    const cmd = `osascript -e 'display notification "${message.replace(/"/g, '\\"')}" with title "${title.replace(/"/g, '\\"')}" sound name "default"'`;
+    // 使用 macOS osascript 发送通知。
+    // 必须用 execFile 传参、不经过 shell：标题/内容里有任务名（可能来自禅道里别人建的任务），
+    // 旧实现拼进 shell 字符串，一个单引号就能注入任意命令。
+    const { execFile } = await import('child_process');
+    const asString = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+    const script = `display notification ${asString(message)} with title ${asString(title)} sound name "default"`;
 
-    exec(cmd, (error) => {
+    execFile('osascript', ['-e', script], (error) => {
       if (error) {
         console.error('系统通知发送失败:', error.message);
       }

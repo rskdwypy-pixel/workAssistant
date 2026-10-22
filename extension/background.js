@@ -36,7 +36,18 @@ async function isBackendAlive(timeout = 1500) {
  *
  * @returns {Promise<{started: boolean, reason?: string}>}
  */
-async function launchBackendViaNative() {
+let launchInFlight = null;
+function launchBackendViaNative() {
+  // 并发调用（SW 唤醒 + onStartup + 业务请求）共用同一次拉起，避免同时起多个宿主进程
+  if (!launchInFlight) {
+    launchInFlight = launchBackendViaNativeOnce().finally(() => {
+      launchInFlight = null;
+    });
+  }
+  return launchInFlight;
+}
+
+async function launchBackendViaNativeOnce() {
   if (!chrome.runtime.connectNative) {
     return {
       started: false,
@@ -56,7 +67,7 @@ async function launchBackendViaNative() {
       return done({ started: false, code: classifyLaunchError(e.message), reason: e.message });
     }
 
-    // 浏览器启动宿主需要时间，超时则判定失败
+    // 宿主会在后端就绪后回报 ready（最多等 15 秒），这里留出余量；超时再兜底探测一次
     const timer = setTimeout(async () => {
       if (await isBackendAlive()) {
         done({ started: true });
@@ -64,16 +75,19 @@ async function launchBackendViaNative() {
         done({
           started: false,
           code: 'timeout',
-          reason: '宿主已请求但后端未就绪，请确认已执行 scripts/install-native-host.sh'
+          reason: '宿主已请求但后端未就绪，请确认已执行 npm run setup:auto-start'
         });
       }
-    }, 6000);
+    }, 20000);
 
-    port.onMessage.addListener(async (msg) => {
-      // 宿主回报状态
+    port.onMessage.addListener((msg) => {
+      // 宿主回报状态：ready = 后端已就绪；error = 宿主明确报告启动失败
       if (msg && msg.type === 'ready') {
         clearTimeout(timer);
-        done({ started: true });
+        done({ started: true, startedBy: msg.startedBy || (msg.reused ? 'existing' : '') });
+      } else if (msg && msg.type === 'error') {
+        clearTimeout(timer);
+        done({ started: false, code: 'launch_failed', reason: msg.reason || '宿主报告后端启动失败' });
       }
     });
 
@@ -151,37 +165,15 @@ const LAUNCH_ERROR_HELP = {
     '宿主配置文件格式有误，请重新执行 npm run setup:auto-start 覆盖它。',
   timeout:
     '宿主已拉起但后端未就绪。首次启动需加载配置与禅道登录，约需 3-8 秒；'
-    + '若持续失败请查看日志 /tmp/workassistant-backend.log。',
+    + '若持续失败请查看日志 ~/Library/Logs/WorkAssistant/backend.log。',
   unsupported:
     '当前浏览器不支持 Native Messaging。建议改用开机自启：'
     + '在项目目录执行 npm run setup:auto-start。',
-  disconnected: '宿主启动后立即断开，请查看 /tmp/workassistant-backend.log 中的错误。',
+  disconnected: '宿主启动后立即断开，请查看 ~/Library/Logs/WorkAssistant/backend.log 中的错误。',
+  launch_failed: '宿主未能启动后端，请查看 ~/Library/Logs/WorkAssistant/backend.log 中的错误。',
   unknown: '请在项目目录执行 npm run setup:auto-start 重新注册宿主后重试。'
 };
 
-/**
- * 确保后端可用：未运行时尝试自动拉起
- * @param {boolean} autoStart - 是否允许自动启动（默认允许）
- */
-async function ensureBackend(autoStart = true) {
-  if (await isBackendAlive()) {
-    return { ok: true, started: false };
-  }
-  if (!autoStart) {
-    return { ok: false, reason: 'backend_down' };
-  }
-  console.log('[Background] 后端未运行，尝试通过 Native Messaging 拉起...');
-  const r = await launchBackendViaNative();
-  if (r.started) {
-    console.log('[Background] ✅ 后端已拉起');
-    return { ok: true, started: true };
-  }
-  console.warn('[Background] ❌ 后端拉起失败:', r.reason);
-  return { ok: false, reason: r.reason || 'backend_start_failed' };
-}
-
-// 同步频率控制常量
-const SYNC_INTERVAL = 24 * 60 * 60 * 1000; // 24小时
 const STORAGE_KEY_LAST_SYNC = 'zentao_last_sync_time';
 
 /**
@@ -224,14 +216,6 @@ async function callBackendZentao(path, options = {}, attempt = 0) {
 }
 
 /**
- * 获取上次同步时间
- */
-async function getLastSyncTime() {
-  const result = await chrome.storage.local.get([STORAGE_KEY_LAST_SYNC]);
-  return result[STORAGE_KEY_LAST_SYNC] || 0;
-}
-
-/**
  * 更新同步时间戳
  */
 async function updateLastSyncTime() {
@@ -240,45 +224,22 @@ async function updateLastSyncTime() {
 }
 
 /**
- * 获取禅道配置
+ * 发送进度更新到已打开的 newtab 页面
+ * newtab 是扩展页面，runtime.sendMessage 直接广播即可，不需要 tabs 权限
  */
-async function fetchConfig() {
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/config`);
-    const data = await response.json();
-    return data.data || {};
-  } catch (err) {
-    console.error('[Background] 获取配置失败:', err);
-    return {};
-  }
+function sendProgressUpdate(currentStep, totalSteps, message) {
+  chrome.runtime.sendMessage({ action: 'updateProgress', currentStep, totalSteps, message })
+    .catch(() => { /* 没有打开的 newtab 页面时会报「无接收方」，忽略 */ });
 }
 
 /**
- * 检查并执行禅道同步（由 newtab 页面调用）
- */
-async function checkAndSyncZentao(force = false) {
-  console.log('[Background] ========== newtab 页面请求检查禅道同步 ==========');
-  try {
-    const config = await fetchConfig();
-    if (!config.zentao?.enabled) {
-      console.log('[Background] 禅道未启用，跳过同步');
-      return { success: false, reason: 'zentao_not_enabled' };
-    }
-    // 手动触发同步（自动同步已禁用）
-    return await syncFromZentaoViaBackend();
-  } catch (err) {
-    console.error('[Background] 检查同步条件失败:', err);
-    return { success: false, reason: err.message };
-  }
-}
-
-/**
- * 从禅道同步「我的任务」到本地（后端直连）
+ * 从禅道同步「我的任务」「我的 Bug」到本地（后端直连）
+ * 禅道是否启用由后端判断；后端没在跑时 callBackendZentao 会先自动拉起
  */
 async function syncFromZentaoViaBackend() {
-  console.log('[Background] ========== 开始后端同步我的任务 ==========');
+  console.log('[Background] ========== 开始后端同步 ==========');
   try {
-    sendProgressUpdate(1, 2, '正在从禅道拉取我的任务...');
+    sendProgressUpdate(1, 2, '正在从禅道拉取我的任务和 Bug...');
     const data = await callBackendZentao('/api/zentao/sync', { body: {} });
 
     if (!data.success) {
@@ -291,13 +252,16 @@ async function syncFromZentaoViaBackend() {
 
     const d = data.data || {};
     console.log('[Background] ✓ 后端同步完成:', d);
+    const removed = (d.removed || 0) + (d.bugs ? d.bugs.removed || 0 : 0);
 
     try {
       chrome.notifications.create({
         type: 'basic',
         iconUrl: 'icons/icon128.png',
         title: '工作助手 - 禅道同步',
-        message: `已同步我的任务：更新 ${d.updated || 0} 个，新增 ${d.added || 0} 个`
+        message: `已同步我的任务：更新 ${d.updated || 0} 个，新增 ${d.added || 0} 个` +
+          (d.bugs ? `；Bug：更新 ${d.bugs.updated || 0} 个，新增 ${d.bugs.added || 0} 个` : '') +
+          (removed ? `；禅道里已删除的 ${removed} 条已从插件移除` : '')
       });
     } catch (e) { /* 通知失败忽略 */ }
 
@@ -310,7 +274,9 @@ async function syncFromZentaoViaBackend() {
         added: d.added || 0,
         updated: d.updated || 0,
         skipped: d.skipped || 0,
-        bugsSynced: d.bugsSynced || 0
+        removed,
+        bugsSynced: d.bugs ? (d.bugs.added || 0) + (d.bugs.updated || 0) : 0,
+        bugError: d.bugError || ''
       }
     };
   } catch (err) {
@@ -498,11 +464,11 @@ async function deleteZentaoTask(params) {
 
 /** 编辑任务（后端直连） */
 async function editZentaoTask(params) {
-  const { taskId, execution, name, pri } = params;
-  console.log('[Background] 编辑禅道任务（后端直连）:', { taskId, execution, name, pri });
+  const { taskId, execution, name, pri, deadline } = params;
+  console.log('[Background] 编辑禅道任务（后端直连）:', { taskId, execution, name, pri, deadline });
   try {
     const data = await callBackendZentao('/api/zentao/task/edit', {
-      body: { taskId, execution, name, pri }
+      body: { taskId, execution, name, pri, deadline }
     });
     if (data.success) return { success: true };
     return { success: false, reason: data.message || '编辑失败' };
@@ -595,10 +561,11 @@ async function activateBugInZentao(params) {
 
 /** 解决 Bug（后端直连） */
 async function resolveBugInZentao(params) {
-  const { bugId, resolution, assignedTo, comment } = params;
+  const { bugId, resolution, assignedTo, comment, localId, attachmentIds } = params;
   try {
+    // localId + attachmentIds：随解决动作一起提交的验证截图（已暂存在本地附件区）
     return await callBackendZentao('/api/zentao/bug/resolve', {
-      body: { bugId, resolution, assignedTo, comment }
+      body: { bugId, resolution, assignedTo, comment, localId, attachmentIds }
     });
   } catch (err) {
     return { success: false, reason: err.message };
@@ -622,21 +589,6 @@ async function deleteBugInZentao(params) {
     return await callBackendZentao('/api/zentao/bug/delete', { body: { bugId } });
   } catch (err) {
     return { success: false, reason: err.message };
-  }
-}
-
-/** 禅道登录（后端直连，复用后端 .env 凭据，不打开标签页） */
-async function performZentaoLogin() {
-  console.log('[Background] 禅道登录（后端直连）');
-  try {
-    const data = await callBackendZentao('/api/zentao/login', { body: {} });
-    if (data.success) {
-      const cookies = data.data || {};
-      return { success: true, token: cookies.zentaosid || cookies.za || 'session' };
-    }
-    return { success: false, error: data.message || '登录失败' };
-  } catch (err) {
-    return { success: false, error: err.message };
   }
 }
 
@@ -683,7 +635,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 // 消息处理
 // ============================================================================
 const ACTION_HANDLERS = {
-  performZenTaoLogin: () => performZentaoLogin(),
   executeInZentaoPage: (req) => executeInZentaoPage(req),
   createKanbanTask: (req) => createKanbanTask(req),
   createKanbanCard: (req) => createKanbanCard(req),
@@ -707,27 +658,14 @@ const ACTION_HANDLERS = {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   const { action } = request;
 
-  if (action === 'checkAndSyncZentao' || action === 'manualSyncFromZentao') {
-    checkAndSyncZentao(action === 'manualSyncFromZentao')
+  if (action === 'manualSyncFromZentao') {
+    syncFromZentaoViaBackend()
       .then(sendResponse)
       .catch(err => sendResponse({ success: false, reason: err.message }));
     return true;
   }
 
-  if (action === 'getLastSyncTime') {
-    getLastSyncTime().then((t) => sendResponse({ success: true, time: t }));
-    return true;
-  }
-
   // —— 后端状态与生命周期 ——
-  if (action === 'getBackendStatus') {
-    isBackendAlive()
-      .then(async (alive) => {
-        sendResponse({ success: true, alive, url: API_BASE_URL });
-      });
-    return true;
-  }
-
   if (action === 'startBackend') {
     launchBackendViaNative()
       .then(async (r) => {
@@ -888,24 +826,3 @@ chrome.runtime.onInstalled.addListener(() => {
   bootstrapBackend();
 });
 
-/**
- * 发送进度更新到 newtab 页面（仅复用已打开页面，不新建标签页）
- */
-function sendProgressUpdate(currentStep, totalSteps, message) {
-  chrome.tabs.query({}).then(tabs => {
-    const newtabTabs = tabs.filter(tab => {
-      if (!tab.url) return false;
-      return tab.url.includes('newtab.html') || tab.url.includes('/newtab');
-    });
-    newtabTabs.forEach(tab => {
-      chrome.tabs.sendMessage(tab.id, {
-        action: 'updateProgress',
-        currentStep,
-        totalSteps,
-        message
-      }).catch(err => {
-        console.log('[Background] 发送到标签页失败:', tab.id, err.message);
-      });
-    });
-  }).catch(() => { /* 忽略 */ });
-}

@@ -26,14 +26,12 @@ function isLocalRequest(req) {
  * - native   由 Native Messaging 宿主（backend-launcher.sh）拉起
  * - launchd  由 macOS 登录项拉起
  *
- * 宿主脚本会设置 WORKASSISTANT_LAUNCHED_BY=native；
- * LaunchAgent 未设置该变量，因此「变量为空且父进程为 launchd」判定为 launchd。
+ * 由启动方通过环境变量 WORKASSISTANT_LAUNCHED_BY 声明：
+ * LaunchAgent plist 写 launchd，backend-launcher.sh 写 native；未设置即手动启动。
+ * （不能靠 ppid 推断：宿主拉起的后端会脱离宿主，ppid 同样是 1）
  */
 function detectLauncher() {
-  if (process.env.WORKASSISTANT_LAUNCHED_BY) {
-    return process.env.WORKASSISTANT_LAUNCHED_BY;
-  }
-  return process.ppid === 1 ? 'launchd' : 'manual';
+  return process.env.WORKASSISTANT_LAUNCHED_BY || 'manual';
 }
 
 function isLaunchAgentInstalled() {
@@ -56,23 +54,6 @@ function isLaunchAgentLoaded() {
   return new Promise((resolve) => {
     execFile('launchctl', ['print', `gui/${uid}/${LABEL}`], { timeout: 5000 }, (err) => {
       resolve(!err);
-    });
-  });
-}
-
-/**
- * 执行 launchctl 命令
- * @param {string[]} args
- * @returns {Promise<{ok: boolean, output: string}>}
- */
-function runLaunchctl(args) {
-  return new Promise((resolve) => {
-    execFile('launchctl', args, { timeout: 8000 }, (err, stdout, stderr) => {
-      if (err) {
-        resolve({ ok: false, output: (stderr || err.message || '').trim() });
-      } else {
-        resolve({ ok: true, output: String(stdout || '').trim() });
-      }
     });
   });
 }
@@ -116,56 +97,29 @@ router.get('/admin/status', async (req, res) => {
  * POST /api/admin/shutdown - 关闭本地服务
  * body: { disableAutoStart?: boolean }
  *
- * 安全约束：这是能杀掉服务的接口，只接受来自本机的请求。
- * Express 仅监听 localhost，但要额外校验来源，
- * 避免浏览器里任意网页通过 fetch 打过来（插件自身也会走这里，故允许扩展来源）。
+ * 来源校验由全局 requestGuard 完成（只放行本插件 / 本机命令行），这里再兜底校验 IP。
+ *
+ * 关闭方式：进程以 0 退出。LaunchAgent 的 KeepAlive 是 SuccessfulExit=false，
+ * 只对异常退出重启，所以正常退出不会被拉回来，也不需要 bootout。
+ * 旧实现先 bootout 自己所在的 job：launchd 当场 SIGTERM 本进程，响应发不出去，
+ * 而且 job 被卸载到下次登录，之后「启动」只能走浏览器宿主，后端跟着浏览器退出、日报静默丢失。
  */
 router.post('/admin/shutdown', async (req, res) => {
   try {
-    // —— 来源校验 ——
     if (!isLocalRequest(req)) {
       console.warn('[Admin] 拒绝非本机关闭请求:', req.ip);
       return res.status(403).json({ success: false, message: '仅允许本机请求' });
     }
 
     const disableAutoStart = !!(req.body && req.body.disableAutoStart);
-    const launchAgentInstalled = isLaunchAgentInstalled();
-    // bootout 只对「已加载的 job」有意义。plist 在、但 launchd 还没加载它时
-    // 执行 bootout 必然失败，然后前端会显示一句并不成立的「停用开机自启失败」——
-    // 那种情况本来就没东西需要停用，所以先判断 loaded 再决定要不要 bootout。
-    const launchAgentLoaded = launchAgentInstalled ? await isLaunchAgentLoaded() : false;
     const notes = [];
 
-    // 先停掉登录项，否则进程一退出就被 KeepAlive 立刻拉回来
-    if (launchAgentLoaded) {
-      const uid = process.getuid ? process.getuid() : 501;
-      const r = await runLaunchctl(['bootout', `gui/${uid}/${LABEL}`]);
-      if (r.ok) {
-        notes.push('已停用开机自启');
-        if (disableAutoStart) {
-          const plistPath = join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`);
-          try {
-            // 仅在用户显式要求时删除 plist 文件
-            const { unlinkSync } = await import('fs');
-            unlinkSync(plistPath);
-            notes.push('已删除开机自启配置');
-          } catch (e) {
-            notes.push(`删除登录项配置失败: ${e.message}`);
-          }
-        }
-      } else {
-        notes.push(`停用开机自启失败(不影响本次关闭): ${r.output}`);
-      }
-    } else if (launchAgentInstalled && disableAutoStart) {
-      // 已注册但未加载：无需 bootout，但仍要按用户要求把注册项移除
-      const plistPath = join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`);
-      try {
-        const { unlinkSync } = await import('fs');
-        unlinkSync(plistPath);
-        notes.push('已删除开机自启配置');
-      } catch (e) {
-        notes.push(`删除登录项配置失败: ${e.message}`);
-      }
+    // 用户显式要求「关闭并停用开机自启」时才动登录项配置（脚本在后端调用时不会 bootout 本进程）
+    if (disableAutoStart && isLaunchAgentInstalled()) {
+      const r = await runScript('uninstall-launchagent.sh');
+      notes.push(isLaunchAgentInstalled()
+        ? `停用开机自启失败: ${r.output.split('\n').pop()}`
+        : '已停用开机自启');
     }
 
     // 必须先回包，再退出 —— 否则前端会收到连接中断错误，看不到结果
@@ -175,34 +129,12 @@ router.post('/admin/shutdown', async (req, res) => {
       notes
     });
 
-    console.log('[Admin] 收到关闭请求，2 秒后退出...', notes.join(' / '));
-
-    // 留出时间让 HTTP 响应发完
-    setTimeout(() => {
-      process.exit(0);
-    }, 2000);
+    console.log('[Admin] 收到关闭请求，1 秒后退出...', notes.join(' / '));
+    setTimeout(() => process.exit(0), 1000);
   } catch (err) {
     console.error('[Admin] 关闭失败:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
-});
-
-/**
- * POST /api/admin/restart-support - 查询重启前置条件
- *
- * 插件本身拉不起后端（除非注册了 Native Messaging 宿主），
- * 这个接口用于让前端如实告诉用户重启是否可行，而不是假装成功。
- */
-router.post('/admin/restart-support', async (req, res) => {
-  res.json({
-    success: true,
-    data: {
-      // 服务已退出，只能靠外部拉起
-      viaNativeMessaging: true,
-      viaLaunchAgent: isLaunchAgentInstalled(),
-      hint: '关闭后请在设置中点击「启动服务」，或等待开机自启/手动启动'
-    }
-  });
 });
 
 /**
@@ -221,7 +153,12 @@ function runScript(scriptName) {
     execFile(
       'bash',
       [scriptPath],
-      { timeout: 20000, cwd: PROJECT_DIR },
+      {
+        timeout: 20000,
+        cwd: PROJECT_DIR,
+        // 告诉脚本「是正在运行的后端在调用你」：脚本据此绝不 bootout 本进程所在的 job
+        env: { ...process.env, WORKASSISTANT_CALLED_FROM_BACKEND: '1' }
+      },
       (err, stdout, stderr) => {
         const output = [String(stdout || ''), String(stderr || '')]
           .join('\n')

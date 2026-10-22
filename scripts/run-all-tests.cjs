@@ -17,7 +17,20 @@ const SUITES = [
   'test-progress-real',
   'test-priority-real',
   'test-optimistic',
-  'test-rollback'
+  'test-rollback',
+  'test-backend-fixes.mjs',
+  'test-task-intake.mjs',
+  'test-task-modal-flow',
+  'test-task-card-bindings',
+  'test-attachments.mjs',
+  'test-attachments-ui',
+  'test-card-actions.mjs',
+  'test-card-actions-ui',
+  'test-reports.mjs',
+  'test-reports-ui',
+  'test-ai-settings.mjs',
+  'test-zentao-truth.mjs',
+  'test-config-transfer.mjs'
 ];
 
 // 让子进程能解析到项目本地的 node_modules（jsdom / acorn）
@@ -28,7 +41,7 @@ const nodePath = [path.join(__dirname, '..', 'node_modules')].concat(
 let failed = 0;
 
 for (const name of SUITES) {
-  const file = path.join(__dirname, `${name}.cjs`);
+  const file = path.join(__dirname, /\.m?js$/.test(name) ? name : `${name}.cjs`);
   console.log(`\n${'='.repeat(56)}\n▶ ${name}\n${'='.repeat(56)}`);
 
   const res = spawnSync(process.execPath, [file], {

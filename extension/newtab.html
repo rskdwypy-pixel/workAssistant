@@ -9,7 +9,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="newtab.css">
-  <link rel="stylesheet" href="sync.css">
   <link rel="stylesheet" href="settings.css">
   <style>
     .today-work-time {
@@ -125,6 +124,11 @@
         <input type="number" id="progressInputConsumed" min="0" max="999" step="0.5" placeholder="如: 1.5"
           style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit; box-sizing: border-box;">
       </div>
+      <!-- 完成任务时附上验证截图（进度拖到 100% 时显示） -->
+      <div id="progressInputAttachments" class="input-group" style="margin-bottom: 16px;" hidden>
+        <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">附件（可选）</label>
+        <div class="att-host"></div>
+      </div>
       <div class="confirm-actions">
         <button class="btn-confirm-cancel" id="progressInputCancel">取消</button>
         <button class="btn-confirm-ok" id="progressInputOk">确定</button>
@@ -169,25 +173,6 @@
       <div class="sidebar-section">
         <h3 class="add-task-title">📝 添加任务</h3>
 
-        <!-- 执行选择器 -->
-        <div class="execution-selector-wrapper" id="executionSelectorWrapper" style="display: none;">
-          <div class="execution-selector-header">
-            <span class="execution-label">所属执行:</span>
-            <button id="refreshExecutionsBtn" class="icon-btn-mini" title="刷新执行列表">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M23 4v6h-6"></path>
-                <path d="M1 20v-6h6"></path>
-                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-              </svg>
-            </button>
-          </div>
-          <select id="executionSelect" class="execution-select">
-            <option value="" selected>自动选择 (AI分析)</option>
-            <!-- 动态填充 -->
-          </select>
-          <span class="ai-indicator" id="aiIndicator" style="display: none;">AI</span>
-        </div>
-
         <div class="add-task-form">
           <div class="task-input-wrapper">
             <textarea id="taskInput" placeholder=" " rows="3"></textarea>
@@ -204,17 +189,25 @@
         <div style="margin-top: 24px; display: flex; flex-direction: column; gap: 8px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
             <h3 style="margin: 0;">🤖 智能总结</h3>
-            <button id="promptSettingsBtn" class="icon-btn" title="提示词设置"
-              style="display: flex; align-items: center; justify-content: center; padding: 4px;">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 20h9"></path>
-                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-              </svg>
-            </button>
+            <div class="summary-head-actions">
+              <button id="viewAllHistory" class="icon-btn" title="历史报告" aria-label="历史报告">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 12a9 9 0 1 0 3-6.7L3 8"></path>
+                  <path d="M3 3v5h5"></path>
+                  <path d="M12 7v5l3 2"></path>
+                </svg>
+              </button>
+              <button id="promptSettingsBtn" class="icon-btn" title="提示词设置" aria-label="提示词设置">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 20h9"></path>
+                  <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                </svg>
+              </button>
+            </div>
           </div>
-          <button id="genDailyBtn" class="btn-secondary" data-type="daily">生成日报</button>
-          <button id="genWeeklyBtn" class="btn-secondary" data-type="weekly">生成周报</button>
-          <button id="genMonthlyBtn" class="btn-secondary" data-type="monthly">生成月报</button>
+          <button id="genDailyBtn" class="btn-secondary" data-type="daily">今日日报</button>
+          <button id="genWeeklyBtn" class="btn-secondary" data-type="weekly">本周周报</button>
+          <button id="genMonthlyBtn" class="btn-secondary" data-type="monthly">本月月报</button>
         </div>
 
         <!-- 测试按钮区域 (用于测试定时任务) -->
@@ -240,7 +233,13 @@
       <div class="mode-tabs">
         <button class="tab-btn active" data-mode="task">📋 任务</button>
         <button class="tab-btn" data-mode="bug">🐛 Bug</button>
+        <button class="tab-btn" data-mode="report">📊 报告</button>
+        <!-- 设置放在标签栏：任务、Bug、报告页都能打开 -->
+        <button id="settingsBtn" class="tab-settings-btn" type="button" title="设置">⚙️ 设置</button>
       </div>
+
+      <!-- 报告模式（内容由 reports.js 渲染） -->
+      <div class="mode-content" id="reportMode"></div>
 
       <!-- 任务模式 -->
       <div class="mode-content active" id="taskMode">
@@ -269,8 +268,7 @@
             <input type="text" id="searchInput" placeholder="搜索任务..." class="header-search">
           </div>
           <div class="task-board-right">
-            <button id="viewAllHistory" class="header-btn">📊 历史报告</button>
-            <button id="settingsBtn" class="header-btn">⚙️ 设置</button>
+            <button id="headerAddTaskBtn" class="header-btn" type="button">➕ 添加任务</button>
           </div>
         </div>
 
@@ -338,7 +336,6 @@
             </div>
             <div class="task-board-right">
               <button id="addBugBtn" class="header-btn">➕ 添加 Bug</button>
-              <button id="bugSettingsBtn" class="header-btn">⚙️ 设置</button>
             </div>
           </div>
 
@@ -389,6 +386,8 @@
         <button class="close-btn" id="closeTaskCreateModal">&times;</button>
       </div>
       <div class="modal-body">
+        <!-- 智能识别状态：弹窗先打开，识别结果回来后自动填入未修改过的字段 -->
+        <div id="taskAiStatus" class="task-ai-status" role="status" aria-live="polite" hidden></div>
         <div class="form-group" style="margin-bottom: 16px;">
           <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">所属执行</label>
           <select id="taskExecution" class="form-control" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
@@ -429,6 +428,10 @@
         <div class="form-group" style="margin-bottom: 16px;">
           <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">任务描述</label>
           <textarea id="taskDescription" rows="4" class="form-control" placeholder="详细描述任务内容..." style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical;"></textarea>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">附件</label>
+          <div id="taskAttachments"></div>
         </div>
         <div style="display: flex; gap: 12px; margin-bottom: 16px;">
           <div class="form-group" style="flex: 1;">
@@ -531,6 +534,10 @@
           <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">重现步骤 *</label>
           <textarea id="bugSteps" rows="6" class="form-control" placeholder="[步骤]&#10;1. ...&#10;&#10;[结果]&#10;...&#10;&#10;[期望]&#10;..." style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical;"></textarea>
         </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">截图 / 附件</label>
+          <div id="bugAttachments"></div>
+        </div>
         <div style="display: flex; justify-content: flex-end; align-items: center; gap: 12px;">
           <span id="bugDraftSaved" style="font-size: 12px; color: var(--text-muted); display: none; white-space: nowrap;">草稿已自动保存</span>
           <button id="submitBugBtn" class="btn-primary">提交 Bug</button>
@@ -598,6 +605,10 @@
         <div class="form-group" style="margin-bottom: 16px;">
           <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">备注</label>
           <textarea id="resolveComment" rows="3" class="form-control" placeholder="填写备注信息..." style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical;"></textarea>
+        </div>
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">验证截图 / 附件（可选）</label>
+          <div id="resolveAttachments"></div>
         </div>
         <div style="display: flex; justify-content: flex-end; gap: 8px;">
           <button id="cancelResolveBtn" class="btn-secondary">取消</button>
@@ -741,7 +752,7 @@
         <span class="sh-icon"><svg><use href="#si-sliders"/></svg></span>
         <div>
           <h3>设置</h3>
-          <div class="sh-sub">配置保存在本机，API Key 与禅道密码不会离开此设备</div>
+          <div class="sh-sub">配置保存在本机；只有「数据迁移」导出时才会带上 API Key 与禅道密码，并用你设置的口令加密</div>
         </div>
         <div class="sh-debug">
           <label class="checkbox-label" title="显示开发调试用的维护操作">
@@ -879,10 +890,36 @@
             </div>
 
             <div class="set-row">
-              <div class="sr-label">模型</div>
+              <div class="sr-label">可用模型</div>
+              <div class="sr-control">
+                <div class="row">
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="fetchAiModels" title="从接口地址读取可用模型（需要 API Key）">
+                    <span class="btn-label">获取模型列表</span>
+                  </button>
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="benchAiModels" title="给每个模型发一条任务解析请求，按实测结果推荐（会消耗少量额度）" disabled>
+                    <span class="btn-label">测速推荐</span>
+                  </button>
+                </div>
+                <span class="input-hint" id="aiModelsHint">获取后可在下面两个模型里直接选择；测速推荐会实际调用每个模型一次</span>
+                <div id="aiBenchResult" class="ai-bench" hidden></div>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">任务解析模型<small>新建任务 / Bug、执行匹配</small></div>
               <div class="sr-control">
                 <input type="text" class="set-input" id="aiModel" placeholder="glm-4-flash" spellcheck="false" style="max-width:340px">
-                <span class="input-hint" id="aiModelHint"></span>
+                <select class="set-select ai-model-select" id="aiModelSelect" data-target="aiModel" style="max-width:340px; display:none" aria-label="从获取到的模型中选择任务解析模型"></select>
+                <span class="input-hint" id="aiModelHint">要在 8 秒内返回，否则新建任务时改用本地解析：选快的模型，推理模型（先思考再回答）通常太慢</span>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">报告总结模型<small>日报 / 周报 / 月报</small></div>
+              <div class="sr-control">
+                <input type="text" class="set-input" id="aiReportModel" placeholder="留空则与任务解析模型相同" spellcheck="false" style="max-width:340px">
+                <select class="set-select ai-model-select" id="aiReportModelSelect" data-target="aiReportModel" style="max-width:340px; display:none" aria-label="从获取到的模型中选择报告总结模型"></select>
+                <span class="input-hint" id="aiReportModelHint">不赶时间，可以选推理更强但更慢的模型</span>
               </div>
             </div>
 
@@ -1006,6 +1043,23 @@
             </div>
 
             <div class="set-row">
+              <div class="sr-label">全员报告成员<small>选填</small></div>
+              <div class="sr-control">
+                <!-- 选中的账号（逗号分隔）；勾选框只是它的编辑界面，保存栏按这个值判断是否有改动 -->
+                <input type="hidden" id="reportMembers" value="">
+                <div class="report-members" id="reportMembersList" aria-label="全员报告成员">
+                  <span class="input-hint">正在读取禅道团队…</span>
+                </div>
+                <div class="row">
+                  <button type="button" class="set-btn set-btn-ghost set-btn-sm" id="reportMembersAll">全选</button>
+                  <button type="button" class="set-btn set-btn-ghost set-btn-sm" id="reportMembersNone">清空</button>
+                  <span class="input-hint" id="reportMembersHint"></span>
+                </div>
+                <span class="input-hint">报告的「全员」部分只统计勾选的人；都不勾 = 团队全员（不含管理员）。「我的」部分不受影响。修改后新生成的报告生效，已有报告点「重新生成」更新。</span>
+              </div>
+            </div>
+
+            <div class="set-row">
               <div class="sr-label">操作</div>
               <div class="sr-control">
                 <div class="row">
@@ -1079,28 +1133,40 @@
           <!-- ========== 数据迁移 ========== -->
           <section class="set-panel" id="p-data" role="tabpanel" aria-label="数据迁移">
             <h4>数据迁移</h4>
-            <p class="set-desc">导出全部配置用于换机或备份，导入后即可在新设备恢复工作环境。</p>
+            <p class="set-desc">换机或备份时导出你自己配置的部分，在新设备导入后直接可用。任务、Bug、执行、报告等能从禅道同步回来的数据不导出。</p>
 
-            <div class="set-callout warn">
-              <svg><use href="#si-alert"/></svg>
-              <div>出于安全考虑，导出的文件<b>不包含</b> API Key 与禅道密码——换机后需要重新填写这两项。</div>
+            <div class="set-callout info">
+              <svg><use href="#si-lock"/></svg>
+              <div>导出内容包含<b>禅道账号密码与 AI Key</b>，会用你设置的口令加密（AES-256-GCM）。口令不保存在任何地方，导入时需要输入同一个口令，忘了只能在原机器上重新导出。</div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">导出的内容</div>
+              <div class="sr-control">
+                <span class="input-hint">禅道地址、账号与密码、默认执行 · AI 接口地址、两类模型与 Key（含各服务商分别保存的 Key）· 提醒时间与推送地址 · 自定义提示词 · 全员报告成员 · 收藏的执行 · 设置页各服务商的地址与模型</span>
+              </div>
             </div>
 
             <div class="set-transfer">
               <div class="set-transfer-card">
                 <div class="tc-icon"><svg><use href="#si-download"/></svg></div>
-                <h5>导出配置</h5>
-                <p>保存 AI、通知、禅道、提示词等全部设置为一个 JSON 文件。</p>
+                <h5>加密导出</h5>
+                <input type="password" class="set-input" id="exportPassphrase" data-no-track placeholder="设置口令（至少 8 位）" autocomplete="new-password">
+                <input type="password" class="set-input" id="exportPassphrase2" data-no-track placeholder="再输一次口令" autocomplete="new-password">
                 <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="exportConfigBtn">
                   <svg><use href="#si-download"/></svg><span class="btn-label">导出配置文件</span>
                 </button>
               </div>
               <div class="set-transfer-card">
                 <div class="tc-icon"><svg><use href="#si-upload"/></svg></div>
-                <h5>导入配置</h5>
-                <p>选择此前导出的 JSON 文件，覆盖当前设置（Key 与密码保留为空待填）。</p>
+                <h5>解密导入</h5>
                 <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="importConfigBtn">
-                  <svg><use href="#si-upload"/></svg><span class="btn-label">选择文件导入</span>
+                  <svg><use href="#si-upload"/></svg><span class="btn-label">选择配置文件</span>
+                </button>
+                <div class="tc-file" id="importConfigInfo" hidden></div>
+                <input type="password" class="set-input" id="importPassphrase" data-no-track placeholder="导出时设置的口令" autocomplete="off" hidden>
+                <button type="button" class="set-btn set-btn-primary set-btn-sm" id="importConfirmBtn" hidden>
+                  <span class="btn-label">解密并导入</span>
                 </button>
               </div>
             </div>
@@ -1149,27 +1215,6 @@
     </div>
   </div>
 
-  <!-- 报告详情模态框 -->
-  <div id="reportModal" class="modal">
-    <div class="modal-content report-modal" style="max-width: 600px;">
-      <div class="modal-header">
-        <h3 id="reportModalTitle">智能汇报</h3>
-        <span class="close-btn" id="closeReportModal">&times;</span>
-      </div>
-      <div class="modal-body" id="reportModalBody" style="max-height: 400px; overflow-y: auto;">
-        <!-- 报告内容将由JS加载 -->
-      </div>
-      <div class="modal-footer"
-        style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #1c2128; padding-top: 16px; margin-top: 16px;">
-        <button id="deleteReportBtn" class="btn-danger">删除此报告</button>
-        <div style="display: flex; gap: 8px;">
-          <button id="regenReportBtn" class="btn-secondary">重新生成</button>
-          <button id="pushReportBtn" class="btn-primary">推送通知</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- 设置时间模态框 -->
   <div id="datetimeModal" class="modal">
     <div class="modal-content" style="max-width: 320px;">
@@ -1192,12 +1237,10 @@
     </div>
   </div>
 
-  <!-- 数据备份功能已下线：backupManager.js / storage-webdav.js 不再引入 -->
-  <script src="sync.js"></script>
-  <script src="sync-ui.js"></script>
-
-  <!-- 禅道标签页和按钮状态管理器 -->
-  <script src="zentaoTabManager.js"></script>
+  <!-- 任务 / Bug 附件 -->
+  <script src="attachments.js"></script>
+  <script src="reports.js"></script>
+  <!-- 按钮状态管理器 -->
   <script src="buttonStateManager.js"></script>
   <!-- 乐观 UI：禅道操作先改界面，失败再回退 -->
   <script src="optimistic.js"></script>

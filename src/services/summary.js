@@ -28,6 +28,15 @@ async function fridayWeeklySummary() {
 
     console.log('📊 执行周五周报...');
 
+    // 启用禅道：生成报告页的周报（我的 + 全员），推送「我的」部分
+    if (config.zentao.enabled) {
+      const { runWeeklyReport } = await import('./reportCenter.js');
+      const r = await runWeeklyReport();
+      if (r) await sendSystemNotification('📊 周报已生成', `本周工时 ${r.mine.hours}h，全员 ${r.team.totalHours}h`);
+      console.log('✅ 周五周报完成（报告页）');
+      return;
+    }
+
     // 生成周报并自动推送
     const report = await generateReport('weekly', true);
 
@@ -51,6 +60,15 @@ async function eveningSummary() {
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
     console.log('🌙 执行晚间日报...', `isWeekend=${isWeekend}`);
+
+    // 启用禅道：生成报告页的日报（周末仅在有人有工作记录时；当月最后一个工作日顺带生成月报）
+    if (config.zentao.enabled) {
+      const { runEveningReports } = await import('./reportCenter.js');
+      const r = await runEveningReports(now);
+      if (r) await sendSystemNotification('🌙 日报已生成', `今日工时 ${r.mine.hours}h，全员 ${r.team.totalHours}h（${r.team.activeCount}/${r.team.members.length} 人）`);
+      console.log('✅ 晚间日报完成（报告页）');
+      return;
+    }
 
     // 如果是周末，检查今天是否有任务更新
     if (isWeekend) {

@@ -11,28 +11,19 @@
   },
   "permissions": [
     "contextMenus",
-    "activeTab",
-    "cookies",
-    "tabs",
-    "scripting",
     "notifications",
     "storage",
-    "nativeMessaging"
+    "nativeMessaging",
+    "cookies"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "http://127.0.0.1:3721/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
-        "content.js"
-      ]
-    }
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
   ]
 }

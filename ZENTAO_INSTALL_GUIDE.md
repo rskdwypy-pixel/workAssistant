@@ -29,12 +29,12 @@
 
 #### 2. 输入禅道地址
 ```
-禅道地址: http://10.128.1.8:8088
+禅道地址: http://zentao.example.com:8088
 ```
 
 **格式要求：**
 - 必须是完整的 URL，包含协议（http 或 https）
-- 示例：`http://10.128.1.8:8088` 或 `https://zentao.example.com`
+- 示例：`http://zentao.example.com:8088` 或 `https://zentao.example.com`
 
 **如何获取禅道地址：**
 - 联系您的禅道管理员
@@ -153,13 +153,13 @@
 把内网地址也塞进代理隧道 —— 代理当然连不到你公司的内网，于是超时失败。
 
 本插件会在这种情况下明确提示：
-`无法连接禅道 http://10.128.1.8:8088（网络不可达：请确认已连内网 / VPN，以及地址与端口是否正确）`
+`无法连接禅道 http://zentao.example.com:8088（网络不可达：请确认已连内网 / VPN，以及地址与端口是否正确）`
 
 **一分钟判断：**
 
 ```bash
 # 看禅道地址走的是哪个网卡 / 网关
-route -n get 10.128.1.8
+route -n get zentao.example.com
 ```
 
 如果输出里 `interface` 是 `utun*`、`gateway` 是 `198.18.0.1`（Clash 系工具的 fake-IP 网关），

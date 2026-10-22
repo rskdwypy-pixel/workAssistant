@@ -69,9 +69,11 @@
 /* 设置弹窗：920px 面板 + 暖调遮罩 */
 #settingsModal { background: rgba(42, 39, 36, 0.32); }
 
+/* 固定尺寸：切换左侧分组时弹窗不随内容多少变大变小，内容在右侧区域内滚动 */
 .settings-modal-content {
   max-width: 920px;
   width: 94%;
+  height: min(720px, 88vh);
   max-height: 88vh;
   border: 1px solid var(--border-warm);
   color: var(--ink);
@@ -448,6 +450,11 @@
 .set-transfer-card .tc-icon svg { width: 17px; height: 17px; }
 .set-transfer-card h5 { font-size: 13px; font-weight: 700; margin-bottom: var(--sp-2); }
 .set-transfer-card p { font-size: 12px; color: var(--text-2); line-height: 1.7; margin-bottom: var(--sp-4); }
+.set-transfer-card { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); }
+.set-transfer-card .set-input { width: 100%; }
+.set-transfer-card [hidden] { display: none !important; }
+.set-transfer-card .tc-file { font-size: 12px; color: var(--text-2); line-height: 1.7; word-break: break-all; }
+.set-transfer-card .tc-file b { color: var(--ink); }
 
 /* ------------------------------------------------------------------ 底部保存栏 */
 .settings-modal-content .settings-footer {
@@ -483,7 +490,7 @@ body.debug-on .debug-only.block { display: block; }
 
 /* ------------------------------------------------------------------ 响应式 */
 @media (max-width: 760px) {
-  .settings-modal-content { width: 96%; max-width: 100%; max-height: 92vh; }
+  .settings-modal-content { width: 96%; max-width: 100%; height: 92vh; max-height: 92vh; }
   .settings-modal-content .settings-layout { grid-template-columns: 1fr; }
   .settings-modal-content .settings-nav {
     flex-direction: row;
@@ -509,3 +516,38 @@ body.debug-on .debug-only.block { display: block; }
   .settings-modal-content .status-dot.online::after { animation: none; }
   .settings-modal-content .btn-spinner { animation-duration: 1.6s; }
 }
+
+/* 通用基础样式（原 sync.css 中仍在使用的部分；设置弹窗内由上方 .settings-modal-content 规则覆盖） */
+.checkbox-label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.checkbox-label input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+.test-result { margin-left: 12px; font-size: 12px; }
+.test-result.success { color: #238636; }
+.test-result.error { color: #f85149; }
+
+/* ---------- AI 模型：测速推荐 ---------- */
+.ai-model-select { margin-top: var(--sp-2); }
+.ai-bench { margin-top: var(--sp-3); border: 1px solid var(--border-warm); border-radius: var(--r-card); padding: var(--sp-3); background: var(--bg-sunken-warm); font-size: 12px; color: var(--ink); max-width: 560px; }
+.ai-bench-wait { color: var(--text-2); }
+.ai-bench-rec { margin-bottom: var(--sp-2); line-height: 2; }
+.ai-bench-pick { border: 1px solid var(--accent); background: var(--accent-soft-bg); color: var(--accent-soft-ink); border-radius: 999px; padding: 1px 10px; margin: 0 4px 0 0; font-size: 12px; cursor: pointer; }
+.ai-bench-pick:hover { background: var(--accent); color: var(--accent-on); }
+.ai-bench-pick:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.ai-bench-none { color: var(--text-muted-warm); }
+.ai-bench-table { width: 100%; border-collapse: collapse; margin-top: var(--sp-2); background: var(--bg-surface-warm); }
+.ai-bench-table th, .ai-bench-table td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border-warm); }
+.ai-bench-table th { color: var(--text-2); font-weight: 500; }
+.ai-bench-tag { font-size: 10px; color: var(--st-warning); border: 1px solid currentColor; border-radius: 4px; padding: 0 3px; }
+.ai-bench-note { margin-top: var(--sp-2); color: var(--text-muted-warm); line-height: 1.6; }
+
+/* ------------------------------------------------------------ 全员报告成员 */
+.report-members { display: flex; flex-wrap: wrap; gap: 6px; max-height: 156px; overflow-y: auto; }
+.report-member {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+  border: 1px solid var(--border-warm); border-radius: 999px; background: var(--bg-surface-warm);
+  font-size: 13px; cursor: pointer; user-select: none;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.report-member:hover { border-color: var(--border-strong-warm); }
+.report-member input { margin: 0; accent-color: var(--accent); }
+.report-member:has(input:checked) { border-color: var(--accent); background: var(--accent-soft-bg); color: var(--accent-soft-ink); }
+.report-member-role { color: var(--text-muted-warm); font-size: 11px; }

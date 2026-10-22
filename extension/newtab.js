@@ -1,5 +1,6 @@
 // API配置
-let API_BASE_URL = 'http://localhost:3721';
+// 后端只监听 IPv4，且扩展只申请了 127.0.0.1 的主机权限，统一用 127.0.0.1
+let API_BASE_URL = 'http://127.0.0.1:3721';
 
 // 当前状态
 let currentYear, currentMonth;
@@ -21,7 +22,6 @@ let todayWorkHours = 0; // 今日已工作时长（小时）
 const DAILY_WORK_HOURS = 8; // 每日标准工时
 
 // ==================== 禅道同步状态 ====================
-const SYNC_INTERVAL = 24 * 60 * 60 * 1000; // 24小时
 const STORAGE_KEY_LAST_SYNC = 'zentao_last_sync_time';
 
 const ZentaoSync = {
@@ -145,7 +145,10 @@ const ZentaoSync = {
         const detail = (added || updated)
           ? `新增 ${added} 个，更新 ${updated} 个`
           : `共 ${total} 条，无变化`;
-        Toast.success(`禅道同步完成：${detail}${bugs ? `，Bug ${bugs} 个` : ''}`);
+        Toast.success(`禅道同步完成：${detail}${bugs ? `，Bug 变更 ${bugs} 个` : ''}`);
+        if (d.bugError) {
+          Toast.warning(`Bug 同步失败：${d.bugError}`, 8000);
+        }
 
         // 重新加载任务列表
         await loadTasks();
@@ -212,34 +215,220 @@ const ZentaoSync = {
 };
 
 /**
- * 在 newtab 页面打开时检查并执行禅道同步
+ * 为「会被重复初始化的组件」提供可撤销的监听作用域
+ *
+ * 弹窗里的下拉组件每次打开都会重新初始化，而 display、document 这些元素是常驻的：
+ * 直接 addEventListener 会越绑越多（绑两次 = 点一下开、又立刻关，下拉打不开）。
+ * 用法：const signal = resetListenerScope(container); el.addEventListener(type, fn, { signal });
+ * 再次调用时会撤掉上一次通过该 signal 绑定的全部监听。
+ *
+ * @param {Element} owner - 常驻的宿主元素（用于挂载 AbortController）
+ * @returns {AbortSignal}
  */
-async function checkAndSyncZentaoOnNewTab() {
-  console.log('[NewTab] ========== newtab 页面打开，检查禅道同步 ==========');
-
-  // 【已注释】禁用自动同步逻辑，只允许手动同步
-  // try {
-  //   // 异步调用 background.js 检查同步
-  //   const response = await chrome.runtime.sendMessage({
-  //     action: 'checkAndSyncZentao',
-  //     force: false  // 不强制，遵守24小时限制
-  //   });
-
-  //   if (response && response.success) {
-  //     console.log('[NewTab] ✓ 禅道同步完成');
-  //     // 重新加载任务列表以显示同步的数据
-  //     await loadTasks();
-  //   } else if (response && response.reason === 'too_soon') {
-  //     console.log('[NewTab] 距离上次同步不足24小时，跳过自动同步');
-  //     console.log('[NewTab] 还需等待:', response.hoursUntilNextSync, '小时');
-  //   } else if (response && response.reason === 'zentao_not_enabled') {
-  //     console.log('[NewTab] 禅道未启用，跳过同步');
-  //   }
-  // } catch (err) {
-  //   console.error('[NewTab] 禅道同步检查失败:', err);
-  // }
-  console.log('[NewTab] 自动同步已禁用，仅允许手动同步');
+function resetListenerScope(owner) {
+  if (owner._listenerScope) owner._listenerScope.abort();
+  owner._listenerScope = new AbortController();
+  return owner._listenerScope.signal;
 }
+
+/**
+ * 在浏览器里打开禅道任务 / Bug 页面，必要时自动登录
+ *
+ * 流程：
+ *   1. 申请禅道地址的访问权限（首次会弹浏览器授权框；必须在点击的用户手势内调用）
+ *   2. 读浏览器里现有的禅道会话，交给后端检查是否有效
+ *   3. 失效则后端用配置的账号单独登录一次，插件把会话 cookie 写进浏览器
+ *   4. 打开页面（看板任务由后端换成 onlybody 详情页）
+ * 没授权时照常打开，需要在禅道页面手动登录。
+ *
+ * @param {task|bug} type
+ * @param {string|number} zentaoId
+ */
+async function openInZentao(type, zentaoId) {
+  const cachedBase = ZentaoBrowserClient.getBaseUrl();
+  let granted = false;
+  if (cachedBase && chrome.permissions) {
+    const origins = [`${new URL(cachedBase).origin}/*`];
+    try {
+      granted = await chrome.permissions.contains({ origins }) || await chrome.permissions.request({ origins });
+    } catch (err) {
+      console.warn('[OpenZentao] 申请禅道地址访问权限失败:', err.message);
+    }
+  }
+
+  try {
+    let browserSid = null;
+    if (granted && chrome.cookies) {
+      const c = await chrome.cookies.get({ url: `${cachedBase}/zentao/`, name: 'zentaosid' }).catch(() => null);
+      browserSid = c ? c.value : null;
+    }
+    const resp = await fetch(`${API_BASE_URL}/api/zentao/open`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, id: String(zentaoId), browserSid })
+    });
+    const result = await resp.json();
+    if (!result.success) throw new Error(result.message || '打开失败');
+
+    if (Array.isArray(result.cookies) && result.cookies.length) {
+      if (granted && chrome.cookies) {
+        for (const c of result.cookies) {
+          await chrome.cookies.set({ url: `${result.base}${c.path}`, name: c.name, value: c.value, path: c.path, httpOnly: !!c.httpOnly });
+        }
+      } else {
+        Toast.info('未授权插件访问禅道地址，需要在打开的禅道页面里手动登录', 5000);
+      }
+    }
+    chrome.tabs.create({ url: result.url });
+  } catch (err) {
+    console.warn('[OpenZentao] 打开禅道页面失败:', err.message);
+    Toast.error(`打开禅道页面失败：${err.message}`);
+  }
+}
+
+/**
+ * 修改任务所属执行的选择浮层（卡片上点执行标签打开）
+ *
+ * 未同步的任务：任选，只改本地。
+ * 已同步的任务：禅道只允许在同一项目的执行之间直接移动；其他执行标「需重建」，
+ * 选中后二次确认，在新执行里重建任务并取消旧任务。
+ */
+const ExecutionPicker = {
+  _close: null,
+  _busy: false,
+
+  async open(task, anchor) {
+    if (this._close) this._close();
+    const pop = document.createElement('div');
+    pop.className = 'exec-picker';
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-label', '修改所属执行');
+    pop.innerHTML = `
+      <div class="exec-picker-head">修改所属执行${task.zentaoId ? ` <span class="exec-picker-sub">任务 #${escapeHtml(task.zentaoId)}</span>` : ''}</div>
+      <input type="search" class="exec-picker-search" placeholder="搜索执行或项目" aria-label="搜索执行或项目">
+      <div class="exec-picker-list" role="listbox"><div class="exec-picker-empty">加载中…</div></div>`;
+    this._close = placePopover(pop, anchor, () => { this._close = null; });
+    const listEl = pop.querySelector('.exec-picker-list');
+    const search = pop.querySelector('.exec-picker-search');
+    setTimeout(() => search.focus(), 0);
+
+    let executions = [];
+    let favorites = new Set();
+    let allowed = null;
+    try {
+      const [execResp, favResp, optResp] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/executions`).then(r => r.json()),
+        fetch(`${API_BASE_URL}/api/executions/favorites`).then(r => r.json()).catch(() => ({})),
+        fetch(`${API_BASE_URL}/api/tasks/${encodeURIComponent(task.id)}/execution-options`).then(r => r.json())
+      ]);
+      executions = (execResp && execResp.data) || [];
+      favorites = new Set(((favResp && favResp.data) || []).map(e => String(e.id)));
+      if (!optResp.success) throw new Error(optResp.message || '读取可选执行失败');
+      allowed = optResp.allowed ? new Set(optResp.allowed.map(String)) : null;
+    } catch (err) {
+      listEl.innerHTML = `<div class="exec-picker-empty">加载失败：${escapeHtml(err.message)}</div>`;
+      return;
+    }
+
+    const current = String(task.executionId || '');
+    const inactive = new Set(['closed', 'cancel', '已关闭', '已取消']);
+    const candidates = executions.filter(e => !inactive.has(e.status) || String(e.id) === current);
+
+    const render = (keyword) => {
+      const kw = String(keyword || '').trim().toLowerCase();
+      const match = (e) => !kw || `${e.name} ${e.projectName || ''}`.toLowerCase().includes(kw);
+      const groups = new Map();
+      const favs = candidates.filter(e => favorites.has(String(e.id)) && match(e));
+      if (favs.length) groups.set('★ 收藏', favs);
+      candidates.filter(match).forEach(e => {
+        const g = e.projectName || '未分组';
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g).push(e);
+      });
+      if (!groups.size) {
+        listEl.innerHTML = '<div class="exec-picker-empty">没有匹配的执行</div>';
+        return;
+      }
+      listEl.innerHTML = [...groups.entries()].map(([g, list]) => `
+        <div class="exec-picker-group">${escapeHtml(g)}</div>
+        ${list.map(e => {
+          const id = String(e.id);
+          const isCurrent = id === current;
+          const tag = isCurrent ? '当前' : (allowed && !allowed.has(id) ? '需重建' : (allowed ? '直接移动' : ''));
+          return `<button type="button" class="exec-picker-item${isCurrent ? ' is-current' : ''}" role="option" data-exec-id="${escapeHtml(id)}" ${isCurrent ? 'aria-selected="true" disabled' : ''}>
+            <span class="exec-picker-name">${escapeHtml(e.name)}${e.status && inactive.has(e.status) ? '（已关闭）' : ''}</span>
+            ${tag ? `<span class="exec-picker-tag tag-${tag === '需重建' ? 'rebuild' : tag === '当前' ? 'current' : 'move'}">${tag}</span>` : ''}
+          </button>`;
+        }).join('')}`).join('');
+      listEl.querySelectorAll('.exec-picker-item:not([disabled])').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const exec = candidates.find(e => String(e.id) === btn.dataset.execId);
+          if (this._close) this._close();
+          this.choose(task, exec);
+        });
+      });
+    };
+    render('');
+    search.addEventListener('input', () => render(search.value));
+  },
+
+  async choose(task, exec) {
+    if (!exec || this._busy) return;
+    this._busy = true;
+    const post = (rebuild) => fetch(`${API_BASE_URL}/api/tasks/${encodeURIComponent(task.id)}/execution`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ executionId: exec.id, rebuild })
+    }).then(r => r.json());
+    try {
+      let result = await post(false);
+      if (result.needRebuild) {
+        const ok = await Confirm.show(
+          '在新执行中重建任务？',
+          `禅道不支持把任务移到其他项目。将在「${exec.name}」新建任务，复制标题、描述、优先级、截止日期、剩余工时和附件；` +
+          `旧任务 #${task.zentaoId} 会在禅道里取消。\n\n注意：旧任务的工时记录和操作历史不会带过去。`,
+          '重建',
+          '取消'
+        );
+        if (!ok) return;
+        ProgressToast.show(`正在「${exec.name}」重建任务…`);
+        try {
+          result = await post(true);
+        } finally {
+          ProgressToast.hide();
+        }
+      }
+      if (!result.success) {
+        Toast.error(`修改所属执行失败：${result.message || '未知错误'}`, 6000);
+        return;
+      }
+      if (result.mode === 'unchanged') return;
+      Toast.success(result.message);
+      (result.warnings || []).forEach(w => Toast.warning(w, 8000));
+      await loadTasks();
+    } catch (err) {
+      Toast.error(`修改所属执行失败：${err.message}`);
+    } finally {
+      this._busy = false;
+    }
+  }
+};
+
+// 卡片上的执行标签：全局委托一次（卡片频繁重建，不逐个绑定）
+document.addEventListener('click', (e) => {
+  const btn = e.target && e.target.closest && e.target.closest('[data-exec-task]');
+  if (!btn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const task = (typeof allTasks !== 'undefined' ? allTasks : []).find(t => String(t.id) === btn.dataset.execTask);
+  if (task) ExecutionPicker.open(task, btn);
+}, true);
+
+// 附件变化（角标上点了重试等）后刷新任务与 Bug 列表
+window.onAttachmentsChanged = () => {
+  loadTasks().catch(() => { });
+  if (typeof BugManager !== 'undefined' && BugManager.loadBugs) BugManager.loadBugs();
+};
 
 // ==================== Toast 通知系统 ====================
 const Toast = {
@@ -431,13 +620,12 @@ const Confirm = {
     this.messageEl = document.getElementById('confirmMessage');
     this.cancelBtn = document.getElementById('confirmCancel');
     this.okBtn = document.getElementById('confirmOk');
-
-    // 默认关闭事件
-    this.cancelBtn.addEventListener('click', () => this.hide(false));
   },
 
   show(title, message, okText = '确定', cancelText = '取消') {
     if (!this.dialog) this.init();
+    // 上一次还没结算（例如被新的确认顶掉）：先按取消处理，再显示这一次
+    if (this._settle) this._settle(false);
 
     this.titleEl.textContent = title;
     this.messageEl.textContent = message;
@@ -446,22 +634,24 @@ const Confirm = {
 
     this.dialog.classList.add('active');
 
+    // 每次 show 的确定 / 取消 / 遮罩监听只属于这一次，任一出口都会全部撤掉并只结算一次。
+    // 旧实现取消按钮不结算 Promise，且确定按钮的监听残留：取消一次删除 A，
+    // 之后在另一次确认里点「确定」删除 B，残留的监听会让 A 也被删除。
     return new Promise((resolve) => {
-      const handleOk = () => {
-        this.hide(false);
-        this.okBtn.removeEventListener('click', handleOk);
-        resolve(true);
+      const controller = new AbortController();
+      const settle = (value) => {
+        if (this._settle !== settle) return;
+        this._settle = null;
+        controller.abort();
+        this.hide();
+        resolve(value);
       };
-
-      this.okBtn.addEventListener('click', handleOk);
-
+      this._settle = settle;
+      const { signal } = controller;
+      this.okBtn.addEventListener('click', () => settle(true), { signal });
+      this.cancelBtn.addEventListener('click', () => settle(false), { signal });
       // 点击遮罩关闭 = 取消
-      this.dialog.addEventListener('click', (e) => {
-        if (e.target === this.dialog) {
-          this.hide(false);
-          resolve(false);
-        }
-      }, { once: true });
+      this.dialog.addEventListener('click', (e) => { if (e.target === this.dialog) settle(false); }, { signal });
     });
   },
 
@@ -473,6 +663,7 @@ const Confirm = {
 // ==================== 进度更新输入对话框 ====================
 const ProgressInputDialog = {
   dialog: null,
+  picker: null,
 
   init() {
     this.dialog = document.getElementById('progressInputDialog');
@@ -482,13 +673,18 @@ const ProgressInputDialog = {
     this.consumedInput = document.getElementById('progressInputConsumed');
     this.cancelBtn = document.getElementById('progressInputCancel');
     this.okBtn = document.getElementById('progressInputOk');
-
-    // 默认关闭事件
-    this.cancelBtn.addEventListener('click', () => this.hide(null));
+    this.attachmentsBox = document.getElementById('progressInputAttachments');
   },
 
-  show(title, message, placeholderWork = '', placeholderConsumed = '', defaultWork = '', defaultConsumed = 0) {
+  /**
+   * @param {Object} [options]
+   * @param {boolean} [options.allowAttachments] - 显示附件区（完成任务时附上验证截图）
+   * @returns {Promise<{work:string, consumed:number, attachments:Array}|null>} 取消返回 null
+   */
+  show(title, message, placeholderWork = '', placeholderConsumed = '', defaultWork = '', defaultConsumed = 0, options = {}) {
     if (!this.dialog) this.init();
+    // 上一次还没结算：按取消处理
+    if (this._settle) this._settle(null);
 
     this.titleEl.textContent = title;
     this.messageEl.textContent = message;
@@ -500,12 +696,37 @@ const ProgressInputDialog = {
     const workTimePlaceholder = getWorkTimePlaceholder();
     this.consumedInput.placeholder = placeholderConsumed || workTimePlaceholder;
 
+    const withAttachments = !!(options.allowAttachments && this.attachmentsBox && typeof AttachmentPicker !== 'undefined');
+    if (this.attachmentsBox) this.attachmentsBox.hidden = !withAttachments;
+    if (withAttachments) {
+      if (!this.picker) {
+        this.picker = new AttachmentPicker(this.attachmentsBox.querySelector('.att-host'), {
+          hint: '可附上验证截图、录屏等，提交后上传到禅道（不插入任务描述）'
+        });
+      }
+      this.picker.clear();
+      this.picker.bindPaste(this.dialog);
+    }
+
     this.dialog.classList.add('active');
 
     // 聚焦到工作内容输入框
     setTimeout(() => this.workInput.focus(), 100);
 
+    // 确定 / 取消 / 遮罩 / 回车的监听只属于这一次，任一出口全部撤掉并只结算一次。
+    // 旧实现「取消」按钮不结算 Promise，调用方一直等待，拖动的进度也不会回滚。
     return new Promise((resolve) => {
+      const controller = new AbortController();
+      const { signal } = controller;
+      const settle = (value) => {
+        if (this._settle !== settle) return;
+        this._settle = null;
+        controller.abort();
+        this.hide();
+        resolve(value);
+      };
+      this._settle = settle;
+
       const handleOk = () => {
         const work = this.workInput.value.trim();
         const consumed = this.consumedInput.value.trim();
@@ -518,15 +739,17 @@ const ProgressInputDialog = {
         }
 
         // 只有当工作内容和消耗工时都没有填写时，才使用默认值
-        const finalWork = work || defaultWork;
-        const finalConsumed = consumed ? parseFloat(consumed) : defaultConsumed;
-
-        this.hide();
-        this.okBtn.removeEventListener('click', handleOk);
-        resolve({ work: finalWork, consumed: finalConsumed });
+        const attachments = withAttachments ? this.picker.getItems() : [];
+        if (withAttachments) this.picker.clear();
+        settle({
+          work: work || defaultWork,
+          consumed: consumed ? parseFloat(consumed) : defaultConsumed,
+          attachments
+        });
       };
 
-      this.okBtn.addEventListener('click', handleOk);
+      this.okBtn.addEventListener('click', handleOk, { signal });
+      this.cancelBtn.addEventListener('click', () => settle(null), { signal });
 
       // 支持回车提交（输入法上屏时除外）
       const handleKeyPress = (e) => {
@@ -535,37 +758,17 @@ const ProgressInputDialog = {
           handleOk();
         }
       };
-      this.workInput.addEventListener('keydown', handleKeyPress);
-      this.consumedInput.addEventListener('keydown', handleKeyPress);
+      this.workInput.addEventListener('keydown', handleKeyPress, { signal });
+      this.consumedInput.addEventListener('keydown', handleKeyPress, { signal });
 
       // 点击遮罩关闭 = 取消
-      const handleMaskClick = (e) => {
-        if (e.target === this.dialog) {
-          this.hide();
-          this.dialog.removeEventListener('click', handleMaskClick);
-          this.workInput.removeEventListener('keydown', handleKeyPress);
-          this.consumedInput.removeEventListener('keydown', handleKeyPress);
-          resolve(null);
-        }
-      };
-      this.dialog.addEventListener('click', handleMaskClick);
-
-      // 清理函数
-      this._cleanup = () => {
-        this.okBtn.removeEventListener('click', handleOk);
-        this.workInput.removeEventListener('keydown', handleKeyPress);
-        this.consumedInput.removeEventListener('keydown', handleKeyPress);
-        this.dialog.removeEventListener('click', handleMaskClick);
-      };
+      this.dialog.addEventListener('click', (e) => { if (e.target === this.dialog) settle(null); }, { signal });
     });
   },
 
   hide() {
     this.dialog.classList.remove('active');
-    if (this._cleanup) {
-      this._cleanup();
-      this._cleanup = null;
-    }
+    if (this.picker) this.picker.clear();
   }
 };
 
@@ -796,12 +999,6 @@ function getTodayWorkTimeReport() {
   }
 }
 
-// 报告状态：存储最后一次生成的报告ID
-let lastReports = {
-  daily: null,
-  weekly: null,
-  monthly: null
-};
 
 // ==================== 进度条拖拽处理 ====================
 
@@ -936,6 +1133,8 @@ function setupProgressDragEvents() {
 document.addEventListener('DOMContentLoaded', async () => {
   // 初始化 ZentaoBrowserClient（从缓存加载用户列表）
   ZentaoBrowserClient.init();
+  // 预取禅道地址：点卡片上的禅道 ID 时要在用户手势内同步申请访问权限，来不及再请求配置
+  ZentaoBrowserClient.initConfig().catch(() => { });
 
   // 初始化今日工时
   initTodayWorkTime();
@@ -1010,14 +1209,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 加载保存的配置
   const savedConfig = localStorage.getItem('workAssistantConfig');
   if (savedConfig) {
-    const config = JSON.parse(savedConfig);
-    // 使用后端服务地址（不要与AI API地址混淆）
-    if (config.backendUrl) {
-      API_BASE_URL = config.backendUrl;
-    } else if (config.apiBaseUrl && !config.apiBaseUrl.includes('open.bigmodel.cn')) {
-      // 兼容旧配置：只有在不包含AI API地址时才使用
-      API_BASE_URL = config.apiBaseUrl;
-    }
+    API_BASE_URL = resolveBackendUrl(JSON.parse(savedConfig), API_BASE_URL);
   }
 
   // 初始化日历
@@ -1031,26 +1223,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadHistoryPreview();
   await checkTodayReports();
 
-  // 自动登录禅道（如果已配置）
-  ZentaoBrowserClient.autoInit().catch(err => {
-    console.log('[ZentaoBrowser] 自动登录跳过:', err.message);
-  });
-
-  // 数据备份功能已下线（设置页入口已移除）。
-// 如需恢复：恢复 newtab.html 中的备份区块 + backupManager/storage-webdav 脚本引入，
-// 并把下面的 init 调用加回来。
-
   // 初始化任务弹框
   await initTaskModal();
 
   // 初始化禅道同步状态显示
   ZentaoSync.init().catch(err => {
     console.error('[ZentaoSync] 初始化失败:', err);
-  });
-
-  // 检查并执行禅道同步（在 newtab 页面打开时）
-  checkAndSyncZentaoOnNewTab().catch(err => {
-    console.error('[NewTab] 禅道同步检查失败:', err);
   });
 
   // 绑定事件
@@ -1069,187 +1247,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }, 60 * 1000); // 每分钟检查一次
 });
 
-// 绑定事件
-function bindEvents() {
-  bindReportEvents();
-  bindDragAndDrop();
-
-  // 进度条拖拽全局事件
-  setupProgressDragEvents();
-  // 添加任务
-  document.getElementById('addTaskBtn').addEventListener('click', addTask);
-  document.getElementById('taskInput').addEventListener('keydown', async function (e) {
-    if (e.key === 'Enter') {
-      // 正在使用输入法拼音选词的时候按下回车不应该触发添加
-      if (e.isComposing || e.keyCode === 229) {
-        return;
-      }
-
-      if (!e.shiftKey) {
-        e.preventDefault();
-        // 根据 TabSwitcher 的当前模式决定调用哪个函数
-        if (TabSwitcher.currentMode === 'bug') {
-          // Bug 模式：获取执行选择和内容
-          const executionSelect = document.getElementById('executionSelect');
-          const selectedExecutionId = executionSelect ? executionSelect.value : null;
-          const content = this.value.trim();
-
-          // 必须输入内容
-          if (!content) {
-            Toast.error('请输入 Bug 描述');
-            return;
-          }
-
-          // 获取执行名称和项目ID（如果选择了具体执行）
-          let executionName = '';
-          let projectId = '';
-          if (selectedExecutionId && executionSelect.selectedIndex >= 0) {
-            executionName = executionSelect.options[executionSelect.selectedIndex]?.text || '';
-            // 从 ExecutionSelector 的收藏列表中查找 projectId
-            if (typeof ExecutionSelector !== 'undefined' && ExecutionSelector.favoriteExecutions) {
-              const exec = ExecutionSelector.favoriteExecutions.find(e => e.id === selectedExecutionId);
-              if (exec) {
-                projectId = exec.projectId || '';
-                console.log('[Bug模式] 从执行选择器获取项目ID:', projectId, '执行:', exec.name);
-              }
-            }
-          }
-
-          console.log('[Bug模式] 准备提交 - executionId:', selectedExecutionId, 'projectId:', projectId, 'content:', content.substring(0, 50));
-
-          // 调用 BugManager 打开弹窗并预填信息
-          // 如果 selectedExecutionId 为空，AI 会自动匹配执行
-          console.log('[Bug模式] BugManager 对象:', typeof BugManager, 'quickSubmit 方法:', typeof BugManager?.quickSubmit);
-          if (typeof BugManager !== 'undefined' && BugManager.quickSubmit) {
-            console.log('[Bug模式] 调用 quickSubmit...');
-            await BugManager.quickSubmit(selectedExecutionId, executionName, projectId, content);
-            this.value = ''; // 清空输入框
-            console.log('[Bug模式] quickSubmit 完成');
-          } else {
-            console.error('[Bug模式] BugManager 或 quickSubmit 不可用');
-          }
-        } else {
-          // 任务模式：添加任务
-          addTask();
-        }
-      } else {
-        // 明确实现 Shift+Enter 换行功能
-        e.preventDefault();
-        const start = this.selectionStart;
-        const end = this.selectionEnd;
-        const val = this.value;
-        this.value = val.substring(0, start) + '\n' + val.substring(end);
-        this.selectionStart = this.selectionEnd = start + 1;
-      }
-    }
-  });
-
-  // 搜索
-  document.getElementById('searchInput').addEventListener('input', debounce(handleSearch, 300));
-
-  // 全局键盘事件：删除任务
-  document.addEventListener('keydown', async (e) => {
-    // 如果焦点在输入框、textarea 或模态框中，不处理
-    const target = e.target;
-    if (target.matches('input, textarea, [contenteditable]') ||
-        target.closest('.modal') || target.closest('.confirm-dialog')) {
-      return;
-    }
-
-    // Delete 或 Backspace 键：弹出确认删除对话框
-    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedTaskId) {
-      e.preventDefault();
-      const task = allTasks.find(t => t.id === selectedTaskId);
-      if (task) {
-        showDeleteConfirmDialog(task);
-      }
-    }
-
-    // Enter 键：直接删除（不弹确认）
-    if (e.key === 'Enter' && selectedTaskId) {
-      e.preventDefault();
-      await deleteSelectedTask();
-    }
-
-    // Escape 键：取消选中
-    if (e.key === 'Escape' && selectedTaskId) {
-      e.preventDefault();
-      document.querySelectorAll('.task-card.selected').forEach(c => c.classList.remove('selected'));
-      selectedTaskId = null;
-    }
-  });
-
-  // 日历导航
-  document.getElementById('prevMonth').addEventListener('click', () => {
-    currentMonth--;
-    if (currentMonth < 1) {
-      currentMonth = 12;
-      currentYear--;
-    }
-    loadCalendar();
-  });
-
-  document.getElementById('nextMonth').addEventListener('click', () => {
-    currentMonth++;
-    if (currentMonth > 12) {
-      currentMonth = 1;
-      currentYear++;
-    }
-    loadCalendar();
-  });
-
-  // 设置
-  document.getElementById('settingsBtn').addEventListener('click', () => {
-    loadSettings();
-    document.getElementById('settingsModal').classList.add('active');
-    checkServiceStatus();
-  });
-
-  // Bug 标签页的设置按钮
-  const bugSettingsBtn = document.getElementById('bugSettingsBtn');
-  if (bugSettingsBtn) {
-    bugSettingsBtn.addEventListener('click', () => {
-      loadSettings();
-      document.getElementById('settingsModal').classList.add('active');
-      checkServiceStatus();
-    });
-  }
-
-  document.getElementById('closeSettings').addEventListener('click', () => {
-    document.getElementById('settingsModal').classList.remove('active');
-  });
-
-  // ========== 提示词（提示词读写见顶层 loadPrompts / savePrompts）==========
-
-  // 顶栏「提示词」按钮：直接打开设置面板并定位到「提示词」分组
-  document.getElementById('promptSettingsBtn').addEventListener('click', () => {
-    loadSettings();
-    document.getElementById('settingsModal').classList.add('active');
-    checkServiceStatus();
-    if (window.settingsUI) window.settingsUI.showGroup('p-prompt');
-  });
-
-  // 「恢复默认」= 清空输入框（空即使用系统默认提示词）
-  const promptResetMap = {
-    resetAddTaskPromptBtn: 'promptAddTask',
-    resetDailyPromptBtn: 'promptDaily',
-    resetWeeklyPromptBtn: 'promptWeekly',
-    resetMonthlyPromptBtn: 'promptMonthly'
-  };
-  Object.keys(promptResetMap).forEach((btnId) => {
-    const btn = document.getElementById(btnId);
-    if (!btn) return;
-    btn.addEventListener('click', () => {
-      const input = document.getElementById(promptResetMap[btnId]);
-      if (!input) return;
-      input.value = '';
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      Toast.success('已恢复默认，保存配置后生效');
-    });
-  });
-  // ====================================
-
-  // ====================================
+// ====================================
 // AI 服务商预设表
 // ====================================
 
@@ -1359,6 +1357,157 @@ const AI_PROVIDERS = {
   }
 };
 
+/** 设置页里 AI 相关的后端请求：带上当前填写的接口地址与 Key（Key 留空时后端用该地址保存过的） */
+async function postAiSettings(path, extra = {}) {
+  const resp = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      baseUrl: document.getElementById('apiBaseUrl').value.trim(),
+      apiKey: document.getElementById('apiKey').value.trim(),
+      ...extra
+    })
+  });
+  return resp.json().catch(() => ({ success: false, message: `HTTP ${resp.status}` }));
+}
+
+/**
+ * 设置页的模型选择
+ *   - 各服务商分别记住接口地址、两类模型（profiles，存浏览器）；Key 按接口地址保存在后端
+ *   - 切换服务商：先记下当前的（含刚填、还没保存的 Key，只在本页内存里），再恢复目标服务商的；
+ *     没配过的用预设。切回来不用重填
+ *   - 获取到的模型列表填进两个下拉框；测速推荐给两类用途各推荐几个
+ */
+const AiModelPicker = {
+  profiles: {},
+  typedKeys: {},
+  savedKeyHosts: [],
+  models: [],
+  provider: null,
+
+  init(config) {
+    this.profiles = { ...(config.aiProfiles || {}) };
+    this.provider = config.aiProvider || 'zhipu';
+    this.typedKeys = {};
+    this.models = [];
+    ['aiModelSelect', 'aiReportModelSelect'].forEach(id => { const el = document.getElementById(id); if (el) { el.style.display = 'none'; el.innerHTML = ''; } });
+    const bench = document.getElementById('benchAiModels');
+    if (bench) bench.disabled = true;
+    const box = document.getElementById('aiBenchResult');
+    if (box) { box.hidden = true; box.innerHTML = ''; }
+    this.loadKeyStatus();
+  },
+
+  /** 后端告诉我们哪些接口地址保存过 Key（不回传 Key 本身） */
+  async loadKeyStatus() {
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/config`);
+      const result = await resp.json();
+      this.savedKeyHosts = (result && result.data && result.data.ai && result.data.ai.savedKeyHosts) || [];
+    } catch {
+      this.savedKeyHosts = [];
+    }
+    this.refreshKeyPlaceholder();
+    if (window.settingsUI && window.settingsUI.refreshBaseline) window.settingsUI.refreshBaseline();
+  },
+
+  hostOf(url) {
+    try {
+      return new URL(String(url).trim().replace(/\/(chat\/completions|models)\/?$/i, '')).host.toLowerCase();
+    } catch {
+      return '';
+    }
+  },
+
+  refreshKeyPlaceholder() {
+    const keyEl = document.getElementById('apiKey');
+    if (!keyEl) return;
+    const host = this.hostOf(document.getElementById('apiBaseUrl').value);
+    keyEl.placeholder = host && this.savedKeyHosts.includes(host)
+      ? '已保存（留空即使用已保存的 Key）'
+      : (this.provider === 'ollama' ? '本地部署可填任意值，如 ollama' : '请输入 API Key');
+  },
+
+  /** 记下当前服务商的地址、模型，以及填了但还没保存的 Key */
+  rememberCurrent() {
+    const baseUrl = document.getElementById('apiBaseUrl').value.trim();
+    this.profiles[this.provider] = {
+      apiBaseUrl: baseUrl,
+      aiModel: document.getElementById('aiModel').value.trim(),
+      aiReportModel: document.getElementById('aiReportModel').value.trim()
+    };
+    const key = document.getElementById('apiKey').value.trim();
+    const host = this.hostOf(baseUrl);
+    if (key && host) this.typedKeys[host] = key;
+  },
+
+  switchProvider(provider) {
+    this.rememberCurrent();
+    this.provider = provider;
+    const saved = this.profiles[provider];
+    if (saved && (saved.apiBaseUrl || saved.aiModel)) {
+      applyAiProviderPreset(provider);
+      document.getElementById('apiBaseUrl').value = saved.apiBaseUrl || document.getElementById('apiBaseUrl').value;
+      document.getElementById('aiModel').value = saved.aiModel || document.getElementById('aiModel').value;
+      document.getElementById('aiReportModel').value = saved.aiReportModel || '';
+    } else {
+      applyAiProviderPreset(provider);
+      document.getElementById('aiReportModel').value = '';
+    }
+    // Key：本页刚填过的直接恢复；后端保存过的留空（占位提示「已保存」）；都没有才需要填
+    const host = this.hostOf(document.getElementById('apiBaseUrl').value);
+    document.getElementById('apiKey').value = (host && this.typedKeys[host]) || '';
+    this.refreshKeyPlaceholder();
+    // 换了服务商，之前获取的模型列表不再适用
+    this.setModels([]);
+    const box = document.getElementById('aiBenchResult');
+    if (box) { box.hidden = true; box.innerHTML = ''; }
+  },
+
+  setModels(models) {
+    this.models = models || [];
+    const bench = document.getElementById('benchAiModels');
+    if (bench) bench.disabled = !this.models.length;
+    [['aiModelSelect', 'aiModel'], ['aiReportModelSelect', 'aiReportModel']].forEach(([selectId, inputId]) => {
+      const select = document.getElementById(selectId);
+      if (!select) return;
+      if (!this.models.length) { select.style.display = 'none'; select.innerHTML = ''; return; }
+      const current = document.getElementById(inputId).value.trim();
+      select.innerHTML = `<option value="">从 ${this.models.length} 个模型中选择…</option>` +
+        this.models.map(m => `<option value="${escapeHtml(m)}"${m === current ? ' selected' : ''}>${escapeHtml(m)}</option>`).join('');
+      select.style.display = '';
+    });
+  },
+
+  pick(inputId, model) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    input.value = model;
+    // 让设置页的「未保存修改」检测感知到变化
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    const select = document.querySelector(`.ai-model-select[data-target="${inputId}"]`);
+    if (select) select.value = model;
+  },
+
+  renderBenchmark(box, result) {
+    const mark = { good: '✅', slow: '⚠️', bad: '❌' };
+    const chips = (list, target, label) => (list.length
+      ? list.map(m => `<button type="button" class="ai-bench-pick" data-pick-target="${target}" data-pick-model="${escapeHtml(m)}" title="设为${label}">${escapeHtml(m)}</button>`).join('')
+      : '<span class="ai-bench-none">没有合适的</span>');
+    box.innerHTML = `
+      <div class="ai-bench-rec"><strong>任务解析推荐</strong>（实测最快、能稳定返回 JSON）：${chips(result.recommend.task, 'aiModel', '任务解析模型')}</div>
+      <div class="ai-bench-rec"><strong>报告总结推荐</strong>（实测可用的里面档位更高的）：${chips(result.recommend.report, 'aiReportModel', '报告总结模型')}</div>
+      <table class="ai-bench-table"><thead><tr><th>模型</th><th>耗时</th><th>任务解析</th><th>报告总结</th></tr></thead><tbody>
+        ${result.results.map(r => `<tr>
+          <td>${escapeHtml(r.model)}${r.reasoning ? ' <span class="ai-bench-tag">推理</span>' : ''}</td>
+          <td title="${(r.samples || [r.seconds]).map(x => `${x}s`).join(' / ')}">${r.seconds}s</td>
+          <td title="${escapeHtml(r.task.text)}">${mark[r.task.level]}</td>
+          <td title="${escapeHtml(r.report.text)}">${mark[r.report.level]}</td></tr>`).join('')}
+      </tbody></table>
+      <div class="ai-bench-note">共测 ${result.tested} 个（cn: 前缀与同名模型只测一个）${(result.skipped || []).length ? `；未测：${escapeHtml(result.skipped.join('、'))}` : ''}。耗时取两次里较慢的那次（中转延迟波动较大）；任务解析要在 8 秒内返回，报告不受这个限制。点推荐的模型名即可填入，记得保存。</div>`;
+  }
+};
+
 /**
  * 应用服务商预设：自动填入接口地址、模型与提示
  * @param {string} provider - 服务商 key
@@ -1392,140 +1541,303 @@ function applyAiProviderPreset(provider) {
   }
 }
 
+// 绑定事件
+function bindEvents() {
+  bindDragAndDrop();
+
+  // 进度条拖拽全局事件
+  setupProgressDragEvents();
+  // 添加任务
+  document.getElementById('addTaskBtn').addEventListener('click', addTask);
+  // 看板头部「添加任务」：手动填写表单（弹窗已开着时不重复打开）
+  document.getElementById('headerAddTaskBtn').addEventListener('click', () => {
+    const modal = document.getElementById('taskCreateModal');
+    if (modal && modal.style.display === 'flex') return;
+    openBlankTaskModal();
+  });
+  document.getElementById('taskInput').addEventListener('keydown', async function (e) {
+    if (e.key === 'Enter') {
+      // 正在使用输入法拼音选词的时候按下回车不应该触发添加
+      if (e.isComposing || e.keyCode === 229) {
+        return;
+      }
+
+      if (!e.shiftKey) {
+        e.preventDefault();
+        // 根据 TabSwitcher 的当前模式决定调用哪个函数
+        if (TabSwitcher.currentMode === 'bug') {
+          // Bug 模式：获取执行选择和内容
+          const executionSelect = document.getElementById('executionSelect');
+          const selectedExecutionId = executionSelect ? executionSelect.value : null;
+          const content = this.value.trim();
+
+          // 必须输入内容
+          if (!content) {
+            Toast.error('请输入 Bug 描述');
+            return;
+          }
+
+          // 获取执行名称和项目ID（如果选择了具体执行）
+          let executionName = '';
+          let projectId = '';
+          if (selectedExecutionId && executionSelect.selectedIndex >= 0) {
+            executionName = executionSelect.options[executionSelect.selectedIndex]?.text || '';
+            // 从 ExecutionSelector 的收藏列表中查找 projectId
+            if (typeof ExecutionSelector !== 'undefined' && ExecutionSelector.favoriteExecutions) {
+              const exec = ExecutionSelector.favoriteExecutions.find(e => e.id === selectedExecutionId);
+              if (exec) {
+                projectId = exec.projectId || '';
+                console.log('[Bug模式] 从执行选择器获取项目ID:', projectId, '执行:', exec.name);
+              }
+            }
+          }
+
+          console.log('[Bug模式] 准备提交 - executionId:', selectedExecutionId, 'projectId:', projectId, 'content:', content.substring(0, 50));
+
+          // 调用 BugManager 打开弹窗并预填信息
+          // 如果 selectedExecutionId 为空，AI 会自动匹配执行
+          console.log('[Bug模式] BugManager 对象:', typeof BugManager, 'quickSubmit 方法:', typeof BugManager?.quickSubmit);
+          if (typeof BugManager !== 'undefined' && BugManager.quickSubmit) {
+            console.log('[Bug模式] 调用 quickSubmit...');
+            await BugManager.quickSubmit(selectedExecutionId, executionName, projectId, content);
+            this.value = ''; // 清空输入框
+            console.log('[Bug模式] quickSubmit 完成');
+          } else {
+            console.error('[Bug模式] BugManager 或 quickSubmit 不可用');
+          }
+        } else {
+          // 任务模式：添加任务
+          addTask();
+        }
+      } else {
+        // 明确实现 Shift+Enter 换行功能
+        e.preventDefault();
+        const start = this.selectionStart;
+        const end = this.selectionEnd;
+        const val = this.value;
+        this.value = val.substring(0, start) + '\n' + val.substring(end);
+        this.selectionStart = this.selectionEnd = start + 1;
+      }
+    }
+  });
+
+
+  // 全局键盘事件：删除任务
+  document.addEventListener('keydown', async (e) => {
+    // 如果焦点在输入框、textarea 或模态框中，不处理
+    const target = e.target;
+    if (target.matches('input, textarea, [contenteditable]') ||
+        target.closest('.modal') || target.closest('.confirm-dialog')) {
+      return;
+    }
+
+    // Delete 或 Backspace 键：弹出确认删除对话框
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedTaskId) {
+      e.preventDefault();
+      const task = allTasks.find(t => t.id === selectedTaskId);
+      if (task) {
+        showDeleteConfirmDialog(task);
+      }
+    }
+
+    // Enter 键：直接删除（不弹确认）
+    if (e.key === 'Enter' && selectedTaskId) {
+      e.preventDefault();
+      await deleteSelectedTask();
+    }
+
+    // Escape 键：取消选中
+    if (e.key === 'Escape' && selectedTaskId) {
+      e.preventDefault();
+      document.querySelectorAll('.task-card.selected').forEach(c => c.classList.remove('selected'));
+      selectedTaskId = null;
+    }
+  });
+
+  // 日历导航
+  document.getElementById('prevMonth').addEventListener('click', () => {
+    currentMonth--;
+    if (currentMonth < 1) {
+      currentMonth = 12;
+      currentYear--;
+    }
+    loadCalendar();
+  });
+
+  document.getElementById('nextMonth').addEventListener('click', () => {
+    currentMonth++;
+    if (currentMonth > 12) {
+      currentMonth = 1;
+      currentYear++;
+    }
+    loadCalendar();
+  });
+
+  // 设置
+  document.getElementById('settingsBtn').addEventListener('click', () => {
+    loadSettings();
+    document.getElementById('settingsModal').classList.add('active');
+    checkServiceStatus();
+  });
+
+  // Bug 标签页的设置按钮
+  const bugSettingsBtn = document.getElementById('bugSettingsBtn');
+  if (bugSettingsBtn) {
+    bugSettingsBtn.addEventListener('click', () => {
+      loadSettings();
+      document.getElementById('settingsModal').classList.add('active');
+      checkServiceStatus();
+    });
+  }
+
+  document.getElementById('closeSettings').addEventListener('click', () => {
+    document.getElementById('settingsModal').classList.remove('active');
+  });
+
+  // ========== 提示词（提示词读写见顶层 loadPrompts / savePrompts）==========
+
+  // 顶栏「提示词」按钮：直接打开设置面板并定位到「提示词」分组
+  document.getElementById('promptSettingsBtn').addEventListener('click', () => {
+    loadSettings();
+    document.getElementById('settingsModal').classList.add('active');
+    checkServiceStatus();
+    if (window.settingsUI) window.settingsUI.showGroup('p-prompt');
+  });
+
+  // 「恢复默认」= 清空输入框（空即使用系统默认提示词）
+  const promptResetMap = {
+    resetAddTaskPromptBtn: 'promptAddTask',
+    resetDailyPromptBtn: 'promptDaily',
+    resetWeeklyPromptBtn: 'promptWeekly',
+    resetMonthlyPromptBtn: 'promptMonthly'
+  };
+  Object.keys(promptResetMap).forEach((btnId) => {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const input = document.getElementById(promptResetMap[btnId]);
+      if (!input) return;
+      input.value = '';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      Toast.success('已恢复默认，保存配置后生效');
+    });
+  });
+
 // ====================================
 // 配置导出 / 导入（换机迁移）
 // ====================================
 
-/** 导出时故意排除的敏感字段 */
-const CONFIG_EXPORT_EXCLUDE = ['apiKey', 'zentaoPassword'];
-
 /**
- * 导出全部配置为 JSON 文件
- *
- * 有意**不导出** API Key 与禅道密码：配置文件常经聊天工具/网盘传递，
- * 带密钥的明文文件一旦外泄风险太高。导入后用户自行补填这两项即可。
+ * 加密导出：用户自己配置的部分（含禅道密码与 AI Key）由后端用口令加密成一个 JSON 文件
+ * 设置页各服务商的地址与模型只存在浏览器里，一并交给后端放进文件
  */
 async function exportAllConfig() {
   const resultEl = document.getElementById('configTransferResult');
+  const pass = document.getElementById('exportPassphrase');
+  const pass2 = document.getElementById('exportPassphrase2');
+  const show = (text, cls) => { if (resultEl) { resultEl.textContent = text; resultEl.className = `test-result ${cls || ''}`; } };
+  if (pass.value.length < 8) { show('✗ 口令至少 8 位', 'error'); pass.focus(); return; }
+  if (pass.value !== pass2.value) { show('✗ 两次输入的口令不一致', 'error'); pass2.focus(); return; }
   try {
-    const response = await fetch(`${API_BASE_URL}/api/config`);
-    const json = await response.json();
-    if (!json.success) throw new Error(json.message || '获取配置失败');
-
-    const config = json.data || {};
-    const exported = { __app: 'workAssistant', __version: 1, exportedAt: new Date().toISOString(), config: {} };
-
-    // 深拷贝并剔除敏感项
-    for (const [k, v] of Object.entries(config)) {
-      if (CONFIG_EXPORT_EXCLUDE.includes(k)) continue;
-      if (v && typeof v === 'object') {
-        const copy = { ...v };
-        for (const secret of CONFIG_EXPORT_EXCLUDE) delete copy[secret];
-        // 用占位标记提示用户需补填
-        if (k === 'ai') copy.apiKey = '';
-        if (k === 'zentao') copy.hasPassword = !!v.hasPassword;
-        exported.config[k] = copy;
-      } else {
-        exported.config[k] = v;
-      }
-    }
-
-    // 附带本地提示词（后端已存，不含敏感信息）
+    let client = {};
     try {
-      const pr = await (await fetch(`${API_BASE_URL}/api/prompts`)).json();
-      if (pr.success && pr.data) exported.prompts = pr.data;
-    } catch (e) { /* 提示词可选，失败不影响导出 */ }
+      const saved = JSON.parse(localStorage.getItem('workAssistantConfig') || '{}');
+      client = { aiProvider: saved.aiProvider || '', aiProfiles: saved.aiProfiles || {} };
+    } catch { /* 浏览器里没有设置也能导出 */ }
+    const response = await fetch(`${API_BASE_URL}/api/config/export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ passphrase: pass.value, client })
+    });
+    const json = await response.json();
+    if (!json.success) throw new Error(json.message || '导出失败');
 
-    const blob = new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(json.data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    const stamp = new Date().toISOString().slice(0, 10);
     a.href = url;
-    a.download = `workAssistant-config-${stamp}.json`;
+    a.download = `workAssistant-config-${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-
-    if (resultEl) {
-      resultEl.textContent = '✅ 配置已导出（不含 API Key 与禅道密码，换机后需重新填写）';
-      resultEl.className = 'test-result success';
-    }
-    Toast.success('配置已导出');
+    pass.value = '';
+    pass2.value = '';
+    show('✅ 已加密导出（含禅道密码与 AI Key）。请记住口令，导入时需要', 'success');
+    Toast.success('配置已加密导出');
   } catch (err) {
-    if (resultEl) {
-      resultEl.textContent = '✗ 导出失败：' + err.message;
-      resultEl.className = 'test-result error';
-    }
+    show('✗ 导出失败：' + err.message, 'error');
     Toast.error('导出失败：' + err.message);
   }
 }
 
-/**
- * 导入配置文件并写回后端
- * @param {File} file - 用户选择的 JSON 文件
- */
-async function importAllConfig(file) {
+/** 选中的待导入文件（解析后的 JSON） */
+let pendingImportFile = null;
+
+/** 选了文件：显示导出时间与包含的内容，等用户输入口令 */
+async function prepareImport(file) {
   const resultEl = document.getElementById('configTransferResult');
-  if (resultEl) { resultEl.textContent = '导入中...'; resultEl.className = 'test-result'; }
-
+  const info = document.getElementById('importConfigInfo');
+  const pass = document.getElementById('importPassphrase');
+  const btn = document.getElementById('importConfirmBtn');
+  pendingImportFile = null;
+  [info, pass, btn].forEach(el => { el.hidden = true; });
   try {
-    const text = await file.text();
-    const parsed = JSON.parse(text);
-    if (!parsed || !parsed.config || typeof parsed.config !== 'object') {
-      throw new Error('不是有效的配置文件');
-    }
+    const parsed = JSON.parse(await file.text());
+    if (!parsed || parsed.__app !== 'workAssistant') throw new Error('不是工作助手导出的配置文件');
+    if (!parsed.encrypted) throw new Error('这是旧版导出的文件（不含密码与 Key）：请在原机器上用新版本重新导出');
+    pendingImportFile = parsed;
+    const at = parsed.exportedAt ? new Date(parsed.exportedAt).toLocaleString('zh-CN') : '未知时间';
+    info.innerHTML = `<b>${escapeHtml(file.name)}</b><br>导出于 ${escapeHtml(at)}<br>包含：${escapeHtml((parsed.contents || []).join('、'))}`;
+    [info, pass, btn].forEach(el => { el.hidden = false; });
+    pass.value = '';
+    pass.focus();
+    if (resultEl) { resultEl.textContent = ''; resultEl.className = 'test-result'; }
+  } catch (err) {
+    if (resultEl) { resultEl.textContent = '✗ ' + err.message; resultEl.className = 'test-result error'; }
+  }
+}
 
-    if (!confirm(
-      `确定导入配置吗？\n\n导入来源：${file.name}\n` +
-      `将覆盖当前 AI / 通知 / 禅道 等设置。\n` +
-      `（API Key 与禅道密码不参与导入，需要另行填写）`
-    )) return;
-
-    const payload = { ...parsed.config };
-    // 密钥不覆盖：避免把导出文件里的空值写回去，冲掉用户已填的 Key
-    if (payload.ai) payload.ai.apiKey = undefined;
-    if (payload.zentao) payload.zentao.password = undefined;
-
-    const response = await fetch(`${API_BASE_URL}/api/config`, {
+/** 解密并导入：后端写回 .env 与运行时配置；浏览器里的设置（各服务商地址与模型等）一并回填 */
+async function importAllConfig() {
+  const resultEl = document.getElementById('configTransferResult');
+  const pass = document.getElementById('importPassphrase');
+  const show = (text, cls) => { if (resultEl) { resultEl.textContent = text; resultEl.className = `test-result ${cls || ''}`; } };
+  if (!pendingImportFile) return;
+  if (!pass.value) { show('✗ 请输入导出时设置的口令', 'error'); pass.focus(); return; }
+  if (!confirm('导入会覆盖当前的禅道、AI、通知、提示词等设置（其他地址已保存的 AI Key 保留）。继续吗？')) return;
+  show('解密并导入中…');
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/config/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({ file: pendingImportFile, passphrase: pass.value })
     });
-    const result = await response.json();
-    if (!result.success && !result.ok) {
-      throw new Error(result.message || result.error || '写入失败');
-    }
-
-    if (parsed.prompts) {
-      try {
-        await fetch(`${API_BASE_URL}/api/prompts`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(parsed.prompts)
-        });
-      } catch (e) { /* 提示词失败不阻断 */ }
-    }
-
-    if (resultEl) {
-      resultEl.textContent = '✅ 配置已导入，正在刷新…';
-      resultEl.className = 'test-result success';
-    }
+    const json = await response.json();
+    if (!json.success) throw new Error(json.message || '导入失败');
+    // 浏览器里的设置：保留本机已有的，导入的覆盖（不含密码与 Key）
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem('workAssistantConfig') || '{}'); } catch { /* 忽略损坏的缓存 */ }
+    const merged = { ...saved, ...json.data.client };
+    delete merged.apiKey;
+    delete merged.zentaoPassword;
+    localStorage.setItem('workAssistantConfig', JSON.stringify(merged));
+    pass.value = '';
+    pendingImportFile = null;
+    show(`✅ 已导入：${json.data.applied.join('、')}。正在刷新…`, 'success');
     Toast.success('配置已导入');
-    setTimeout(() => location.reload(), 900);
+    setTimeout(() => location.reload(), 1200);
   } catch (err) {
-    if (resultEl) {
-      resultEl.textContent = '✗ 导入失败：' + err.message;
-      resultEl.className = 'test-result error';
-    }
-    Toast.error('导入失败：' + err.message);
+    show('✗ 导入失败：' + err.message, 'error');
+    if (/口令/.test(err.message)) pass.select();
   }
 }
 
 // AI服务选择切换
   document.getElementById('aiProvider').addEventListener('change', (e) => {
-    applyAiProviderPreset(e.target.value);
+    AiModelPicker.switchProvider(e.target.value);
   });
+  document.getElementById('apiBaseUrl').addEventListener('input', () => AiModelPicker.refreshKeyPlaceholder());
 
   // 模型选型说明展开/收起
   const aiModelHelpBtn = document.getElementById('aiModelHelpBtn');
@@ -1543,52 +1855,97 @@ async function importAllConfig(file) {
   });
   document.getElementById('importConfigFile')?.addEventListener('change', (e) => {
     const file = e.target.files && e.target.files[0];
-    if (file) importAllConfig(file);
-    e.target.value = ''; // 允许重复导入同一个文件
+    if (file) prepareImport(file);
+    e.target.value = ''; // 允许重复选择同一个文件
+  });
+  document.getElementById('importConfirmBtn')?.addEventListener('click', importAllConfig);
+  document.getElementById('importPassphrase')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); importAllConfig(); }
   });
 
-  // 测试AI连接
+  // 获取模型列表：由后端请求服务商的 /models（扩展页直连会受跨域限制）
+  document.getElementById('fetchAiModels').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const hint = document.getElementById('aiModelsHint');
+    btn.disabled = true;
+    hint.textContent = '正在获取模型列表…';
+    try {
+      const result = await postAiSettings('/api/ai/models');
+      if (!result.success) throw new Error(result.message || '获取失败');
+      AiModelPicker.setModels(result.models);
+      // 地址填的是完整聊天地址时，后端会规整成 base URL，这里同步回填
+      if (result.baseUrl) document.getElementById('apiBaseUrl').value = result.baseUrl;
+      hint.textContent = `已获取 ${result.models.length} 个模型，可在下面两个模型里直接选择；不确定选哪个，点「测速推荐」`;
+    } catch (err) {
+      hint.textContent = `❌ ${err.message}`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // 测速推荐：后端给每个模型发一条任务解析请求，按实测给两类用途各推荐几个
+  document.getElementById('benchAiModels').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const box = document.getElementById('aiBenchResult');
+    btn.disabled = true;
+    box.hidden = false;
+    box.innerHTML = '<div class="ai-bench-wait">正在逐个测试（最多 24 个模型，每个最长 25 秒），通常需要 30~60 秒…</div>';
+    try {
+      const result = await postAiSettings('/api/ai/benchmark', { models: AiModelPicker.models });
+      if (!result.success) throw new Error(result.message || '测速失败');
+      AiModelPicker.renderBenchmark(box, result);
+    } catch (err) {
+      box.innerHTML = `<div class="ai-bench-wait">❌ ${escapeHtml(err.message)}</div>`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  document.getElementById('aiBenchResult').addEventListener('click', (e) => {
+    const pick = e.target.closest('[data-pick-model]');
+    if (pick) AiModelPicker.pick(pick.dataset.pickTarget, pick.dataset.pickModel);
+  });
+  document.querySelectorAll('.ai-model-select').forEach(select => {
+    select.addEventListener('change', (e) => {
+      if (e.target.value) AiModelPicker.pick(e.target.dataset.target, e.target.value);
+    });
+  });
+
+  // 测试连接：任务解析模型、报告总结模型分别按各自用途测（经后端）
   document.getElementById('testAi').addEventListener('click', async () => {
     const resultEl = document.getElementById('aiTestResult');
+    const taskModel = document.getElementById('aiModel').value.trim();
+    const reportModel = document.getElementById('aiReportModel').value.trim();
     resultEl.textContent = '测试中...';
     resultEl.className = 'test-result';
-
+    const line = (label, r) => `${r.success ? (r.verdict && r.verdict.level === 'good' ? '✅' : '⚠️') : '❌'} ${label}：${r.message || (r.success ? '连接成功' : '连接失败')}`;
     try {
-      const apiKey = document.getElementById('apiKey').value.trim();
-      const baseUrl = document.getElementById('apiBaseUrl').value.trim();
-      const model = document.getElementById('aiModel').value.trim();
-
-      if (!apiKey) {
-        resultEl.textContent = '请先输入 API Key';
-        resultEl.className = 'test-result error';
-        return;
+      const lines = [];
+      const task = await postAiSettings('/api/ai/test', { model: taskModel, purpose: 'task' });
+      lines.push(line(`任务解析（${taskModel || '未填'}）`, task));
+      if (reportModel && reportModel !== taskModel) {
+        const report = await postAiSettings('/api/ai/test', { model: reportModel, purpose: 'report' });
+        lines.push(line(`报告总结（${reportModel}）`, report));
       }
-
-      // 测试调用
-      const response = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: model,
-          messages: [{ role: 'user', content: '你好' }],
-          max_tokens: 10
-        })
-      });
-
-      if (response.ok) {
-        resultEl.textContent = '✅ 连接成功';
-        resultEl.className = 'test-result success';
-      } else {
-        const error = await response.json();
-        resultEl.textContent = `❌ ${error.error?.message || '连接失败'}`;
-        resultEl.className = 'test-result error';
-      }
+      resultEl.textContent = lines.join('\n');
+      resultEl.className = `test-result ${lines.every(l => l.startsWith('✅')) ? 'success' : lines.some(l => l.startsWith('❌')) ? 'error' : ''}`;
+      resultEl.style.whiteSpace = 'pre-line';
     } catch (err) {
       resultEl.textContent = `❌ 连接失败: ${err.message}`;
       resultEl.className = 'test-result error';
+    }
+  });
+
+  // 填了企业微信 / 钉钉 / 飞书机器人地址：类型跟着选好（类型选错时平台会拒收消息，以前还会显示「推送成功」）
+  document.getElementById('webhookUrl').addEventListener('input', (e) => {
+    let host = '';
+    try { host = new URL(e.target.value.trim()).host.toLowerCase(); } catch { return; }
+    const type = host === 'qyapi.weixin.qq.com' ? 'wecom'
+      : host === 'oapi.dingtalk.com' ? 'dingtalk'
+        : (host.endsWith('feishu.cn') || host.endsWith('larksuite.com')) ? 'feishu' : '';
+    const select = document.getElementById('webhookType');
+    if (type && select.value !== type) {
+      select.value = type;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
     }
   });
 
@@ -1637,8 +1994,9 @@ async function importAllConfig(file) {
     const password = document.getElementById('zentaoPassword').value.trim();
     const resultEl = document.getElementById('zentaoTestResult');
 
-    if (!url || !username || !password) {
-      resultEl.textContent = '❌ 请先填写禅道地址、账号和密码';
+    // 密码不回显：留空表示使用已保存的密码
+    if (!url || !username) {
+      resultEl.textContent = '❌ 请先填写禅道地址和账号';
       resultEl.className = 'test-result error';
       return;
     }
@@ -1647,23 +2005,19 @@ async function importAllConfig(file) {
     resultEl.className = 'test-result';
 
     try {
-      // 通过配置对象临时覆盖浏览器客户端配置进行测试
-      const tempConfig = {
-        enabled: true,
-        url,
-        username,
-        password,
-        _isManualTest: true
-      };
-      ZentaoBrowserClient.config = tempConfig;
+      // 由后端用表单里的地址/账号/密码试登录（不影响已保存的配置与会话）
+      const resp = await fetch(`${API_BASE_URL}/api/zentao/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, username, password })
+      });
+      const result = await resp.json();
 
-      const loginSuccess = await ZentaoBrowserClient.login();
-
-      if (loginSuccess) {
-        resultEl.textContent = '✅ 连接并登录成功！浏览器已获取认证信息。';
+      if (result.success) {
+        resultEl.textContent = '✅ 连接并登录成功';
         resultEl.className = 'test-result success';
       } else {
-        resultEl.textContent = '❌ 连接失败，请检查账号密码或跨域设置';
+        resultEl.textContent = `❌ 连接失败：${result.message || '请检查地址、账号和密码'}`;
         resultEl.className = 'test-result error';
       }
     } catch (err) {
@@ -1680,7 +2034,7 @@ async function importAllConfig(file) {
     resultEl.className = 'test-result';
 
     try {
-      const users = await ZentaoBrowserClient.loadUsersFromTeamPage();
+      const users = await ZentaoBrowserClient.refreshUsersFromZentao();
       const userCount = Object.keys(users).length;
 
       if (userCount > 0) {
@@ -1701,10 +2055,13 @@ async function importAllConfig(file) {
     const saveBtn = document.getElementById('saveSettings');
     setBtnLoading(saveBtn, '保存中…');
 
+    const typedKey = document.getElementById('apiKey').value.trim();
+    AiModelPicker.rememberCurrent();
     const config = {
-      apiKey: document.getElementById('apiKey').value.trim(),
       apiBaseUrl: document.getElementById('apiBaseUrl').value.trim(),
       aiModel: document.getElementById('aiModel').value.trim(),
+      aiReportModel: document.getElementById('aiReportModel').value.trim(),
+      aiProfiles: AiModelPicker.profiles,
       morningHour: document.getElementById('morningHour').value,
       eveningHour: document.getElementById('eveningHour').value,
       webhookUrl: document.getElementById('webhookUrl').value.trim(),
@@ -1714,13 +2071,15 @@ async function importAllConfig(file) {
       zentaoEnabled: document.getElementById('zentaoEnabled')?.checked || false,
       zentaoUrl: document.getElementById('zentaoUrl')?.value.trim() || '',
       zentaoUsername: document.getElementById('zentaoUsername')?.value.trim() || '',
-      zentaoPassword: document.getElementById('zentaoPassword')?.value.trim() || '',
       zentaoCreateTaskUrl: document.getElementById('zentaoCreateTaskUrl')?.value.trim() || '',
       // 后端服务URL（与AI API URL分开）
-      backendUrl: 'http://localhost:3721'
+      backendUrl: 'http://127.0.0.1:3721'
     };
 
     let savedOk = false;
+
+    // 禅道密码只发给后端（存在本机 .env），不写进浏览器
+    const typedZentaoPassword = document.getElementById('zentaoPassword')?.value.trim() || '';
 
     try {
       // 保存到localStorage
@@ -1732,9 +2091,11 @@ async function importAllConfig(file) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            apiKey: config.apiKey || '',
+            // 留空 = 用这个地址以前保存的 Key（Key 只存在后端 .env，按地址分别保存）
+            apiKey: typedKey,
             apiBaseUrl: config.apiBaseUrl || '',
             aiModel: config.aiModel || '',
+            aiReportModel: config.aiReportModel || '',
             morningHour: config.morningHour || '9',
             eveningHour: config.eveningHour || '21',
             webhookUrl: config.webhookUrl || '',
@@ -1761,7 +2122,7 @@ async function importAllConfig(file) {
             enabled: config.zentaoEnabled,
             url: config.zentaoUrl,
             username: config.zentaoUsername,
-            password: config.zentaoPassword,
+            password: typedZentaoPassword,
             createTaskUrl: config.zentaoCreateTaskUrl
           })
         });
@@ -1776,6 +2137,15 @@ async function importAllConfig(file) {
         console.warn('同步禅道配置失败:', err);
       }
 
+      // 全员报告关注的用户（存后端 .env，下次生成报告时生效）
+      if (typeof ReportMembersPicker !== 'undefined') {
+        try {
+          await ReportMembersPicker.save();
+        } catch (err) {
+          Toast.error('报告成员保存失败：' + err.message);
+        }
+      }
+
       // 提示词与配置同属「设置」，一次保存一起写盘
       try {
         await savePrompts();
@@ -1785,15 +2155,15 @@ async function importAllConfig(file) {
       }
 
       // 更新后端服务地址
-      API_BASE_URL = config.backendUrl || 'http://localhost:3721';
-
-      // 保存备份配置
-      if (window.backupUI) {
-        window.backupUI.saveBackupSettingsFromSettings();
-      }
+      API_BASE_URL = config.backendUrl || 'http://127.0.0.1:3721';
 
       // 与旧版不同：保存后不再自动关闭面板，用户可继续改其它分组。
       // 底部状态条会变为「所有更改已保存」，需要关闭时点右上角 ×。
+      if (typedZentaoPassword) {
+        const pwEl = document.getElementById('zentaoPassword');
+        pwEl.value = '';
+        pwEl.placeholder = '已保存（留空表示不修改）';
+      }
       Toast.success('配置已保存');
       savedOk = true;
     } catch (err) {
@@ -1831,11 +2201,6 @@ async function importAllConfig(file) {
     }
   });
 
-  // 历史日报按钮
-  document.getElementById('viewAllHistory').addEventListener('click', async () => {
-    await showHistoryModal();
-  });
-
   // ==================== 测试按钮事件 ====================
   // 早9点通知测试
   document.getElementById('testMorningBtn')?.addEventListener('click', async () => {
@@ -1855,16 +2220,6 @@ async function importAllConfig(file) {
   // 月末晚月报测试
   document.getElementById('testMonthlyBtn')?.addEventListener('click', async () => {
     await testScheduledTask('monthly', '月报');
-  });
-
-  document.getElementById('closeReportModal').addEventListener('click', () => {
-    document.getElementById('reportModal').classList.remove('active');
-  });
-
-  document.getElementById('reportModal').addEventListener('click', (e) => {
-    if (e.target.id === 'reportModal') {
-      document.getElementById('reportModal').classList.remove('active');
-    }
   });
 
   // 设置时间模态框关闭事件
@@ -1979,277 +2334,12 @@ window.hideTestButtons = function () {
   }
 };
 
-// 报告相关逻辑
-let currentReportAction = null;
+// ==================== 侧栏「智能总结」 ====================
+// 报告已移到「📊 报告」标签页（基于禅道数据，按日历查看）。侧栏按钮与历史报告按钮由 reports.js 绑定。
 
-// 检查今天是否生成过报告
+/** 兼容旧调用点（测试按钮执行后）：刷新报告页日历 */
 async function checkTodayReports() {
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/history?limit=100`);
-    const result = await response.json();
-
-    if (result.success) {
-      const today = new Date().toISOString().split('T')[0];
-      const currentWeek = getWeekRange();
-      const currentMonth = getMonthRange();
-
-      // 查找最后一次的各类报告
-      const dailyReport = result.data.find(r => r.type === 'daily' && r.date === today);
-      const weeklyReport = result.data.find(r => r.type === 'weekly' && r.dateLabel === currentWeek.label);
-      const monthlyReport = result.data.find(r => r.type === 'monthly' && r.dateLabel === currentMonth.label);
-
-      // 更新按钮状态
-      updateReportButton('daily', dailyReport, '日报');
-      updateReportButton('weekly', weeklyReport, '周报');
-      updateReportButton('monthly', monthlyReport, '月报');
-    }
-  } catch (err) {
-    console.warn('检查报告状态失败:', err);
-  }
-}
-
-// 获取本周范围
-function getWeekRange() {
-  const now = new Date();
-  const day = now.getDay() || 7;
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day + 1);
-  const label = `${start.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })} - ${now.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}周报`;
-  return { label, start: start.toISOString().split('T')[0] };
-}
-
-// 获取本月范围
-function getMonthRange() {
-  const now = new Date();
-  const label = `${now.getFullYear()}年${now.getMonth() + 1}月总结`;
-  return { label, start: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01` };
-}
-
-// 更新报告按钮状态
-function updateReportButton(type, report, typeName) {
-  const btn = document.getElementById(`gen${type.charAt(0).toUpperCase() + type.slice(1)}Btn`);
-
-  if (report) {
-    lastReports[type] = report;
-    btn.textContent = `打开${typeName}`;
-    btn.dataset.mode = 'open';
-    btn.dataset.reportId = report.id;
-  } else {
-    lastReports[type] = null;
-    btn.textContent = `生成${typeName}`;
-    btn.dataset.mode = 'generate';
-    delete btn.dataset.reportId;
-  }
-}
-
-function bindReportEvents() {
-  const types = { daily: '日报', weekly: '周报', monthly: '月报' };
-
-  Object.keys(types).forEach(type => {
-    const btn = document.getElementById(`gen${type.charAt(0).toUpperCase() + type.slice(1)}Btn`);
-    if (btn) {
-      btn.addEventListener('click', () => handleReportClick(type, btn, types[type]));
-    }
-  });
-}
-
-async function handleReportClick(type, btnElement, typeName) {
-  const mode = btnElement.dataset.mode || 'generate';
-
-  if (mode === 'open' && btnElement.dataset.reportId) {
-    // 打开现有报告
-    await openReportById(btnElement.dataset.reportId, type, btnElement, typeName);
-  } else {
-    // 生成新报告
-    await handleGenerateReport(type, btnElement, typeName);
-  }
-}
-
-async function handleGenerateReport(type, btnElement, typeName) {
-  try {
-    const originalText = btnElement.textContent;
-    btnElement.textContent = '生成中...';
-    btnElement.disabled = true;
-
-    // 同步 webhook 配置到后端（确保推送能正常工作）
-    const savedConfig = localStorage.getItem('workAssistantConfig');
-    if (savedConfig) {
-      const config = JSON.parse(savedConfig);
-      if (config.webhookUrl) {
-        await fetch(`${API_BASE_URL}/api/webhook/config`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: config.webhookUrl,
-            type: config.webhookType || 'generic'
-          })
-        });
-      }
-    }
-
-    // 传递选择的日期参数和今日工时信息
-    const dateParam = selectedDate || new Date().toISOString().split('T')[0];
-    const workHours = todayWorkHours > 0 ? todayWorkHours : null;
-    const params = new URLSearchParams({ date: dateParam });
-    if (workHours) params.append('workHours', workHours.toString());
-
-    const response = await fetch(`${API_BASE_URL}/api/report/generate/${type}?${params.toString()}`, { method: 'POST' });
-    const result = await response.json();
-
-    if (result.success) {
-      // 更新按钮状态为打开
-      lastReports[type] = result.data;
-      btnElement.textContent = `打开${typeName}`;
-      btnElement.dataset.mode = 'open';
-      btnElement.dataset.reportId = result.data.id;
-
-      showReportModal(result.data, type, btnElement, typeName);
-    } else {
-      Toast.error(`生成失败: ${result.error}`);
-      btnElement.textContent = originalText;
-    }
-  } catch (err) {
-    Toast.error(`网络错误: ${err.message}`);
-    btnElement.textContent = `生成${typeName}`;
-  } finally {
-    btnElement.disabled = false;
-  }
-}
-
-// 根据ID打开报告
-async function openReportById(reportId, type, btnElement, typeName) {
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/history?limit=100`);
-    const result = await response.json();
-
-    if (result.success) {
-      const report = result.data.find(r => r.id === reportId);
-      if (report) {
-        showReportModal(report, type, btnElement, typeName);
-      } else {
-        Toast.warning('报告不存在，请重新生成');
-        btnElement.textContent = `生成${typeName}`;
-        btnElement.dataset.mode = 'generate';
-        delete btnElement.dataset.reportId;
-      }
-    }
-  } catch (err) {
-    Toast.error('加载报告失败: ' + err.message);
-  }
-}
-
-// 格式化报告项（高亮状态标签）
-function formatReportItem(item) {
-  let html = escapeHtml(item);
-
-  // 高亮 [待办] 标签 - 橙色
-  html = html.replace(/\[待办\]/g, '<span style="display: inline-block; padding: 2px 6px; border-radius: 3px; background: #fff3cd; color: #856404; font-size: 11px; margin-right: 4px;">[待办]</span>');
-
-  // 高亮 [进行中] 标签 - 蓝色
-  html = html.replace(/\[进行中\]/g, '<span style="display: inline-block; padding: 2px 6px; border-radius: 3px; background: #cfe2ff; color: #084298; font-size: 11px; margin-right: 4px;">[进行中]</span>');
-
-  // 高亮时间信息 - 灰色斜体
-  html = html.replace(/$$提醒: ([^)]+)$$/g, '<span style="color: #6c757d; font-size: 12px; font-style: italic;">(提醒: $1)</span>');
-  html = html.replace(/$$截止: ([^)]+)$$/g, '<span style="color: #dc3545; font-size: 12px; font-weight: 500;">(截止: $1)</span>');
-
-  return html;
-}
-
-function showReportModal(report, type, originBtn, typeName) {
-  const modal = document.getElementById('reportModal');
-  const title = document.getElementById('reportModalTitle');
-  const body = document.getElementById('reportModalBody');
-
-  title.textContent = report.dateLabel || report.date || '智能汇报';
-
-  body.innerHTML = `
-    <div style="margin-bottom: 16px;">
-      <h4 style="margin-bottom: 8px;">总览</h4>
-      <p style="color: #666; font-size: 14px;">${escapeHtml(report.summary)}</p>
-    </div>
-    ${report.completed?.length ? `
-    <div style="margin-bottom: 16px;">
-      <h4 style="margin-bottom: 8px;">✅ 已完成</h4>
-      <ul style="padding-left: 20px; color: #555; font-size: 14px;">
-        ${report.completed.map(c => `<li style="margin-bottom: 4px;">${formatReportItem(c)}</li>`).join('')}
-      </ul>
-    </div>` : ''}
-    ${report.tomorrowFocus?.length ? `
-    <div style="margin-bottom: 16px;">
-      <h4 style="margin-bottom: 8px;">🎯 待办/进行中</h4>
-      <ul style="padding-left: 20px; color: #555; font-size: 14px;">
-        ${report.tomorrowFocus.map(c => `<li style="margin-bottom: 4px;">${formatReportItem(c)}</li>`).join('')}
-      </ul>
-    </div>` : ''}
-    ${report.risks?.length ? `
-    <div style="margin-bottom: 16px;">
-      <h4 style="margin-bottom: 8px; color: #e74c3c;">⚠️ 风险建议</h4>
-      <ul style="padding-left: 20px; color: #e74c3c; font-size: 14px;">
-        ${report.risks.map(c => `<li style="margin-bottom: 4px;">${escapeHtml(c)}</li>`).join('')}
-      </ul>
-    </div>` : ''}
-  `;
-
-  // 绑定 Modal 按钮
-  const delBtn = document.getElementById('deleteReportBtn');
-  const regenBtn = document.getElementById('regenReportBtn');
-  const pushBtn = document.getElementById('pushReportBtn');
-
-  // 确保按钮可见
-  delBtn.style.display = 'inline-block';
-  regenBtn.style.display = 'inline-block';
-  pushBtn.style.display = 'inline-block';
-
-  // 清除旧事件
-  const newDelBtn = delBtn.cloneNode(true);
-  delBtn.parentNode.replaceChild(newDelBtn, delBtn);
-  const newRegenBtn = regenBtn.cloneNode(true);
-  regenBtn.parentNode.replaceChild(newRegenBtn, regenBtn);
-  const newPushBtn = pushBtn.cloneNode(true);
-  pushBtn.parentNode.replaceChild(newPushBtn, pushBtn);
-
-  newDelBtn.onclick = async () => {
-    const confirmed = await showConfirm('删除报告', '确定要删除此报告吗？删除后无法恢复。');
-    if (confirmed) {
-      await fetch(`${API_BASE_URL}/api/report/${report.id}`, { method: 'DELETE' });
-      modal.classList.remove('active');
-      originBtn.textContent = `生成${typeName}`;
-      originBtn.dataset.mode = 'generate';
-      delete originBtn.dataset.reportId;
-      lastReports[type] = null;
-      loadHistoryPreview();
-      Toast.success('报告已删除');
-    }
-  };
-
-
-  newRegenBtn.onclick = () => {
-    // 使用报告的原始日期，而不是当前选中日期
-    if (report.date) {
-      selectedDate = report.date;
-    }
-    modal.classList.remove('active');
-    handleGenerateReport(type, originBtn, typeName);
-  };
-  newPushBtn.onclick = async () => {
-    newPushBtn.textContent = '推送中...';
-    newPushBtn.disabled = true;
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/report/${report.id}/push`, { method: 'POST' });
-      const resJson = await res.json();
-      if (!resJson.success) {
-        Toast.error('推送失败:' + resJson.error);
-      } else {
-        Toast.success('推送成功');
-      }
-    } catch (err) {
-      Toast.error('网络错误:' + err.message);
-    } finally {
-      newPushBtn.textContent = '推送通知';
-      newPushBtn.disabled = false;
-    }
-  };
-
-  modal.classList.add('active');
+  if (typeof ReportPage !== 'undefined') ReportPage.refresh();
 }
 
 // 加载日历数据
@@ -2414,6 +2504,9 @@ async function loadTasksByDate(dateStr) {
 }
 
 function renderTasks() {
+  // 优先级菜单挂在 body 上，随卡片重建；先清掉旧的，避免已删除任务的菜单残留
+  document.querySelectorAll('.priority-menu').forEach(m => m.remove());
+
   let filteredTasks = [...allTasks];
 
   // 排序规则：手动拖拽 > 优先级 > 修改时间
@@ -2564,12 +2657,13 @@ function createTaskCard(task) {
             ${escapeHtml(task.title)}
           </span>
           ${task.zentaoId
-            ? `<span class="zentao-task-link" data-task-id="${task.zentaoId}" style="color: #3b82f6; text-decoration: none; font-size: 12px; cursor: pointer;">#${task.zentaoId}</span>`
+            ? `<a class="zentao-task-link" href="#" role="button" data-task-id="${task.zentaoId}" title="在禅道中打开 #${task.zentaoId}" style="color: #3b82f6; text-decoration: none; font-size: 12px; cursor: pointer;">#${task.zentaoId}</a>`
             : `<button class="sync-to-zentao-btn" data-task-id="${task.id}" style="background: #10b981; color: white; border: none; padding: 2px 6px; border-radius: 3px; font-size: 11px; cursor: pointer; transition: background 0.2s;" title="同步到禅道">同步</button>`
           }
           ${syncBadgeHTML}
+          ${attachmentBadgeHTML(task)}
         </div>
-        ${task.executionName ? `<span class="execution-tag" style="margin-top: 4px;">${escapeHtml(task.executionName)}</span>` : ''}
+        <button type="button" class="execution-tag execution-tag-btn${task.executionName ? '' : ' is-empty'}" data-exec-task="${escapeHtml(task.id)}" title="点击修改所属执行" style="margin-top: 4px;">${task.executionName ? escapeHtml(task.executionName) : '＋ 设置执行'}</button>
       </div>
       ${priorityHTML}
     </div>
@@ -2618,36 +2712,36 @@ function createTaskCard(task) {
   const priorityBtn = card.querySelector('.priority-toggle');
 
   if (priorityBtn) {
-    // 创建菜单（挂载到 body，避免被 overflow 裁剪）
-    let priorityMenu = document.querySelector(`.priority-menu-${task.id}`);
-    if (!priorityMenu) {
-      priorityMenu = document.createElement('div');
-      priorityMenu.className = `priority-menu priority-menu-${task.id}`;
-      priorityMenu.style.cssText = 'display:none; position:fixed; background:white; border:1px solid #e2e8f0; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:99999; min-width:60px; padding:4px 0;';
-      priorityMenu.innerHTML = `
-        ${priority !== 1 ? `<div class="priority-option" data-priority="1" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#ef4444; text-align:center;">P1</div>` : ''}
-        ${priority !== 2 ? `<div class="priority-option" data-priority="2" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#f59e0b; text-align:center;">P2</div>` : ''}
-        ${priority !== 3 ? `<div class="priority-option" data-priority="3" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#3b82f6; text-align:center;">P3</div>` : ''}
-        ${priority !== 4 ? `<div class="priority-option" data-priority="4" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#9ca3af; text-align:center;">P4</div>` : ''}
-      `;
-      document.body.appendChild(priorityMenu);
+    // 菜单挂载到 body（避免被 overflow 裁剪）。每次渲染卡片都重建：
+    // 旧实现复用 body 上的菜单、却每次渲染都再绑一遍点击事件，渲染 N 次后点一下就发 N 次更新
+    // （禅道按 lastEditedDate 拒绝并发编辑，于是报「同步失败」）；菜单选项也停留在第一次的优先级。
+    document.querySelectorAll(`.priority-menu-${task.id}`).forEach(m => m.remove());
+    const priorityMenu = document.createElement('div');
+    priorityMenu.className = `priority-menu priority-menu-${task.id}`;
+    priorityMenu.style.cssText = 'display:none; position:fixed; background:white; border:1px solid #e2e8f0; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:99999; min-width:60px; padding:4px 0;';
+    priorityMenu.innerHTML = `
+      ${priority !== 1 ? `<div class="priority-option" data-priority="1" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#ef4444; text-align:center;">P1</div>` : ''}
+      ${priority !== 2 ? `<div class="priority-option" data-priority="2" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#f59e0b; text-align:center;">P2</div>` : ''}
+      ${priority !== 3 ? `<div class="priority-option" data-priority="3" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#3b82f6; text-align:center;">P3</div>` : ''}
+      ${priority !== 4 ? `<div class="priority-option" data-priority="4" style="padding:6px 12px; cursor:pointer; font-size:12px; font-weight:500; color:#9ca3af; text-align:center;">P4</div>` : ''}
+    `;
+    document.body.appendChild(priorityMenu);
 
-      // 绑定菜单选项事件
-      priorityMenu.querySelectorAll('.priority-option').forEach(option => {
-        option.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const newPriority = parseInt(e.currentTarget.dataset.priority);
-          updateTaskPriority(task.id, newPriority);
-          priorityMenu.style.display = 'none';
-        });
-        option.addEventListener('mouseenter', () => {
-          option.style.background = '#f1f5f9';
-        });
-        option.addEventListener('mouseleave', () => {
-          option.style.background = 'transparent';
-        });
+    // 绑定菜单选项事件
+    priorityMenu.querySelectorAll('.priority-option').forEach(option => {
+      option.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const newPriority = parseInt(e.currentTarget.dataset.priority);
+        updateTaskPriority(task.id, newPriority);
+        priorityMenu.style.display = 'none';
       });
-    }
+      option.addEventListener('mouseenter', () => {
+        option.style.background = '#f1f5f9';
+      });
+      option.addEventListener('mouseleave', () => {
+        option.style.background = 'transparent';
+      });
+    });
 
     // 点击按钮切换菜单显示
     priorityBtn.addEventListener('click', (e) => {
@@ -2666,22 +2760,6 @@ function createTaskCard(task) {
       } else {
         priorityMenu.style.display = 'none';
       }
-    });
-
-    // 点击选项更新优先级
-    priorityMenu.querySelectorAll('.priority-option').forEach(option => {
-      option.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const newPriority = parseInt(e.currentTarget.dataset.priority);
-        updateTaskPriority(task.id, newPriority);
-        priorityMenu.style.display = 'none';
-      });
-      option.addEventListener('mouseenter', () => {
-        option.style.background = '#f1f5f9';
-      });
-      option.addEventListener('mouseleave', () => {
-        option.style.background = 'transparent';
-      });
     });
   }
 
@@ -2762,12 +2840,13 @@ function createTaskCard(task) {
   });
 
   // 任务 ID 链接点击事件 - 在扩展内展示详情（不再打开禅道标签页）
+  // 禅道 ID：在浏览器里打开禅道任务页（自动登录）；插件内详情点卡片打开
   const taskLink = card.querySelector('.zentao-task-link');
   if (taskLink && task.zentaoId) {
     taskLink.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      showTaskDetail(task);
+      openInZentao('task', task.zentaoId);
     });
   }
 
@@ -2916,13 +2995,13 @@ async function initTaskModal() {
   // 关闭按钮
   const closeBtn = document.getElementById('closeTaskCreateModal');
   if (closeBtn) {
-    closeBtn.addEventListener('click', hideTaskModal);
+    closeBtn.addEventListener('click', requestCloseTaskModal);
   }
 
   // 取消按钮
   const cancelBtn = document.getElementById('cancelTaskCreateBtn');
   if (cancelBtn) {
-    cancelBtn.addEventListener('click', hideTaskModal);
+    cancelBtn.addEventListener('click', requestCloseTaskModal);
   }
 
   // 点击弹框外部关闭
@@ -2930,7 +3009,7 @@ async function initTaskModal() {
   if (taskModal) {
     taskModal.addEventListener('click', (e) => {
       if (e.target === taskModal) {
-        hideTaskModal();
+        requestCloseTaskModal();
       }
     });
   }
@@ -2945,8 +3024,9 @@ async function initTaskModal() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       const modal = document.getElementById('taskCreateModal');
-      if (modal && modal.style.display === 'flex') {
-        hideTaskModal();
+      // 确认框开着时 Esc 交给确认框，不连带关掉弹窗
+      if (modal && modal.style.display === 'flex' && !document.querySelector('#confirmDialog.active')) {
+        requestCloseTaskModal();
       }
     }
   });
@@ -2956,6 +3036,22 @@ async function initTaskModal() {
 
   // 初始化指派人和抄送人的 multi-select（页面初始化阶段无 initialData）
   await initTaskUserSelects();
+
+  // 附件选择区：可在弹窗任意位置粘贴截图
+  const attachmentsHost = document.getElementById('taskAttachments');
+  if (attachmentsHost && typeof AttachmentPicker !== 'undefined') {
+    taskAttachmentPicker = new AttachmentPicker(attachmentsHost);
+    taskAttachmentPicker.bindPaste(taskModal);
+  }
+
+  // 记录用户亲手改过的字段：识别结果晚到时不覆盖这些字段
+  TASK_INTAKE_FIELDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const mark = () => { if (taskIntakeSession) taskIntakeSession.touched.add(id); };
+    el.addEventListener('input', mark);
+    el.addEventListener('change', mark);
+  });
 
   // 草稿自动保存
   const taskInputs = ['taskTitle', 'taskDescription', 'taskExecution', 'taskPriority', 'taskProgress', 'taskDueDate'];
@@ -2997,8 +3093,9 @@ async function showTaskModal(initialData = {}) {
     document.getElementById('taskExecution').value = initialData.executionId;
     console.log('[TaskModal] 预选执行ID:', initialData.executionId);
   }
-  if (initialData.priority) {
-    document.getElementById('taskPriority').value = initialData.priority;
+  // 显式传入（含默认值）时必须覆盖，否则会残留上一次打开时的值
+  if ('priority' in initialData) {
+    document.getElementById('taskPriority').value = initialData.priority || 3;
   }
   // 进度：AI 明确识别出进度才填，否则一律归 0。
   // 这里必须「无条件赋值」而不能只在有值时赋值 ——
@@ -3007,8 +3104,8 @@ async function showTaskModal(initialData = {}) {
   document.getElementById('taskProgress').value = Number.isFinite(initialData.progress)
     ? initialData.progress
     : 0;
-  if (initialData.dueDate) {
-    document.getElementById('taskDueDate').value = initialData.dueDate;
+  if ('dueDate' in initialData) {
+    document.getElementById('taskDueDate').value = toDueDateTimeLocal(initialData.dueDate);
   }
 
   modal.style.display = 'flex';
@@ -3030,6 +3127,22 @@ function hideTaskModal() {
   if (modal) {
     modal.style.display = 'none';
   }
+  // 关闭即放弃本次识别：晚到的识别结果不会再回填，也不会落库
+  taskIntakeSession = null;
+  setTaskAiStatus(null);
+  if (taskAttachmentPicker) taskAttachmentPicker.clear();
+}
+
+/**
+ * 用户主动关闭新建任务弹窗（关闭按钮 / 取消 / 遮罩 / Esc）：已添加附件时先确认，避免截图白截
+ */
+async function requestCloseTaskModal() {
+  const count = taskAttachmentPicker ? taskAttachmentPicker.count : 0;
+  if (count > 0) {
+    const ok = await Confirm.show('放弃附件？', `已添加 ${count} 个附件，关闭后不会保存。`, '关闭', '继续编辑');
+    if (!ok) return;
+  }
+  hideTaskModal();
 }
 
 /**
@@ -3132,7 +3245,7 @@ async function initTaskUserSelects(initialData = {}) {
   if (!users || Object.keys(users).length === 0) {
     console.warn('[TaskModal] 用户列表未加载，尝试从禅道加载...');
     try {
-      await ZentaoBrowserClient.loadUsersFromTeamPage();
+      await ZentaoBrowserClient.refreshUsersFromZentao();
       users = await ZentaoBrowserClient.getUsers();
       console.log('[TaskModal] 从禅道加载后的用户数量:', users ? Object.keys(users).length : 0);
     } catch (err) {
@@ -3194,6 +3307,9 @@ function initTaskMultiSelect(fieldId, users) {
     return;
   }
 
+  // 每次打开弹窗都会重新初始化：先撤掉上一次绑定的监听，避免同一元素上越绑越多
+  const listenerSignal = resetListenerScope(container);
+
   // 存储选中的用户
   const selectedUsers = new Set();
 
@@ -3231,7 +3347,7 @@ function initTaskMultiSelect(fieldId, users) {
           option.classList.add('selected');
         }
         updateTaskMultiSelectDisplay(fieldId, selectedUsers, users);
-      });
+      }, { signal: listenerSignal });
 
       optionsContainer.appendChild(option);
     });
@@ -3247,7 +3363,7 @@ function initTaskMultiSelect(fieldId, users) {
       dropdown.style.display = isVisible ? 'none' : 'block';
       display.classList.toggle('active', !isVisible);
     }
-  });
+  }, { signal: listenerSignal });
 
   // 点击其他地方关闭下拉
   document.addEventListener('click', (e) => {
@@ -3255,7 +3371,7 @@ function initTaskMultiSelect(fieldId, users) {
       dropdown.style.display = 'none';
       display.classList.remove('active');
     }
-  });
+  }, { signal: listenerSignal });
 
   // 初始化渲染选项
   renderOptions();
@@ -3374,6 +3490,18 @@ function getTaskSelectedUsers(fieldId) {
  * 从弹框提交任务
  */
 async function submitTaskFromModal() {
+  const session = taskIntakeSession;
+
+  // 识别还没回来、执行又留在「自动选择」：等识别结果（最多 8 秒），
+  // 否则会直接落到默认执行。用户自己选了执行就不用等。
+  const execSelect = document.getElementById('taskExecution');
+  if (session && session.pending && !session.settled && execSelect && !execSelect.value) {
+    const restoreWait = ButtonStateManager.setLoading('submitTaskCreateBtn', { loadingText: '等待识别…' });
+    await Promise.race([session.pending, new Promise(resolve => setTimeout(resolve, TASK_SUBMIT_WAIT_MS))]);
+    restoreWait();
+    if (taskIntakeSession !== session) return; // 等待期间弹窗被关掉了
+  }
+
   const title = document.getElementById('taskTitle').value.trim();
   const description = document.getElementById('taskDescription').value.trim();
   const executionId = document.getElementById('taskExecution').value;
@@ -3423,7 +3551,15 @@ async function submitTaskFromModal() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         content,
+        // 带 title = 弹窗提交：后端直接用表单值落库，不再调用大模型
+        title,
         executionId: executionId || undefined,
+        // 只有用户亲手选/改的执行才记入学习库，单纯采纳识别建议不算
+        executionPickedByUser: session
+          ? !!session.userExecutionId || session.touched.has('taskExecution')
+          : !!executionId,
+        // 预览阶段的识别结果（提醒时间、工期等表单里没有的字段）
+        analysis: session && session.analysis ? session.analysis : undefined,
         priority,
         status,
         progress,
@@ -3437,6 +3573,8 @@ async function submitTaskFromModal() {
 
     if (result.success) {
       const task = result.data;
+      // 先取出附件（关闭弹窗会清空选择区）
+      const attachmentItems = taskAttachmentPicker ? taskAttachmentPicker.getItems() : [];
 
       // —— 乐观 UI：本地任务已落库，立刻上屏并关掉表单 ——
       // 禅道同步是 1~3 秒级的慢操作，放在后台跑，不阻塞用户下一步动作。
@@ -3449,13 +3587,24 @@ async function submitTaskFromModal() {
       // 后台同步日历（同样不阻塞界面）
       loadCalendar().catch(err => console.warn('[TaskModal] 日历刷新失败:', err));
 
-      // —— 后台同步禅道 ——
-      syncNewTaskToZentao(task, {
-        executionId,
-        priority,
-        dueDate,
-        assignees,
-        ccUsers
+      // —— 后台：先把附件存进本地附件区，再同步禅道 ——
+      // 任务拿到禅道 ID 后，后端会把附件推送上去（截图同时插进任务描述）
+      const attachmentsSaved = attachmentItems.length
+        ? AttachmentApi.uploadAll(task.id, attachmentItems, { inline: true }).then(({ failed }) => {
+          if (failed.length) Toast.error(`${failed.length} 个附件添加失败：${failed.map(f => f.message).join('；')}`, 6000);
+        }).catch(err => Toast.error(`附件添加失败：${err.message}`, 6000))
+        : Promise.resolve();
+      attachmentsSaved.finally(async () => {
+        await syncNewTaskToZentao(task, {
+          executionId,
+          priority,
+          dueDate,
+          assignees,
+          ccUsers
+        });
+        // 带附件的：任务拿到禅道 ID 后后端开始推送附件，刷新一次列表，
+        // 角标显示「上传中」并由观察器在推送结束后再刷新
+        if (attachmentItems.length) loadTasks().catch(() => { });
       });
     } else {
       Toast.error(result.error || '创建任务失败');
@@ -3609,151 +3758,236 @@ function clearTaskDraft() {
 // ==================== 原有任务添加逻辑 ====================
 
 // 添加任务
+/**
+ * 新建任务弹窗的识别会话
+ *
+ * 流程：回车 → 弹窗立即打开（原文先填进标题）→ 后台调用预览接口识别 →
+ * 结果回来后只填用户**还没动过**的字段。确认时才落库，取消即真的取消。
+ *
+ * touched：用户亲手改过的字段 id。程序赋值不会触发 input/change 事件，
+ * 所以只有真实的用户操作会被记进来。
+ */
+let taskIntakeSession = null;
+/** 新建任务弹窗的附件选择区（initTaskModal 里创建） */
+let taskAttachmentPicker = null;
+const TASK_INTAKE_FIELDS = ['taskTitle', 'taskDescription', 'taskExecution', 'taskPriority', 'taskProgress', 'taskDueDate'];
+const TASK_PREVIEW_TIMEOUT_MS = 12000;
+const TASK_SUBMIT_WAIT_MS = 8000;
+
+function setTaskAiStatus(kind, text) {
+  const el = document.getElementById('taskAiStatus');
+  if (!el) return;
+  if (!kind) {
+    el.hidden = true;
+    el.textContent = '';
+    return;
+  }
+  el.hidden = false;
+  el.className = `task-ai-status is-${kind}`;
+  el.textContent = text;
+}
+
+/** 把识别结果填入未被用户改过的字段，并短暂高亮被填的字段 */
+function fillUntouchedTaskField(session, id, value) {
+  if (value === undefined || value === null || value === '') return false;
+  if (session.touched.has(id)) return false;
+  const el = document.getElementById(id);
+  if (!el || String(el.value) === String(value)) return false;
+  if (el.tagName === 'SELECT' && !Array.from(el.options).some(o => o.value === String(value))) return false;
+  el.value = value;
+  el.classList.add('task-ai-filled');
+  setTimeout(() => el.classList.remove('task-ai-filled'), 1500);
+  return true;
+}
+
+/**
+ * 截止日期 → datetime-local 输入框能接受的值（YYYY-MM-DDTHH:mm）
+ *
+ * 识别结果只有日期（YYYY-MM-DD），直接塞给 datetime-local 会被浏览器静默丢弃，
+ * 截止日期就永远预填不上。补上时刻：同一天有提醒时间就用提醒时刻，否则按 18:00 下班前。
+ */
+function toDueDateTimeLocal(dueDate, reminderTime) {
+  if (!dueDate) return '';
+  const str = String(dueDate);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(str)) return str.slice(0, 16);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) return '';
+  if (reminderTime) {
+    const d = new Date(reminderTime);
+    const p = (n) => String(n).padStart(2, '0');
+    if (!Number.isNaN(d.getTime()) && `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` === str) {
+      return `${str}T${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+  }
+  return `${str}T18:00`;
+}
+
+/** 识别来源 → 状态条文案 */
+function describeTaskPreview(result) {
+  const s = result.suggestion;
+  const execText = s && s.executionName
+    ? `执行「${s.executionName}」`
+    : '未识别到执行，保存时使用默认执行';
+  switch (result.source) {
+    case 'ai':
+      return { kind: 'ok', text: `✨ AI 已识别：${execText}。已自动填入你没改过的字段` };
+    case 'local':
+      if (!result.aiAvailable) {
+        return { kind: 'fallback', text: `AI 未配置，已按本地规则识别时间、优先级和进度；${execText}` };
+      }
+      return { kind: 'ok', text: `⚡ 已根据${s && s.matchedBy === 'learning' ? '历史记录' : s && s.matchedBy === 'user' ? '你选择的执行' : '关键词'}快速识别：${execText}` };
+    case 'ai-timeout':
+      return { kind: 'fallback', text: `AI 响应超时，已按本地规则识别；${execText}，请检查后提交` };
+    default:
+      return { kind: 'fallback', text: `AI 识别失败，已按本地规则识别；${execText}，请检查后提交` };
+  }
+}
+
+/**
+ * 后台请求识别结果并回填
+ * @param {Object} session
+ * @param {{localOnly?: boolean}} [opts] - localOnly：只要本地规则结果（毫秒级），用于先秒填
+ * @returns {Promise<Object|null>} 识别结果；失败或会话已失效返回 null
+ */
+async function runTaskPreview(session, opts = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TASK_PREVIEW_TIMEOUT_MS);
+  try {
+    const resp = await fetch(`${API_BASE_URL}/api/task`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: session.content,
+        executionId: session.userExecutionId || undefined,
+        preview: true,
+        localOnly: !!opts.localOnly
+      }),
+      signal: controller.signal
+    });
+    const result = await resp.json();
+    if (taskIntakeSession !== session) return null; // 弹窗已关闭或已开始新的一次
+    if (!result.success) throw new Error(result.error || '识别失败');
+
+    session.analysis = result.analysis || null;
+    session.suggestion = result.suggestion || null;
+    session.source = result.source;
+
+    const a = result.analysis || {};
+    fillUntouchedTaskField(session, 'taskTitle', a.title);
+    fillUntouchedTaskField(session, 'taskPriority', a.priority);
+    if (Number.isFinite(a.progress) && a.progress > 0) fillUntouchedTaskField(session, 'taskProgress', a.progress);
+    fillUntouchedTaskField(session, 'taskDueDate', toDueDateTimeLocal(a.dueDate, a.reminderTime));
+    if (!session.userExecutionId && result.suggestion) {
+      fillUntouchedTaskField(session, 'taskExecution', result.suggestion.executionId);
+    }
+
+    const { kind, text } = describeTaskPreview(result);
+    if (result.aiPending) {
+      // 本地结果先填上了，AI 还在路上：保持「识别中」样式
+      const execText = result.suggestion && result.suggestion.executionName ? `（执行「${result.suggestion.executionName}」）` : '';
+      setTaskAiStatus('loading', `⚡ 已按本地规则快速填入${execText}，AI 正在补充…`);
+    } else {
+      setTaskAiStatus(kind, text);
+    }
+    if (result.aiError) console.warn('[AddTask] AI 识别降级:', result.aiError);
+
+    // 低置信度：让用户确认执行归属（用户已经自己选了执行就不打扰）
+    if (result.needConfirm && Array.isArray(result.candidates) && result.candidates.length > 0 &&
+        !session.touched.has('taskExecution')) {
+      try {
+        const picked = await AiConfirmDialog.show(
+          '确认任务归属',
+          'AI 无法确定这条任务属于哪个执行，请选择：',
+          result.candidates,
+          document.getElementById('taskExecution')?.value || ''
+        );
+        if (picked && taskIntakeSession === session) {
+          const selectEl = document.getElementById('taskExecution');
+          if (selectEl) {
+            selectEl.value = picked.id;
+            selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          setTaskAiStatus('ok', `已选择执行「${picked.name}」，提交后会记住，下次同类任务自动匹配`);
+        }
+      } catch (e) {
+        console.warn('[AddTask] 归属确认取消:', e.message);
+      }
+    }
+    return result;
+  } catch (err) {
+    if (taskIntakeSession !== session) return null;
+    console.warn('[AddTask] 识别失败:', err.message);
+    setTaskAiStatus('error', err.name === 'AbortError'
+      ? '识别超时，请手动填写；保存时会按默认执行处理'
+      : '识别失败，请手动填写；保存时会按默认执行处理');
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 打开空白的新建任务表单（手动填写，不做识别） */
+async function openBlankTaskModal() {
+  taskIntakeSession = null;
+  setTaskAiStatus(null);
+  await showTaskModal();
+}
+
 async function addTask() {
   const input = document.getElementById('taskInput');
   const content = input.value.trim();
 
-  // 检查任务弹框是否已经打开
+  // 弹框已打开时再次触发 = 关闭
   const taskModal = document.getElementById('taskCreateModal');
   if (taskModal && taskModal.style.display === 'flex') {
-    // 如果弹框已打开，关闭它并取消添加
-    console.log('[AddTask] 任务弹框已打开，取消添加');
-    hideTaskModal();
+    await requestCloseTaskModal();
     return;
   }
 
   if (!content) {
-    // 如果输入框为空，直接打开空白弹框
-    await showTaskModal();
+    // 输入框为空：直接打开空白弹框
+    await openBlankTaskModal();
     return;
   }
 
-  // 获取选择的执行ID
   const selectedExecutionId = ExecutionSelector.getSelectedExecution();
-  console.log('[AddTask] ========== 开始 AI 分析 ==========');
-  console.log('[AddTask] 任务内容:', content);
-  console.log('[AddTask] 用户选择的执行ID:', selectedExecutionId || '(AI自动选择)');
-
-  // 立即清空输入框
   input.value = '';
 
-  // 显示加载提示
-  const originalPlaceholder = input.placeholder;
-  input.placeholder = '✨ AI 正在分析任务，请稍候...';
+  const session = {
+    content,
+    userExecutionId: selectedExecutionId || '',
+    touched: new Set(),
+    analysis: null,
+    suggestion: null,
+    source: null,
+    pending: null,
+    settled: false
+  };
+  taskIntakeSession = session;
 
-  // 使用 ButtonStateManager 管理输入框状态
-  const restoreButton = ButtonStateManager.setLoading('addTaskBtn', {
-    loadingText: '分析中...',
-    disableInput: true,
-    inputId: 'taskInput'
+  // 先开弹窗：原文先填进标题，识别结果回来再补其他字段
+  const firstLine = content.split('\n')[0];
+  await showTaskModal({
+    title: firstLine,
+    description: content.includes('\n') ? content.substring(content.indexOf('\n') + 1) : '',
+    executionId: selectedExecutionId || '',
+    priority: 3,
+    progress: 0,
+    dueDate: ''
   });
+  if (taskIntakeSession !== session) return;
 
-  try {
-    // 调用 AI 分析 API
-    const response = await fetch(`${API_BASE_URL}/api/task`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        content,
-        executionId: selectedExecutionId || undefined
-      })
-    });
-
-    const result = await response.json();
-
-    if (result.success && result.data) {
-      console.log('[AddTask] ✓ AI 分析成功');
-      console.log('[AddTask] AI 分析结果:', result.data);
-
-      // —— AI 不可用：明确告知用户，而不是让用户误以为解析"不聪明" ——
-      if (result.aiAvailable === false) {
-        Toast.warning('AI 未配置，任务已按原文保存（标题/时间/优先级需手动填写）', 5000);
-      } else if (result.aiAnalysisFailed) {
-        Toast.warning('AI 解析失败，任务已按原文保存，请手动补充字段', 5000);
-      } else if (result.aiMatch && result.aiMatch.matchedBy) {
-        const m = result.aiMatch;
-        const viaMap = { 'ai-unified': 'AI', rule: '关键词', learning: '历史记录' };
-        console.log('[AddTask] 归属判定:', m.matchedBy, m.confidence, m.reason);
-        if (result.needConfirm) {
-          Toast.info(`AI 把握不大（${Math.round((m.confidence || 0) * 100)}%），请确认执行归属`, 4000);
-        }
+  setTaskAiStatus('loading', '正在识别执行归属、优先级和时间…你可以先改其他字段');
+  // 两段式：先要本地规则结果（毫秒级）秒填；需要时再等 AI 补充未改过的字段
+  session.pending = (async () => {
+    try {
+      const local = await runTaskPreview(session, { localOnly: true });
+      if (local && local.aiPending && taskIntakeSession === session) {
+        await runTaskPreview(session);
       }
-
-      // 构建 initialData，包含 AI 分析的所有数据
-      const initialData = {
-        title: result.data.title || content.split('\n')[0],
-        description: result.data.content || (content.includes('\n') ? content.substring(content.indexOf('\n') + 1) : ''),
-        executionId: result.data.executionId || selectedExecutionId || '',
-        priority: result.data.priority || 3,
-        status: result.data.status || 'todo',
-        // 注意：progress 为 0 是合法值，必须透传，不能用 || 兜底成 0/空
-        progress: Number.isFinite(result.data.progress) ? result.data.progress : 0,
-        // 工期 → 截止时间（AI 已把「预计3天完成」换算成日期）
-        dueDate: result.data.dueDate || ''
-      };
-
-      console.log('[AddTask] 预填数据:', initialData);
-
-      // 打开任务弹框并预填 AI 分析的数据（等待执行列表加载完成）
-      await showTaskModal(initialData);
-
-      // —— 低置信度：不静默确认，弹出候选让用户选择 ——
-      if (result.needConfirm && Array.isArray(result.confirmCandidates) && result.confirmCandidates.length > 0) {
-        try {
-          const picked = await AiConfirmDialog.show(
-            '确认任务归属',
-            'AI 无法确定这条任务属于哪个执行，请选择：',
-            result.confirmCandidates,
-            initialData.executionId
-          );
-          if (picked) {
-            const selectEl = document.getElementById('taskExecution');
-            if (selectEl) {
-              selectEl.value = picked.id;
-              selectEl.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-            // 记录纠正 → 下次同类描述可直接命中
-            fetch(`${API_BASE_URL}/api/ai/learn`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ content, executionId: picked.id })
-            }).catch(() => { });
-            Toast.success(`已记为「${picked.name}」，下次同类任务会自动匹配`);
-          }
-        } catch (e) {
-          console.warn('[AddTask] 归属确认取消:', e.message);
-        }
-      }
-    } else {
-      // AI 分析失败，打开弹框但只预填原始内容
-      console.warn('[AddTask] AI 分析失败，使用原始内容');
-      Toast.warning('AI 分析失败，请手动填写');
-
-      const initialData = {
-        title: content.split('\n')[0],
-        description: content.includes('\n') ? content.substring(content.indexOf('\n') + 1) : '',
-        executionId: selectedExecutionId || ''
-      };
-
-      await showTaskModal(initialData);
+    } finally {
+      session.settled = true;
     }
-  } catch (err) {
-    console.error('[AddTask] AI 分析出错:', err);
-    Toast.error('AI 分析失败，请手动填写');
-
-    // 出错时也打开弹框，但只预填原始内容
-    const initialData = {
-      title: content.split('\n')[0],
-      description: content.includes('\n') ? content.substring(content.indexOf('\n') + 1) : '',
-      executionId: selectedExecutionId || ''
-    };
-
-    await showTaskModal(initialData);
-  } finally {
-    // 恢复按钮和输入框状态
-    restoreButton();
-    input.placeholder = originalPlaceholder;
-  }
+  })();
 }
 
 /**
@@ -4369,6 +4603,7 @@ async function updateTaskProgress(taskId, progress) {
 
     let progressComment = '';
     let consumedTime = 0;
+    let completionAttachments = [];
 
     // 如果进度有变化，弹出输入框让用户填写工作内容和消耗工时
     if (snapshot.progress !== progress) {
@@ -4378,7 +4613,8 @@ async function updateTaskProgress(taskId, progress) {
         '',                              // placeholder 工作
         '',                              // placeholder 消耗工时
         `更新进度至 ${progress}%`,         // 默认工作
-        1                                 // 默认消耗工时（1小时）
+        1,                                // 默认消耗工时（1小时）
+        { allowAttachments: progress === 100 } // 完成任务时可附上验证截图
       );
 
       // 用户取消则不更新，返回 false
@@ -4389,6 +4625,7 @@ async function updateTaskProgress(taskId, progress) {
 
       progressComment = result.work;
       consumedTime = result.consumed;
+      completionAttachments = result.attachments || [];
     }
 
     // —— 第一步：乐观更新本地 UI，不等任何网络请求 ——
@@ -4427,8 +4664,13 @@ async function updateTaskProgress(taskId, progress) {
     }
 
     // —— 第四步：禅道同步放到后台，不再阻塞界面 ——
+    // 完成时附带的附件：先存进本地附件区，已同步禅道的先推送附件、再改状态
+    // （禅道「关闭任务」表单不带附件，任务关闭后再编辑可能被拒，所以附件必须在状态之前到位）
+    const attachmentsReady = completionAttachments.length
+      ? uploadCompletionAttachments(task, completionAttachments)
+      : Promise.resolve();
     if (task.zentaoId) {
-      syncProgressToZentao(
+      attachmentsReady.then(() => syncProgressToZentao(
         {
           id: taskId,
           zentaoId: task.zentaoId,
@@ -4441,7 +4683,7 @@ async function updateTaskProgress(taskId, progress) {
           consumedTime,
           totalConsumedTime: previousTotal + consumedTime
         }
-      );
+      ));
     }
 
     console.log('[Progress] 进度更新成功，本地状态已更新');
@@ -4453,6 +4695,27 @@ async function updateTaskProgress(taskId, progress) {
     Toast.error('更新进度失败');
     console.warn('更新进度失败:', err);
     return false;
+  }
+}
+
+/**
+ * 完成任务时附带的附件：存进本地附件区；任务已同步禅道则立即推送并等待完成，
+ * 调用方在它之后才改禅道状态。失败不阻塞状态更新（卡片会显示「未上传 · 重试」）。
+ */
+async function uploadCompletionAttachments(task, items) {
+  try {
+    const { uploaded, failed } = await AttachmentApi.uploadAll(task.id, items, { inline: false, push: false });
+    if (failed.length) {
+      Toast.error(`${failed.length} 个附件添加失败：${failed.map(f => f.message).join('；')}`, 6000);
+    }
+    if (uploaded.length && task.zentaoId) {
+      const r = await AttachmentApi.sync(task.id);
+      if (!r.success) Toast.error(`附件上传到禅道失败：${r.message}（可在任务详情里重试）`, 6000);
+    }
+  } catch (err) {
+    Toast.error(`附件上传失败：${err.message}（可在任务详情里重试）`, 6000);
+  } finally {
+    loadTasks().catch(() => { });
   }
 }
 
@@ -4582,7 +4845,7 @@ async function updateTaskPriority(taskId, priority) {
   }
 
   // 后端确认存住了，此时才推送禅道
-  if (task.zentaoId && task.zentaoExecution) {
+  if (task.zentaoId && (task.zentaoExecution || task.executionId)) {
     OptimisticUI.trackSync({
       taskId: taskId,
       quiet: true,
@@ -4590,7 +4853,7 @@ async function updateTaskPriority(taskId, priority) {
       failureMessage: (res) => `本地已更新，但同步禅道失败：${OptimisticUI.explainFailure(res)}`,
       syncFn: () => ZentaoBrowserClient.editTask({
         zentaoId: task.zentaoId,
-        execution: task.zentaoExecution,
+        execution: task.zentaoExecution || task.executionId,
         name: task.title,  // 传入任务标题，用于 desc 字段
         pri: priority
       })
@@ -4677,11 +4940,11 @@ async function updateTaskTitle(taskId, newTitle) {
 
   try {
     // 如果有 zentaoId 和 zentaoExecution，先同步到禅道
-    if (task.zentaoId && task.zentaoExecution) {
+    if (task.zentaoId && (task.zentaoExecution || task.executionId)) {
       try {
         const zentaoResult = await ZentaoBrowserClient.editTask({
           zentaoId: task.zentaoId,
-          execution: task.zentaoExecution,
+          execution: task.zentaoExecution || task.executionId,
           name: trimmedTitle
         });
         if (zentaoResult.success) {
@@ -4906,7 +5169,133 @@ async function handleTaskAction(taskId, action) {
   }
 }
 
-// 搜索任务
+/**
+ * 搜索任务 / Bug：从禅道搜（禅道「全局搜索」，覆盖本账号能看到的全部任务 / Bug，不只是看板上同步下来的）
+ *
+ * 结果列在搜索框下方：已在看板上的点开本地卡片，其余在禅道里打开。
+ * 禅道连不上 / 未启用时，任务搜索退回以前的本地搜索（过滤看板）。
+ */
+const ZentaoSearch = {
+  token: 0,
+
+  attach(inputId, type) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    const wrap = input.parentElement;
+    wrap.classList.add('zsearch-wrap');
+    const panel = document.createElement('div');
+    panel.className = 'zsearch-panel';
+    panel.setAttribute('role', 'listbox');
+    panel.hidden = true;
+    wrap.appendChild(panel);
+    const state = { input, panel, type, localFiltered: false, last: '' };
+    input.setAttribute('autocomplete', 'off');
+    input.addEventListener('input', debounce(() => this.run(state), 400));
+    input.addEventListener('focus', () => { if (input.value.trim() && panel.innerHTML) panel.hidden = false; });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { panel.hidden = true; input.blur(); }
+      if (e.key === 'ArrowDown') { const first = panel.querySelector('.zsearch-item'); if (first) { e.preventDefault(); first.focus(); } }
+    });
+    panel.addEventListener('keydown', (e) => {
+      const items = [...panel.querySelectorAll('.zsearch-item')];
+      const i = items.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown' && i >= 0) { e.preventDefault(); (items[i + 1] || items[i]).focus(); }
+      if (e.key === 'ArrowUp' && i >= 0) { e.preventDefault(); (items[i - 1] || input).focus(); }
+      if (e.key === 'Escape') { panel.hidden = true; input.focus(); }
+    });
+    panel.addEventListener('click', (e) => {
+      const item = e.target.closest('.zsearch-item');
+      if (item) this.open(state, item.dataset);
+    });
+    document.addEventListener('click', (e) => {
+      if (!wrap.contains(e.target)) panel.hidden = true;
+    });
+  },
+
+  async run(state) {
+    const q = state.input.value.trim();
+    if (q === state.last) return;
+    state.last = q;
+    const token = ++this.token;
+    if (!q) {
+      state.panel.hidden = true;
+      state.panel.innerHTML = '';
+      // 之前退回过本地搜索（看板被过滤了）：恢复看板
+      if (state.localFiltered) { state.localFiltered = false; await handleSearch(); }
+      return;
+    }
+    const label = state.type === 'bug' ? 'Bug' : '任务';
+    state.panel.innerHTML = `<div class="zsearch-status"><span class="zsearch-spinner"></span>正在禅道中搜索${label}…</div>`;
+    state.panel.hidden = false;
+    // 两步：先只要命中（约 0.3 秒）马上列出，再查状态 / 指派人等详情补全（约 3 秒）
+    const fetchResults = async (details) => {
+      const resp = await fetch(`${API_BASE_URL}/api/zentao/search?type=${state.type}&q=${encodeURIComponent(q)}${details ? '' : '&details=0'}`);
+      const result = await resp.json().catch(() => ({ success: false, message: `HTTP ${resp.status}` }));
+      if (!result.success) throw new Error(result.message || '搜索失败');
+      return result.data;
+    };
+    try {
+      const quick = await fetchResults(false);
+      if (token !== this.token) return;
+      this.render(state, q, quick, true);
+      if (!quick.items.length) return;
+      const full = await fetchResults(true);
+      if (token !== this.token) return;
+      this.render(state, q, full);
+    } catch (err) {
+      if (token !== this.token) return;
+      if (state.type === 'task') {
+        // 退回本地搜索：过滤看板
+        state.localFiltered = true;
+        await handleSearch();
+        state.panel.innerHTML = `<div class="zsearch-status is-error">禅道搜索失败：${escapeHtml(err.message)}<br>已在看板中显示本地搜索结果</div>`;
+      } else {
+        state.panel.innerHTML = `<div class="zsearch-status is-error">禅道搜索失败：${escapeHtml(err.message)}</div>`;
+      }
+    }
+  },
+
+  render(state, q, { items, total }, loading = false) {
+    const label = state.type === 'bug' ? 'Bug' : '任务';
+    if (!items.length) {
+      state.panel.innerHTML = `<div class="zsearch-status">禅道里没有找到包含「${escapeHtml(q)}」的${label}</div>`;
+      return;
+    }
+    const closed = new Set(['done', 'closed', 'cancel', 'resolved']);
+    const head = `<div class="zsearch-head">禅道中找到 ${total} 个${label}${total > items.length ? `，显示最近编辑的 ${items.length} 个` : ''}${loading ? '<span class="zsearch-spinner zsearch-loading" title="正在读取状态、指派人"></span>' : ''}</div>`;
+    state.panel.innerHTML = head + items.map(x => `
+      <button type="button" class="zsearch-item ${closed.has(x.status) ? 'is-closed' : ''}" role="option"
+        data-type="${x.type}" data-id="${escapeHtml(x.id)}" data-local-id="${escapeHtml(x.localId || '')}">
+        <span class="zsearch-title"><span class="zsearch-id">#${escapeHtml(x.id)}</span>${escapeHtml(x.title)}</span>
+        <span class="zsearch-meta">
+          ${x.statusLabel ? `<span class="zsearch-status-tag is-${escapeHtml(x.status)}">${escapeHtml(x.statusLabel)}</span>` : ''}
+          ${x.assignedToName ? `<span>${escapeHtml(x.assignedToName)}</span>` : ''}
+          ${x.where ? `<span class="zsearch-where">${escapeHtml(x.where)}</span>` : ''}
+          ${!x.statusLabel && x.editedDate ? `<span>${escapeHtml(x.editedDate)} 编辑</span>` : ''}
+          ${x.localId ? '<span class="zsearch-local">看板中</span>' : ''}
+        </span>
+      </button>`).join('');
+  },
+
+  /** 已在看板上的打开本地卡片详情，其余在禅道里打开 */
+  open(state, data) {
+    state.panel.hidden = true;
+    if (data.localId) {
+      if (data.type === 'bug' && typeof BugManager !== 'undefined') return BugManager.showBugDetail(data.localId);
+      const task = allTasks.find(t => t.id === data.localId);
+      if (task) return showTaskDetail(task);
+    }
+    openInZentao(data.type, data.id);
+  }
+};
+
+// 页面一解析完就绑定（不放进 bindEvents：那要等日历、任务、弹窗等初始化完，打开后头几秒输入没反应）
+document.addEventListener('DOMContentLoaded', () => {
+  ZentaoSearch.attach('searchInput', 'task');
+  ZentaoSearch.attach('bugSearchInput', 'bug');
+});
+
+// 搜索任务（本地，禅道搜索不可用时的退路）
 async function handleSearch() {
   const keyword = document.getElementById('searchInput').value.trim();
 
@@ -5000,6 +5389,7 @@ function showTaskDetail(task) {
       <div><strong>创建时间:</strong> ${new Date(task.createdAt).toLocaleString('zh-CN')}</div>
     </div>
     ${progressUpdatesHtml}
+    <div class="att-section" style="margin: 16px 0;"></div>
     <div style="display: flex; gap: 8px;">
       ${task.status !== 'done' ? `<button class="btn-primary detail-action-btn" data-action="done">标记完成</button>` : ''}
       <button class="btn-secondary detail-action-btn" style="border-color: #e74c3c; color: #e74c3c;" data-action="delete">删除</button>
@@ -5076,6 +5466,11 @@ function showTaskDetail(task) {
     });
   }
 
+  // 附件区：预览、下载、追加（可直接粘贴截图）、删除、重试
+  if (typeof AttachmentPanel !== 'undefined') {
+    AttachmentPanel.mount(body.querySelector('.att-section'), task, { onChanged: () => loadTasks().catch(() => { }) });
+  }
+
   modal.classList.add('active');
 }
 
@@ -5134,6 +5529,25 @@ function debounce(func, wait) {
 
 let activeDatetimeTask = null;
 
+/**
+ * 进行中任务的「截止时间」推送到禅道任务的截止日期（禅道只有日期，时间部分丢掉）
+ * 「提醒时间」（未开始的任务）只是本地提醒，不推送
+ * @param {string} value - datetime-local 的值，空串 = 清除截止日期
+ */
+function syncDeadlineToZentao(task, value) {
+  if (task.type === 'bug' || task.status !== 'in_progress' || !task.zentaoId) return;
+  OptimisticUI.trackSync({
+    taskId: task.id,
+    successMessage: () => (value ? '截止日期已同步到禅道' : '已清除禅道里的截止日期'),
+    failureMessage: (res) => `本地已保存，但截止日期同步禅道失败：${OptimisticUI.explainFailure(res)}`,
+    syncFn: () => ZentaoBrowserClient.editTask({
+      zentaoId: task.zentaoId,
+      execution: task.zentaoExecution || task.executionId,
+      deadline: value || ''
+    })
+  });
+}
+
 function openDatetimeModal(task) {
   activeDatetimeTask = task;
   const modal = document.getElementById('datetimeModal');
@@ -5189,13 +5603,16 @@ function openDatetimeModal(task) {
 
     document.getElementById('dtModalConfirmBtn').textContent = '保存中...';
     try {
-      await fetch(`${API_BASE_URL}/api/task/${task.id}`, {
+      const resp = await fetch(`${API_BASE_URL}/api/task/${task.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reminderTime })
       });
+      const result = await resp.json().catch(() => ({}));
+      if (!result.success) throw new Error(result.error || '保存失败');
       await loadTasks();
       modal.classList.remove('active');
+      syncDeadlineToZentao(task, val);
     } catch (err) {
       console.warn('更新时间失败:', err);
       alert('更新时间失败');
@@ -5225,6 +5642,21 @@ const CONFIG_PRESETS = {
     aiProvider: 'openai'
   }
 };
+
+/**
+ * 设置里保存的后端地址（不要与 AI 接口地址混淆）
+ *
+ * 很早的配置把后端地址存在 apiBaseUrl 里，这里只在它是本机地址时才沿用。
+ * 以前只排除了智谱地址：填了其他 AI 服务商 / 中转地址、又没有 backendUrl 时，
+ * 整个插件会把请求（含任务数据）发到 AI 服务商那里。
+ */
+function resolveBackendUrl(config, fallback) {
+  const local = /^http:\/\/(127\.0\.0\.1|localhost):\d+\/?$/;
+  const pick = (u) => String(u).replace('//localhost:', '//127.0.0.1:').replace(/\/$/, '');
+  if (config && config.backendUrl && local.test(config.backendUrl)) return pick(config.backendUrl);
+  if (config && !config.backendUrl && local.test(config.apiBaseUrl || '')) return pick(config.apiBaseUrl);
+  return fallback;
+}
 
 // 加载设置
 // ============================================================================
@@ -5303,9 +5735,12 @@ function loadSettings() {
   };
 
   setVal('aiProvider', config.aiProvider || 'zhipu');
+  // Key 保存在后端（按接口地址分别保存）；旧版本存在浏览器里的照旧回填，保存一次后就不再存浏览器
   setVal('apiKey', config.apiKey || '');
   setVal('apiBaseUrl', config.apiBaseUrl || CONFIG_PRESETS.zhipu.apiBaseUrl);
   setVal('aiModel', config.aiModel || CONFIG_PRESETS.zhipu.aiModel);
+  setVal('aiReportModel', config.aiReportModel || '');
+  AiModelPicker.init(config);
   setVal('morningHour', config.morningHour || 9);
   setVal('eveningHour', config.eveningHour || 21);
   setVal('webhookUrl', config.webhookUrl || '');
@@ -5318,7 +5753,8 @@ function loadSettings() {
   }
   setVal('zentaoUrl', config.zentaoUrl || '');
   setVal('zentaoUsername', config.zentaoUsername || '');
-  setVal('zentaoPassword', config.zentaoPassword || '');
+  // 禅道密码只存在后端，不回显；是否已保存由 loadZentaoConfigStatus 按后端状态提示
+  setVal('zentaoPassword', '');
   setVal('zentaoCreateTaskUrl', config.zentaoCreateTaskUrl || '');
 
   // 同步调试模式复选框状态
@@ -5330,18 +5766,10 @@ function loadSettings() {
   // 提示词与主配置不在同一接口，单独拉取（完成后会刷新「已保存」基线）
   loadPrompts();
 
-  // 数据备份功能已下线（设置页入口已移除），此处加存在性保护，
-  // 避免老版本 sync-ui.js 在元素缺失时抛异常、中断后续加载。
-  try {
-    if (window.syncUI && typeof window.syncUI.loadCurrentSyncSettings === 'function') {
-      window.syncUI.loadCurrentSyncSettings();
-    }
-  } catch (err) {
-    console.warn('[设置] 同步/备份配置加载跳过:', err.message);
-  }
 
   // 加载禅道配置状态（异步回填，完成后会刷新基线）
   loadZentaoConfigStatus();
+  if (typeof ReportMembersPicker !== 'undefined') ReportMembersPicker.load();
 
   // 交给设置页 UI 层：回到默认分组并记录「已保存」基线
   if (window.settingsUI) window.settingsUI.onOpen();
@@ -5356,15 +5784,20 @@ async function loadZentaoConfigStatus() {
       const result = await response.json();
       if (result.success && result.data) {
         console.log('[前端] 禅道配置状态:', result.data);
-        // 如果后端有配置，可以使用后端的配置覆盖前端的
-        const zentaoUrlEl = document.getElementById('zentaoUrl');
-        if (result.data.enabled && zentaoUrlEl && !zentaoUrlEl.value) {
-          document.getElementById('zentaoEnabled').checked = true;
-          zentaoUrlEl.value = result.data.urlPrefix?.replace('...', '') || '';
-          document.getElementById('zentaoUsername').value = result.data.username || '';
-          document.getElementById('zentaoPassword').value = result.data.password || '';
-          document.getElementById('zentaoCreateTaskUrl').value = result.data.createTaskUrl || '';
-        }
+        // 禅道操作全部由后端用 .env 里的配置完成，以后端为准回填
+        // （以前只在浏览器缓存里没有地址时才回填，密码「已保存」的提示也就不出现，看起来像没填密码）
+        const d = result.data;
+        const setIf = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
+        const enabledEl = document.getElementById('zentaoEnabled');
+        if (enabledEl) enabledEl.checked = !!d.enabled;
+        // 后端回传的字段是 url（以前读不存在的 urlPrefix，回填成空，一保存设置就把禅道地址清空）
+        setIf('zentaoUrl', d.url);
+        setIf('zentaoUsername', d.username);
+        const execEl = document.getElementById('zentaoCreateTaskUrl');
+        if (execEl) execEl.value = d.createTaskUrl || '';
+        // 后端不回传密码；已保存时给出提示，留空保存即保持不变
+        const pwEl = document.getElementById('zentaoPassword');
+        if (pwEl) pwEl.placeholder = d.hasPassword ? '已保存（留空表示不修改）' : '请输入禅道密码';
       }
     }
   } catch (err) {
@@ -5378,300 +5811,6 @@ async function loadZentaoConfigStatus() {
 // 检查服务状态
 // 说明：完整实现（状态卡 + 启动/停止）见文件后段 checkServiceStatus()，
 // 此处原有的精简版已移除，避免重复声明。
-
-// 显示历史日报列表
-async function showHistoryModal() {
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/history?limit=50`);
-    const result = await response.json();
-
-    if (result.success) {
-      const modal = document.getElementById('reportModal');
-      const title = document.getElementById('reportModalTitle');
-      const body = document.getElementById('reportModalBody');
-
-      title.textContent = '📊 历史报告';
-
-      if (result.data.length === 0) {
-        body.innerHTML = '<p style="text-align: center; color: #7f8c8d; padding: 40px;">暂无历史报告</p>';
-      } else {
-        body.innerHTML = `
-          <div>
-            ${result.data.map(item => `
-              <div class="history-report-item" data-report-id="${item.id}" data-report-type="${item.type}" style="border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; margin-bottom: 12px; transition: all 0.2s;">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
-                  <div style="flex: 1;">
-                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                      <strong style="font-size: 14px;">${item.dateLabel || item.date}</strong>
-                      <span class="report-type-badge" style="font-size: 11px; padding: 2px 6px; border-radius: 4px; background: ${item.type === 'daily' ? '#3498db' : item.type === 'weekly' ? '#9b59b6' : '#e67e22'}; color: white;">${item.type === 'daily' ? '日报' : item.type === 'weekly' ? '周报' : '月报'}</span>
-                    </div>
-                    <p style="font-size: 13px; color: #555; margin: 0;">${escapeHtml(item.summary || '').slice(0, 100)}${item.summary && item.summary.length > 100 ? '...' : ''}</p>
-                    <div style="margin-top: 8px; font-size: 12px; color: #7f8c8d;">
-                      完成 ${item.stats?.done || 0} 项 | 待办 ${item.stats?.todo || 0} 项
-                    </div>
-                  </div>
-                </div>
-                <div class="report-actions" style="display: flex; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #eee;">
-                  <button class="history-btn history-open-btn" data-id="${item.id}" style="padding: 4px 12px; font-size: 12px; border: 1px solid #3498db; background: white; color: #3498db; border-radius: 4px; cursor: pointer;">打开</button>
-                  <button class="history-btn history-regen-btn" data-id="${item.id}" data-type="${item.type}" style="padding: 4px 12px; font-size: 12px; border: 1px solid #f39c12; background: white; color: #f39c12; border-radius: 4px; cursor: pointer;">重新生成</button>
-                  <button class="history-btn history-delete-btn" data-id="${item.id}" style="padding: 4px 12px; font-size: 12px; border: 1px solid #e74c3c; background: white; color: #e74c3c; border-radius: 4px; cursor: pointer;">删除</button>
-                </div>
-              </div>
-            `).join('')}
-          </div>
-        `;
-
-        // 绑定按钮事件
-        bindHistoryListButtons();
-      }
-
-      // 隐藏不需要的按钮
-      document.getElementById('deleteReportBtn').style.display = 'none';
-      document.getElementById('regenReportBtn').style.display = 'none';
-      document.getElementById('pushReportBtn').style.display = 'none';
-
-      modal.classList.add('active');
-    }
-  } catch (err) {
-    Toast.error('加载历史报告失败: ' + err.message);
-  }
-}
-
-// 绑定历史列表按钮事件
-function bindHistoryListButtons() {
-  // 打开按钮
-  document.querySelectorAll('.history-open-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const reportId = btn.dataset.id;
-      openHistoryReportDetail(reportId);
-    });
-  });
-
-  // 重新生成按钮
-  document.querySelectorAll('.history-regen-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const reportId = btn.dataset.id;
-      const type = btn.dataset.type;
-      regenerateReport(reportId, type, btn);
-    });
-  });
-
-  // 删除按钮
-  document.querySelectorAll('.history-delete-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const reportId = btn.dataset.id;
-      deleteHistoryReport(reportId, btn);
-    });
-  });
-}
-
-// 打开历史报告详情
-async function openHistoryReportDetail(reportId) {
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/history?limit=100`);
-    const result = await response.json();
-
-    if (result.success) {
-      const report = result.data.find(r => r.id === reportId);
-      if (report) {
-        const modal = document.getElementById('reportModal');
-        const title = document.getElementById('reportModalTitle');
-        const body = document.getElementById('reportModalBody');
-
-        title.textContent = report.dateLabel || report.date;
-
-        body.innerHTML = `
-          <div style="margin-bottom: 16px;">
-            <h4 style="margin-bottom: 8px;">总览</h4>
-            <p style="color: #666; font-size: 14px;">${escapeHtml(report.summary)}</p>
-          </div>
-          ${report.completed?.length ? `
-          <div style="margin-bottom: 16px;">
-            <h4 style="margin-bottom: 8px;">✅ 已完成</h4>
-            <ul style="padding-left: 20px; color: #555; font-size: 14px;">
-              ${report.completed.map(c => `<li style="margin-bottom: 4px;">${formatReportItem(c)}</li>`).join('')}
-            </ul>
-          </div>` : ''}
-          ${report.tomorrowFocus?.length ? `
-          <div style="margin-bottom: 16px;">
-            <h4 style="margin-bottom: 8px;">🎯 待办/进行中</h4>
-            <ul style="padding-left: 20px; color: #555; font-size: 14px;">
-              ${report.tomorrowFocus.map(c => `<li style="margin-bottom: 4px;">${formatReportItem(c)}</li>`).join('')}
-            </ul>
-          </div>` : ''}
-          ${report.risks?.length ? `
-          <div style="margin-bottom: 16px;">
-            <h4 style="margin-bottom: 8px; color: #e74c3c;">⚠️ 风险建议</h4>
-            <ul style="padding-left: 20px; color: #e74c3c; font-size: 14px;">
-              ${report.risks.map(c => `<li style="margin-bottom: 4px;">${escapeHtml(c)}</li>`).join('')}
-            </ul>
-          </div>` : ''}
-          <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-color); display: flex; gap: 8px;">
-            <button id="historyBackBtn" class="btn-secondary">返回列表</button>
-            <button id="historyPushBtn" class="btn-primary">推送</button>
-          </div>
-        `;
-
-        // 绑定按钮事件
-        document.getElementById('historyBackBtn').addEventListener('click', () => showHistoryModal());
-        document.getElementById('historyPushBtn').addEventListener('click', () => pushHistoryReport(report.id));
-
-        modal.classList.add('active');
-      }
-    }
-  } catch (err) {
-    Toast.error('加载报告详情失败: ' + err.message);
-  }
-}
-
-// 重新生成报告
-async function regenerateReport(oldReportId, type, btnElement) {
-  const typeNames = { daily: '日报', weekly: '周报', monthly: '月报' };
-  const confirmed = await showConfirm('重新生成报告', `确定要重新生成${typeNames[type]}吗？这将使用相同的时间范围。`, '重新生成', '取消');
-  if (!confirmed) {
-    return;
-  }
-
-  const originalText = btnElement.textContent;
-  btnElement.textContent = '生成中...';
-  btnElement.disabled = true;
-
-  try {
-    // 先获取原始报告的日期信息
-    const historyRes = await fetch(`${API_BASE_URL}/api/history?limit=100`);
-    const historyResult = await historyRes.json();
-    let dateParam = null;
-    
-    if (historyResult.success) {
-      const oldReport = historyResult.data.find(r => r.id === oldReportId);
-      if (oldReport && oldReport.date) {
-        dateParam = oldReport.date;
-      }
-    }
-
-    // 构建请求参数
-    const params = new URLSearchParams();
-    if (dateParam) {
-      params.append('date', dateParam);
-    }
-    
-    const response = await fetch(`${API_BASE_URL}/api/report/generate/${type}?${params.toString()}`, { method: 'POST' });
-    const result = await response.json();
-
-    if (result.success) {
-      await showHistoryModal(); // 刷新列表
-      Toast.success(`${typeNames[type]}已重新生成`);
-    } else {
-      Toast.error(`生成失败: ${result.error}`);
-    }
-  } catch (err) {
-    Toast.error(`网络错误: ${err.message}`);
-  } finally {
-    btnElement.textContent = originalText;
-    btnElement.disabled = false;
-  }
-}
-
-// 删除历史报告
-async function deleteHistoryReport(reportId, btnElement) {
-  const confirmed = await showConfirm('删除报告', '确定要删除此报告吗？删除后无法恢复。', '删除', '取消');
-  if (!confirmed) {
-    return;
-  }
-
-  try {
-    await fetch(`${API_BASE_URL}/api/report/${reportId}`, { method: 'DELETE' });
-
-    // 从DOM中移除该报告项
-    const reportItem = btnElement.closest('.history-report-item');
-    if (reportItem) {
-      reportItem.remove();
-    }
-
-    // 检查是否需要更新按钮状态
-    await checkTodayReports();
-
-    // 如果没有报告了，刷新整个列表
-    const remainingItems = document.querySelectorAll('.history-report-item');
-    if (remainingItems.length === 0) {
-      await showHistoryModal();
-    }
-
-    Toast.success('报告已删除');
-  } catch (err) {
-    Toast.error('删除失败: ' + err.message);
-  }
-}
-
-// 查看历史日报详情（保留向后兼容）
-window.viewHistoryDetail = async function (reportId) {
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/history`);
-    const result = await response.json();
-
-    if (result.success) {
-      const report = result.data.find(r => r.id === reportId);
-      if (report) {
-        const modal = document.getElementById('reportModal');
-        const title = document.getElementById('reportModalTitle');
-        const body = document.getElementById('reportModalBody');
-
-        title.textContent = report.dateLabel || report.date;
-
-        body.innerHTML = `
-          <div style="margin-bottom: 16px;">
-            <h4 style="margin-bottom: 8px;">总览</h4>
-            <p style="color: #666; font-size: 14px;">${escapeHtml(report.summary)}</p>
-          </div>
-          ${report.completed?.length ? `
-          <div style="margin-bottom: 16px;">
-            <h4 style="margin-bottom: 8px;">✅ 已完成</h4>
-            <ul style="padding-left: 20px; color: #555; font-size: 14px;">
-              ${report.completed.map(c => `<li style="margin-bottom: 4px;">${formatReportItem(c)}</li>`).join('')}
-            </ul>
-          </div>` : ''}
-          ${report.tomorrowFocus?.length ? `
-          <div style="margin-bottom: 16px;">
-            <h4 style="margin-bottom: 8px;">🎯 待办/进行中</h4>
-            <ul style="padding-left: 20px; color: #555; font-size: 14px;">
-              ${report.tomorrowFocus.map(c => `<li style="margin-bottom: 4px;">${formatReportItem(c)}</li>`).join('')}
-            </ul>
-          </div>` : ''}
-          ${report.risks?.length ? `
-          <div style="margin-bottom: 16px;">
-            <h4 style="margin-bottom: 8px; color: #e74c3c;">⚠️ 风险建议</h4>
-            <ul style="padding-left: 20px; color: #e74c3c; font-size: 14px;">
-              ${report.risks.map(c => `<li style="margin-bottom: 4px;">${escapeHtml(c)}</li>`).join('')}
-            </ul>
-          </div>` : ''}
-          <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-color); display: flex; gap: 8px;">
-            <button class="btn-secondary" onclick="showHistoryModal()">返回列表</button>
-            <button class="btn-primary" onclick="pushHistoryReport('${report.id}')">推送</button>
-          </div>
-        `;
-
-        modal.classList.add('active');
-      }
-    }
-  } catch (err) {
-    Toast.error('加载日报详情失败: ' + err.message);
-  }
-};
-
-// 推送历史日报
-window.pushHistoryReport = async function (reportId) {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/report/${reportId}/push`, { method: 'POST' });
-    const resJson = await res.json();
-    if (!resJson.success) {
-      Toast.error('推送失败: ' + resJson.error);
-    } else {
-      Toast.success('推送成功');
-    }
-  } catch (err) {
-    Toast.error('网络错误: ' + err.message);
-  }
-};
 
 // ==================== 拖拽排序控制 ====================
 function bindDragAndDrop() {
@@ -5758,7 +5897,6 @@ async function handleDragEnd() {
   await updateTaskOrder();
   await loadTasks();
   updateCounts();
-  triggerSync();
 }
 
 // 找出被拖拽的任务（状态或列发生变化的任务）
@@ -5833,21 +5971,6 @@ async function updateTaskOrder() {
       });
     } catch (err) {
       console.warn('批量更新排序失败:', err);
-    }
-  }
-}
-
-// ==================== 数据同步触发 ====================
-
-/**
- * 触发数据同步（数据变更时调用）
- */
-function triggerSync() {
-  if (typeof syncManager !== 'undefined' && syncManager.syncConfig.enabled && syncManager.syncConfig.autoSync) {
-    syncManager.debouncedUpload();
-    // 更新UI状态
-    if (window.syncUI) {
-      window.syncUI.updateStatusDisplay();
     }
   }
 }
@@ -6004,10 +6127,6 @@ function scrapeUserDataFromZentao() {
  */
 const ZentaoBrowserClient = {
   config: null,
-  isLoggedIn: false,
-  sessionToken: null,
-  cookies: null, // 手动存储的 Cookie 字符串
-  keepAliveTimer: null,
   users: {}, // 用户列表缓存 {account: name}
   usersLoaded: false, // 用户列表是否已加载
 
@@ -6059,363 +6178,24 @@ const ZentaoBrowserClient = {
   },
 
   /**
-   * 登录禅道
+   * 让后端从禅道重新拉取团队成员（我的地盘 → 团队），失败时退回后端缓存
    */
-  async login() {
-    await this.initConfig();
-
-    if (!this.isConfigured()) {
-      console.log('[ZentaoBrowser] 禅道未配置');
-      return false;
-    }
-
-    // Force re-login if we are running a manual test where config is passed
-    if (this.isLoggedIn && !this.config._isManualTest) {
-      console.log('[ZentaoBrowser] 已登录，跳过');
-      return true;
-    }
-
-    if (this._isLoggingIn) {
-      console.log('[ZentaoBrowser] 正在登录中，防重入...');
-      // 简单等待锁释放，实际中可以选择用 Promise
-      return false;
-    }
-
-    this._isLoggingIn = true;
-    console.log('[ZentaoBrowser] 开始全自动标签页模拟登录流...');
-
+  async refreshUsersFromZentao() {
     try {
-      // 通过 background.js 发起真正的浏览器原生登陆流程，因为只有 background 具备跨站操作和保存 Session 原生安全 Cookie 的特权
-      // 添加重试机制，处理 background service worker 启动延迟问题
-      return new Promise((resolve) => {
-        const maxRetries = 3;
-        let retryCount = 0;
-
-        const attemptLogin = () => {
-          console.log(`[ZentaoBrowser] 尝试登录 (${retryCount + 1}/${maxRetries})...`);
-
-          chrome.runtime.sendMessage({
-            action: 'performZenTaoLogin',
-            url: this.getBaseUrl(),
-            username: this.config.username,
-            password: this.config.password
-          }, (response) => {
-            if (chrome.runtime.lastError) {
-              console.warn(`[ZentaoBrowser] 后台通信失败 (尝试 ${retryCount + 1}):`, chrome.runtime.lastError);
-
-              // 如果还有重试次数，等待后重试
-              if (retryCount < maxRetries - 1) {
-                retryCount++;
-                console.log(`[ZentaoBrowser] 等待 500ms 后重试...`);
-                setTimeout(attemptLogin, 500);
-                return;
-              }
-
-              // 重试次数用完
-              console.error('[ZentaoBrowser] 后台通信失败，已达到最大重试次数');
-              Toast.error('内部通信异常，请重新加载扩展');
-              this._isLoggingIn = false;
-              resolve(false);
-              return;
-            }
-
-            if (response && response.success) {
-              this.sessionToken = response.token;
-              localStorage.setItem('zentao_sessionToken', this.sessionToken);
-              this.isLoggedIn = true;
-              if (this.config._isManualTest) Toast.success('禅道登录成功');
-              console.log('[ZentaoBrowser] 隐形标签页自动登录已同步完成');
-              this._isLoggingIn = false;
-              resolve(true);
-            } else {
-              console.warn('[ZentaoBrowser] 后台注入登录失败:', response?.error);
-              if (this.config._isManualTest) Toast.error('禅道登录失败: ' + (response?.error || ''));
-              this._isLoggingIn = false;
-              resolve(false);
-            }
-          });
-        };
-
-        // 开始首次尝试
-        attemptLogin();
-      });
-    } catch (err) {
-      console.warn('[ZentaoBrowser] 登录异常:', err.message);
-      if (this.config._isManualTest) Toast.error('禅道登录异常');
-      this._isLoggingIn = false;
-      return false;
-    }
-  },
-
-  /**
-   * 自动初始化（页面加载时调用）
-   * 检查浏览器中是否已经登录禅道，如果没有则执行登录
-   */
-  async autoInit() {
-    await this.initConfig();
-    if (this.isConfigured()) {
-      // 先检查浏览器中是否已经登录禅道
-      const isValid = await this.validateSession();
-      if (isValid) {
-        console.log('[ZentaoBrowser] 检测到浏览器中已登录禅道，无需重复登录');
-        this.isLoggedIn = true;
-        this.startKeepAlive();
-        return;
-      }
-
-      // 浏览器中未登录，执行自动登录
-      console.log('[ZentaoBrowser] 浏览器中未登录禅道，开始自动登录...');
-      const loginSuccess = await this.login();
-      if (loginSuccess) {
-        this.startKeepAlive();
-      }
-    }
-  },
-
-  /**
-   * 验证当前 session 是否有效
-   * 直接检查浏览器中的禅道 cookie，因为扩展页面的 fetch 请求不会自动携带其他域的 cookie
-   */
-  async validateSession() {
-    return new Promise((resolve) => {
-      try {
-        const url = this.getBaseUrl();
-        if (!url) {
-          resolve(false);
-          return;
-        }
-
-        // 使用禅道首页 URL 来检查 cookie，确保能正确找到 cookie
-        const zentaoUrl = `${url}/zentao/`;
-
-        // 直接检查浏览器中的禅道 session cookie（zentaosid）
-        chrome.cookies.get({ url: zentaoUrl, name: 'zentaosid' }, (cookie) => {
-          if (chrome.runtime.lastError) {
-            console.warn('[ZentaoBrowser] 检查 cookie 失败:', chrome.runtime.lastError.message);
-            resolve(false);
-            return;
-          }
-
-          if (cookie && cookie.value) {
-            // cookie 存在且有值，说明浏览器已登录禅道
-            console.log('[ZentaoBrowser] 检测到浏览器中禅道登录状态有效');
-            resolve(true);
-          } else {
-            // 没有找到 cookie，说明未登录
-            console.log('[ZentaoBrowser] 浏览器中未检测到禅道登录 cookie');
-            resolve(false);
-          }
-        });
-      } catch (err) {
-        console.warn('[ZentaoBrowser] 验证 session 失败:', err.message);
-        resolve(false);
-      }
-    });
-  },
-
-  /**
-   * 启动定时保活检查
-   */
-  startKeepAlive(intervalMinutes = 2) {
-    if (this.keepAliveTimer) {
-      clearInterval(this.keepAliveTimer);
-    }
-
-    const intervalMs = intervalMinutes * 60 * 1000;
-    console.log(`[ZentaoBrowser] 启动会话保活，检测间隔: ${intervalMinutes} 分钟`);
-
-    // 不立即执行检查，等定时器第一次触发时再检查
-    // 这样可以避免在登录过程中重复登录
-    this.keepAliveTimer = setInterval(() => {
-      this.keepAliveCheck();
-    }, intervalMs);
-  },
-
-  /**
-   * 停止定时保活检查
-   */
-  stopKeepAlive() {
-    if (this.keepAliveTimer) {
-      clearInterval(this.keepAliveTimer);
-      this.keepAliveTimer = null;
-      console.log('[ZentaoBrowser] 会话保活定时器已停止');
-    }
-  },
-
-  /**
-   * 刷新 Cookie（直接在浏览器端重新登录）
-   */
-  async refreshCookies() {
-    try {
-      console.log('[ZentaoBrowser] 正在重新登录以刷新 Cookie...');
-      this.isLoggedIn = false;
-      const success = await this.login();
-      if (success) {
-        // 更新 localStorage
-        try {
-          localStorage.setItem('zentao_sessionToken', this.sessionToken);
-        } catch (e) {
-          // 忽略存储错误
-        }
-        return true;
-      }
-      return false;
-    } catch (err) {
-      console.warn('[ZentaoBrowser] 刷新 Cookie 失败:', err.message);
-      return false;
-    }
-  },
-
-  /**
-   * 会话保活检查
-   * 直接检查浏览器中的禅道 cookie，确保登录状态与用户实际浏览器状态同步
-   */
-  async keepAliveCheck() {
-    if (!this.isConfigured()) return;
-
-    try {
-      const isValid = await this.validateSession();
-      if (!isValid) {
-        console.log('[ZentaoBrowser] 检测到浏览器登录失效，正在重新登录...');
-        this.isLoggedIn = false;
-        await this.login();
-      } else {
-        console.log('[ZentaoBrowser] 浏览器会话正常');
-      }
-    } catch (err) {
-      console.warn('[ZentaoBrowser] 会话保活检查失败:', err.message);
-    }
-  },
-
-  /**
-   * 生成随机 UID
-   */
-  generateUid() {
-    return Math.random().toString(36).substring(2, 14);
-  },
-
-  /**
-   * 获取浏览器中禅道的所有 cookie
-   * 用于手动设置请求头，因为扩展页面的 fetch 不会自动携带跨域 cookie
-   */
-  async getCookies() {
-    return new Promise((resolve) => {
-      try {
-        const url = this.getBaseUrl();
-        if (!url) {
-          resolve('');
-          return;
-        }
-
-        const zentaoUrl = new URL(url);
-
-        // 获取所有匹配的 cookie（包括主域和子域）
-        chrome.cookies.getAll({ domain: zentaoUrl.hostname }, (cookies) => {
-          if (chrome.runtime.lastError) {
-            console.warn('[ZentaoBrowser] 获取 cookies 失败:', chrome.runtime.lastError.message);
-            resolve('');
-            return;
-          }
-
-          if (cookies && cookies.length > 0) {
-            // 构造 Cookie header 格式: name1=value1; name2=value2
-            const cookieHeader = cookies
-              .map(c => `${c.name}=${c.value}`)
-              .join('; ');
-            console.log('[ZentaoBrowser] 获取到浏览器 cookies:', cookies.length, '个');
-            resolve(cookieHeader);
-          } else {
-            console.log('[ZentaoBrowser] 未找到浏览器 cookies');
-            resolve('');
-          }
-        });
-      } catch (err) {
-        console.warn('[ZentaoBrowser] 获取 cookies 异常:', err.message);
-        resolve('');
-      }
-    });
-  },
-
-  /**
-   * 获取 session token（通过 GET 请求获取用户信息页面）
-   */
-  async getSessionToken() {
-    try {
-      const response = await fetch(`${this.getBaseUrl()}/zentao/api.php?mode=getconfig`);
-      if (!response.ok) return null;
-
-      const text = await response.text();
-      // 尝试从响应中提取 session token
-      const match = text.match(/"s":"([^"]+)"/);
-      if (match) {
-        return match[1];
-      }
-    } catch (err) {
-      console.warn('[ZentaoBrowser] 获取 session token 失败:', err);
-    }
-    return null;
-  },
-
-  /**
-   * 从团队页面加载用户列表
-   * 通过创建临时标签页访问 my-team.html，注入脚本提取用户信息
-   */
-  async loadUsersFromTeamPage() {
-    // 后端直连：用户列表已由后端缓存到 /api/zentao/users，不再打开 my-team.html 标签页
-    console.log('[ZentaoBrowser] 从后端加载禅道用户列表...');
-    try {
-      const resp = await fetch(`${API_BASE_URL}/api/zentao/users`);
+      const resp = await fetch(`${API_BASE_URL}/api/zentao/users/refresh`, { method: 'POST' });
       const result = await resp.json();
-      const users = (result && result.data) || {};
-      const count = Object.keys(users).length;
-      if (count > 0) {
-        this.users = users;
+      if (result.success && result.data && Object.keys(result.data).length > 0) {
+        this.users = result.data;
         this.usersLoaded = true;
-        console.log('[ZentaoBrowser] 已从后端加载用户列表:', count, '个用户');
-      } else {
-        this.users = this.users || {};
-        this.usersLoaded = true;
-        console.warn('[ZentaoBrowser] 后端用户列表为空');
+        try { localStorage.setItem('zentao_users', JSON.stringify(this.users)); } catch (e) { /* 忽略 */ }
+        return this.users;
       }
-      return this.users;
+      console.warn('[ZentaoBrowser] 从禅道刷新用户列表失败:', result.message || result.error);
     } catch (err) {
-      console.warn('[ZentaoBrowser] 加载用户列表失败:', err.message);
-      this.users = this.users || {};
-      this.usersLoaded = true;
-      return this.users;
+      console.warn('[ZentaoBrowser] 从禅道刷新用户列表异常:', err.message);
     }
-  },
-
-  /**
-   * 保存用户列表到后端
-   */
-  async saveUsersToBackend(users) {
-    try {
-      console.log('[ZentaoBrowser] 保存用户列表到后端和localStorage，用户数量:', Object.keys(users).length);
-
-      // 同时保存到 localStorage 作为缓存
-      try {
-        localStorage.setItem('zentao_users', JSON.stringify(users));
-        console.log('[ZentaoBrowser] ✓ 用户列表已保存到 localStorage');
-      } catch (e) {
-        console.warn('[ZentaoBrowser] 保存用户列表到 localStorage 失败:', e);
-      }
-
-      // 保存到后端
-      const response = await fetch(`${API_BASE_URL}/api/zentao/users`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ users })
-      });
-      const result = await response.json();
-      if (result.success) {
-        console.log('[ZentaoBrowser] ✓ 用户列表已保存到后端:', result.message);
-      } else {
-        console.warn('[ZentaoBrowser] 保存用户列表到后端失败:', result.error);
-      }
-    } catch (err) {
-      console.error('[ZentaoBrowser] 保存用户列表到后端异常:', err.message);
-    }
+    const cached = await this.loadUsersFromBackend();
+    return Object.keys(cached).length > 0 ? cached : (this.users || {});
   },
 
   /**
@@ -6623,105 +6403,6 @@ const ZentaoBrowserClient = {
   },
 
   /**
-   * 从 HTML 页面提取任务ID
-   */
-  async extractTaskIdFromHtml(locatePath) {
-    try {
-      const cookieHeader = await this.getCookies();
-      const headers = {};
-      if (cookieHeader) {
-        headers['Cookie'] = cookieHeader;
-      }
-
-      const response = await fetch(`${this.getBaseUrl()}${locatePath}`, {
-        headers
-      });
-
-      if (!response.ok) {
-        console.warn('[ZentaoBrowser] 获取任务列表页面失败:', response.status);
-        return null;
-      }
-
-      const html = await response.text();
-
-      // 尝试多种正则模式提取任务ID
-      const patterns = [
-        /<tr\s+data-id=['"](\d+)['"]/,           // data-id="123"
-        /value=['"](\d+)['"].*?title=['"][^>]*>/,  // <option value="123" title="...">
-        /<a\s+href=['"][^'"]*task[-_]view[-_](\d+)/, // task-view-123
-        /\/task[-_]view[-_]?(\d+)/,               // /task-view-123
-        /['"]taskId['"]:\s*(\d+)/,               // "taskId": 123
-        /['"]id['"]:\s*['"]?(\d+)['"]?/          // "id": "123" 或 id: 123
-      ];
-
-      for (const pattern of patterns) {
-        const match = html.match(pattern);
-        if (match && match[1]) {
-          const taskId = parseInt(match[1], 10);
-          console.log('[ZentaoBrowser] ✓ 从 HTML 提取到任务ID:', taskId, '模式:', pattern.source);
-          return taskId;
-        }
-      }
-
-      console.warn('[ZentaoBrowser] ✗ HTML 中未找到任务ID，尝试获取最新任务');
-
-      // 后备方案：尝试获取该执行下的最新任务
-      const executionId = locatePath.match(/execution-task-(\d+)-/)?.[1];
-      if (executionId) {
-        const latestTaskId = await this.getLatestTaskId(executionId);
-        if (latestTaskId) {
-          console.log('[ZentaoBrowser] ✓ 获取到最新任务ID:', latestTaskId);
-          return parseInt(latestTaskId, 10);
-        }
-      }
-
-      return null;
-    } catch (err) {
-      console.warn('[ZentaoBrowser] 提取任务ID异常:', err.message);
-      return null;
-    }
-  },
-
-  /**
-   * 获取指定执行下的最新任务ID
-   */
-  async getLatestTaskId(executionId) {
-    try {
-      const baseUrl = this.getBaseUrl();
-      const cookieHeader = await this.getCookies();
-      const headers = { 'Cookie': cookieHeader };
-
-      // 访问执行的任务列表页面
-      const listUrl = `${baseUrl}/zentao/execution-task-${executionId}-unclosed-0-order_desc.html`;
-      const response = await fetch(listUrl, { headers });
-
-      if (!response.ok) {
-        return null;
-      }
-
-      const html = await response.text();
-
-      // 尝试从页面提取第一个任务ID
-      const patterns = [
-        /<tr\s+data-id=['"](\d+)['"]/,
-        /value=['"](\d+)['"].*?title=['"][^>]*>/,
-      ];
-
-      for (const pattern of patterns) {
-        const match = html.match(pattern);
-        if (match && match[1]) {
-          return match[1];
-        }
-      }
-
-      return null;
-    } catch (err) {
-      console.log('[ZentaoBrowser] 获取最新任务ID失败:', err.message);
-      return null;
-    }
-  },
-
-  /**
    * 更新任务状态
    * @param {string} taskId - 任务ID
    * @param {string} status - 状态 (todo/in_progress/done)
@@ -6886,8 +6567,9 @@ const ZentaoBrowserClient = {
    * @param {string} options.execution - 执行ID
    * @param {string} [options.name] - 任务标题
    * @param {number} [options.pri] - 优先级 (1-4)
+   * @param {string} [options.deadline] - 截止时间（只取日期；空串 = 清除，不传 = 不改）
    */
-  async editTask({ zentaoId, execution, name, pri }) {
+  async editTask({ zentaoId, execution, name, pri, deadline }) {
     await this.initConfig();
 
     if (!this.isConfigured()) {
@@ -6897,7 +6579,7 @@ const ZentaoBrowserClient = {
     const baseUrl = this.getBaseUrl();
     const username = this.config.username || 'admin';
 
-    console.log('[ZentaoBrowser] 准备编辑禅道任务:', { zentaoId, execution, name, pri, username });
+    console.log('[ZentaoBrowser] 准备编辑禅道任务:', { zentaoId, execution, name, pri, deadline, username });
 
     try {
       // 通过 background.js 在禅道页面中执行
@@ -6908,7 +6590,9 @@ const ZentaoBrowserClient = {
           taskId: zentaoId,
           execution,
           name: name || '',
-          pri: pri || 3,
+          // 没传就不改：以前默认 3，改个标题会把禅道里的优先级也改成 3
+          pri: pri || '',
+          deadline,
           username
         }, (response) => {
           if (chrome.runtime.lastError) {
@@ -7253,28 +6937,13 @@ const ExecutionSelector = {
   currentExecutionId: null,
 
   /**
-   * 初始化执行选择器
+   * 初始化：加载执行列表（云标签筛选等处要用）
+   *
+   * 侧栏「添加任务 / 提交 Bug」上方的「所属执行」选择卡片已去掉：执行默认由 AI 推断，
+   * 需要指定时在弹出的表单里选。没有选择框时 getSelectedExecution() 返回 null，即交给 AI。
    */
   async init() {
-    const selectorWrapper = document.getElementById('executionSelectorWrapper');
-    const refreshBtn = document.getElementById('refreshExecutionsBtn');
-    const select = document.getElementById('executionSelect');
-
-    if (!selectorWrapper) return;
-
-    // 刷新按钮事件
-    if (refreshBtn) {
-      refreshBtn.addEventListener('click', () => this.refreshExecutions());
-    }
-
-    // 加载执行列表
     await this.loadExecutions();
-
-    // 检查禅道是否已配置，如果已配置则显示选择器
-    const config = await this.getZentaoConfig();
-    if (config && config.enabled) {
-      selectorWrapper.style.display = 'block';
-    }
   },
 
   /**
@@ -7616,7 +7285,7 @@ const TagCloud = {
 // ==================== Tab 切换 ====================
 
 const TabSwitcher = {
-  currentMode: 'task', // 'task' or 'bug'
+  currentMode: 'task', // 'task' | 'bug' | 'report'
 
   init() {
     const tabButtons = document.querySelectorAll('.tab-btn');
@@ -7668,17 +7337,6 @@ const TabSwitcher = {
       addTaskHint.textContent = mode === 'bug' ? '选择执行后，输入 Bug 描述，按回车提交' : '按回车添加 · Shift+回车换行';
     }
 
-    // 4.3 执行选择器在两种模式下都显示
-    const executionSelectorWrapper = document.getElementById('executionSelectorWrapper');
-    const executionLabel = document.querySelector('.execution-label');
-    if (executionSelectorWrapper) {
-      executionSelectorWrapper.style.display = '';
-    }
-    // 更新执行选择器标签
-    if (executionLabel) {
-      executionLabel.textContent = mode === 'bug' ? '所属执行:' : '所属执行:';
-    }
-
     // 4.4 输入框在两种模式下都显示
     const taskInputWrapper = document.querySelector('.task-input-wrapper');
     if (taskInputWrapper) {
@@ -7698,7 +7356,9 @@ const TabSwitcher = {
     }
 
     // 5. 优化：加载对应模式的数据
-    if (mode === 'bug') {
+    if (mode === 'report') {
+      if (typeof ReportPage !== 'undefined') ReportPage.show();
+    } else if (mode === 'bug') {
       if (typeof BugManager !== 'undefined' && BugManager.loadBugs) {
         BugManager.loadBugs();
       }
@@ -7795,57 +7455,10 @@ const ExecutionFavorites = {
       syncBtn.textContent = '同步中...';
       resultSpan.textContent = '';
 
-      // 从后端获取禅道配置
-      const configResponse = await fetch(`${API_BASE_URL}/api/zentao/config`);
-      const configResult = await configResponse.json();
-
-      if (!configResult.success || !configResult.data.url) {
-        throw new Error('禅道未配置');
-      }
-
-      const zentaoUrl = configResult.data.url.replace(/\/$/, '');
-
-      // 通过后端获取执行列表（后端持有禅道会话，无需浏览器 cookie，也不会打开标签页）
-      const execResp = await fetch(`${API_BASE_URL}/api/zentao/executions`);
-      const execResult = await execResp.json();
-      if (!execResult.success) {
-        throw new Error(execResult.message || '获取执行列表失败');
-      }
-      const rawExecutions = Array.isArray(execResult.data) ? execResult.data : [];
-      if (rawExecutions.length === 0) {
-        throw new Error('未找到执行数据');
-      }
-
-      const formattedExecutions = rawExecutions.map(ex => {
-        const executionType = ex.type || 'execution';
-        return {
-          id: String(ex.id),
-          name: ex.name,
-          projectName: ex.projectName || '',
-          projectId: String(ex.projectId || ''),
-          productName: ex.productName || '',
-          status: ex.status || 'open',
-          type: executionType,
-          kanbanId: executionType === 'kanban' ? String(ex.id) : null,
-          isDefault: String(ex.id) === String(configResult.data.executionId)
-        };
-      });
-
-      // 保存到后端
-      console.log('[ExecutionFavorites] 准备保存到后端，执行数量:', formattedExecutions.length);
-      console.log('[ExecutionFavorites] 执行类型分布:', formattedExecutions.reduce((acc, ex) => {
-        acc[ex.type] = (acc[ex.type] || 0) + 1;
-        return acc;
-      }, {}));
-
-      const saveResp = await fetch(`${API_BASE_URL}/api/executions/sync`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ executions: formattedExecutions })
-      });
+      // 后端直连禅道拉取执行列表并落盘（同时刷新项目列表）
+      const saveResp = await fetch(`${API_BASE_URL}/api/executions/sync`, { method: 'POST' });
       const saveResult = await saveResp.json();
-
-      console.log('[ExecutionFavorites] 后端保存结果:', saveResult);
+      const formattedExecutions = Array.isArray(saveResult.data) ? saveResult.data : [];
 
       if (saveResult.success) {
         this.executions = formattedExecutions;
@@ -7854,7 +7467,7 @@ const ExecutionFavorites = {
         resultSpan.style.color = 'var(--success)';
         Toast.success(`已同步 ${formattedExecutions.length} 个执行`);
       } else {
-        throw new Error(saveResult.error || '保存失败');
+        throw new Error(saveResult.message || saveResult.error || '同步失败');
       }
     } catch (err) {
       console.error('[ExecutionFavorites] 同步执行失败:', err);
@@ -7865,18 +7478,6 @@ const ExecutionFavorites = {
       syncBtn.disabled = false;
       syncBtn.textContent = '🔄 从禅道同步执行';
     }
-  },
-
-  async getZentaoCookie(zentaoUrl) {
-    return new Promise((resolve) => {
-      chrome.cookies.get({ url: `${zentaoUrl}/zentao/`, name: 'zentaosid' }, (cookie) => {
-        if (cookie && cookie.value) {
-          resolve(`zentaosid=${cookie.value}`);
-        } else {
-          resolve(null);
-        }
-      });
-    });
   },
 
   renderExecutionList() {
@@ -8032,7 +7633,7 @@ const BugManager = {
     // 关闭 Bug 弹窗
     const closeBtn = document.getElementById('closeBugModal');
     if (closeBtn) {
-      closeBtn.addEventListener('click', () => this.hideBugModal());
+      closeBtn.addEventListener('click', () => this.requestCloseBugModal());
     }
 
     // 点击弹框外部关闭
@@ -8040,9 +7641,18 @@ const BugManager = {
     if (bugModal) {
       bugModal.addEventListener('click', (e) => {
         if (e.target === bugModal) {
-          this.hideBugModal();
+          this.requestCloseBugModal();
         }
       });
+    }
+
+    // 截图 / 附件选择区：可在弹窗任意位置粘贴截图
+    const attachmentsHost = document.getElementById('bugAttachments');
+    if (attachmentsHost && bugModal && typeof AttachmentPicker !== 'undefined') {
+      this.attachmentPicker = new AttachmentPicker(attachmentsHost, {
+        hint: '单个文件不超过 50MB，最多 10 个；截图会同时插入禅道的重现步骤'
+      });
+      this.attachmentPicker.bindPaste(bugModal);
     }
 
     // 提交 Bug
@@ -8398,7 +8008,7 @@ const BugManager = {
     let bugIdSuffix = '';
     let addBugIdBtn = '';
     if (bug.zentaoId) {
-      bugIdSuffix = ` <a class="bug-id-link-inline" href="javascript:void(0)" data-bug-id="${bug.zentaoId}" title="点击查看禅道详情">#${bug.zentaoId}</a>`;
+      bugIdSuffix = ` <a class="bug-id-link-inline" href="#" role="button" data-bug-id="${bug.zentaoId}" title="在禅道中打开 #${bug.zentaoId}">#${bug.zentaoId}</a>`;
     } else {
       // 没有BugID时显示同步按钮
       addBugIdBtn = `<button class="bug-sync-to-zentao-btn" title="同步到禅道创建Bug" data-bug-id="${bug.id}">同步</button>`;
@@ -8419,6 +8029,7 @@ const BugManager = {
         <span class="bug-severity ${severityClass}">${severityText}</span>
         <span class="task-title-text">${escapeHtml(bug.title)}${bugIdSuffix}</span>
         ${addBugIdBtn}
+        ${attachmentBadgeHTML(bug)}
       </div>
       ${bug.projectName ? `<span class="execution-tag">${escapeHtml(bug.projectName)}</span>` : ''}
       ${assigneeDisplay ? `<div class="bug-meta">${assigneeDisplay}</div>` : ''}
@@ -8434,7 +8045,7 @@ const BugManager = {
       bugIdLink.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        this.showBugDetail(bug.id);
+        openInZentao('bug', bug.zentaoId);
       });
     }
 
@@ -8906,6 +8517,17 @@ const BugManager = {
     if (modal) {
       modal.style.display = 'none';
     }
+    if (this.attachmentPicker) this.attachmentPicker.clear();
+  },
+
+  /** 用户主动关闭（关闭按钮 / 遮罩）：已添加附件时先确认。文字内容有草稿，附件没有 */
+  async requestCloseBugModal() {
+    const count = this.attachmentPicker ? this.attachmentPicker.count : 0;
+    if (count > 0) {
+      const ok = await Confirm.show('放弃附件？', `已添加 ${count} 个截图 / 附件，关闭后不会保存（文字内容会保留在草稿里）。`, '关闭', '继续编辑');
+      if (!ok) return;
+    }
+    this.hideBugModal();
   },
 
   /**
@@ -9107,7 +8729,7 @@ const BugManager = {
 
     if (!users || Object.keys(users).length === 0) {
       console.warn('[BugManager] 用户列表未加载，尝试从禅道加载...');
-      await ZentaoBrowserClient.loadUsersFromTeamPage();
+      await ZentaoBrowserClient.refreshUsersFromZentao();
       users = await ZentaoBrowserClient.getUsers();
       console.log('[BugManager] 从禅道加载后的用户数量:', users ? Object.keys(users).length : 0);
     }
@@ -9143,6 +8765,9 @@ const BugManager = {
       console.error(`[BugManager] 多选组件元素不存在: ${fieldId}`);
       return;
     }
+
+    // 每次打开弹窗都会重新初始化：先撤掉上一次绑定的监听，避免同一元素上越绑越多
+    const listenerSignal = resetListenerScope(container);
 
     // 存储选中的用户
     const selectedUsers = new Set();
@@ -9181,7 +8806,7 @@ const BugManager = {
             option.classList.add('selected');
           }
           this.updateMultiSelectDisplay(fieldId, selectedUsers, users);
-        });
+        }, { signal: listenerSignal });
 
         optionsContainer.appendChild(option);
       });
@@ -9197,7 +8822,7 @@ const BugManager = {
         dropdown.style.display = isVisible ? 'none' : 'block';
         display.classList.toggle('active', !isVisible);
       }
-    });
+    }, { signal: listenerSignal });
 
     // 点击其他地方关闭下拉
     document.addEventListener('click', (e) => {
@@ -9205,7 +8830,7 @@ const BugManager = {
         dropdown.style.display = 'none';
         display.classList.remove('active');
       }
-    });
+    }, { signal: listenerSignal });
 
     // 初始化渲染选项
     renderOptions();
@@ -9366,7 +8991,6 @@ const BugManager = {
       const configResp = await fetch(`${API_BASE_URL}/api/zentao/config`);
       const configResult = await configResp.json();
       const baseUrl = configResult.data?.url?.replace(/\/$/, '') || null;
-      let needRelogin = false;
 
       if (baseUrl) {
         // 初始化 syncResponse，默认为失败（未同步到禅道）
@@ -9696,37 +9320,9 @@ const BugManager = {
           return;
         } else if (syncResponse && syncResponse.success !== undefined) {
           console.warn('[BugManager] 禅道 Bug 同步失败, success:', syncResponse.success, 'reason:', syncResponse.reason, 'data:', syncResponse.data);
-          if (syncResponse.reason === 'no_zentao_tab') {
-             ProgressToast.hide();
-             Toast.error('未找到禅道标签页，请先在浏览器中登录禅道');
-             return;
-          } else if (typeof syncResponse.reason === 'string' && (syncResponse.reason.includes('超时') || syncResponse.reason.includes('登录'))) {
-             needRelogin = true;
-          } else {
-             ProgressToast.hide();
-             Toast.warning('禅道同步失败，将在本地保存 (' + (syncResponse.reason || '未知错误') + ')');
-          }
-        }
-      }
-
-      if (needRelogin) {
-        ProgressToast.hide();
-        console.log('[BugManager] 需要重新登录禅道');
-        Toast.warning('禅道登录已超时，正在重新登录...');
-
-        // 调用浏览器端的 ZentaoBrowser 刷新 Cookie
-        if (typeof ZentaoBrowser !== 'undefined' && ZentaoBrowser.refreshCookies) {
-          const refreshSuccess = await ZentaoBrowser.refreshCookies();
-          if (refreshSuccess) {
-            Toast.success('禅道登录成功，请重新提交 Bug');
-            return;
-          } else {
-            Toast.error('禅道自动登录失败，请手动在浏览器标签页登录');
-            return;
-          }
-        } else {
-          Toast.error('请手动在浏览器中重新登录禅道标签页');
-          return;
+          // 会话过期由后端自动重新登录；走到这里是真失败（网络/权限/参数），本地照常保存
+          ProgressToast.hide();
+          Toast.warning('禅道同步失败，将在本地保存 (' + (syncResponse.reason || '未知错误') + ')');
         }
       }
     } catch (syncError) {
@@ -9768,8 +9364,20 @@ const BugManager = {
           Toast.success('Bug 已保存到本地，稍后可点击"同步"按钮同步到禅道');
         }
 
+        // 先取出附件（关闭弹窗会清空选择区），本地保存成功后上传；
+        // Bug 已在禅道创建的，后端会立即推送（截图同时插进重现步骤），否则同步到禅道后自动上传
+        const attachmentItems = this.attachmentPicker ? this.attachmentPicker.getItems() : [];
+        const localBugId = result.data && result.data.id;
         this.clearDraft();
         this.hideBugModal();
+        if (attachmentItems.length && localBugId) {
+          AttachmentApi.uploadAll(localBugId, attachmentItems, { inline: true })
+            .then(({ failed }) => {
+              if (failed.length) Toast.error(`${failed.length} 个附件添加失败：${failed.map(f => f.message).join('；')}`, 6000);
+            })
+            .catch(err => Toast.error(`附件添加失败：${err.message}`, 6000))
+            .finally(() => this.loadBugs());
+        }
         // 清除 modal 中的执行信息
         if (modal) {
           delete modal.dataset.executionId;
@@ -9990,6 +9598,7 @@ const BugManager = {
             </div>
           </div>
         ` : ''}
+        <div class="att-section" style="margin-top: 12px;"></div>
         ${bug.history && bug.history.length > 0 ? `
           <div style="margin-top: 12px;">
             <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 500;">历史记录:</p>
@@ -10025,6 +9634,11 @@ const BugManager = {
     `;
 
     // 清空并重新创建按钮，避免 CSP 问题
+    // 附件区：截图 / 录屏预览、下载、追加（可直接粘贴截图）、删除、重试
+    if (typeof AttachmentPanel !== 'undefined') {
+      AttachmentPanel.mount(content.querySelector('.att-section'), bug, { onChanged: () => this.loadBugs() });
+    }
+
     actions.innerHTML = '';
 
     // 编辑 BugID 按钮（始终显示）
@@ -10147,6 +9761,17 @@ const BugManager = {
       }
     }
 
+    // 验证截图 / 附件：随「解决」动作一起提交到禅道（出现在该次解决的历史记录下）
+    const resolveAttachmentsHost = document.getElementById('resolveAttachments');
+    if (resolveAttachmentsHost && typeof AttachmentPicker !== 'undefined') {
+      if (!this.resolveAttachmentPicker) {
+        this.resolveAttachmentPicker = new AttachmentPicker(resolveAttachmentsHost, {
+          hint: '可附上修复后的验证截图，随「解决」一起提交到禅道'
+        });
+      }
+      this.resolveAttachmentPicker.clear();
+      this.resolveAttachmentPicker.bindPaste(modal);
+    }
     modal.style.display = 'flex';
   },
 
@@ -10169,6 +9794,7 @@ const BugManager = {
 
       document.getElementById('resolveComment').value = '';
     }
+    if (this.resolveAttachmentPicker) this.resolveAttachmentPicker.clear();
   },
 
   /**
@@ -10404,13 +10030,13 @@ const BugManager = {
     // 如果用户列表为空或数量太少（可能加载失败），尝试重新加载
     if (!users || userCount === 0) {
       console.warn('[BugManager] 用户列表未加载，尝试从禅道加载...');
-      await ZentaoBrowserClient.loadUsersFromTeamPage();
+      await ZentaoBrowserClient.refreshUsersFromZentao();
       users = await ZentaoBrowserClient.getUsers();
       console.log('[BugManager] 从禅道加载后用户数量:', Object.keys(users).length);
     } else if (userCount < 5) {
       // 用户列表数量太少，可能是加载不完整，尝试重新加载
       console.warn('[BugManager] 用户列表数量过少(', userCount, '个)，可能加载不完整，尝试重新加载...');
-      await ZentaoBrowserClient.loadUsersFromTeamPage();
+      await ZentaoBrowserClient.refreshUsersFromZentao();
       users = await ZentaoBrowserClient.getUsers();
       console.log('[BugManager] 重新加载后用户数量:', Object.keys(users).length);
     }
@@ -10445,7 +10071,7 @@ const BugManager = {
 
     if (!users || userCount === 0) {
       console.warn('[BugManager] 用户列表未加载，尝试加载...');
-      await ZentaoBrowserClient.loadUsersFromTeamPage();
+      await ZentaoBrowserClient.refreshUsersFromZentao();
       users = await ZentaoBrowserClient.getUsers();
       console.log('[BugManager] 从禅道加载后用户数量:', Object.keys(users).length);
     }
@@ -10475,6 +10101,9 @@ const BugManager = {
       console.warn('[BugManager] initSingleSelect: 容器元素未找到');
       return;
     }
+
+    // 每次打开弹窗都会重新初始化：先撤掉上一次绑定的监听，避免同一元素上越绑越多
+    const listenerSignal = resetListenerScope(container);
 
     const userCount = Object.keys(users).length;
     console.log('[BugManager] initSingleSelect: 初始化单选组件，用户数量:', userCount);
@@ -10508,7 +10137,7 @@ const BugManager = {
         display.innerHTML = `<span class="multi-select-tag"><span class="multi-select-tag-name">${name}</span></span>`;
         dropdown.style.display = 'none';
         display.classList.remove('active');
-      });
+      }, { signal: listenerSignal });
 
       optionsContainer.appendChild(option);
     });
@@ -10517,7 +10146,7 @@ const BugManager = {
     display.addEventListener('click', (e) => {
       dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
       display.classList.toggle('active', dropdown.style.display !== 'none');
-    });
+    }, { signal: listenerSignal });
 
     // 点击其他地方关闭下拉
     document.addEventListener('click', (e) => {
@@ -10525,7 +10154,7 @@ const BugManager = {
         dropdown.style.display = 'none';
         display.classList.remove('active');
       }
-    });
+    }, { signal: listenerSignal });
 
     // 如果有选中的值，恢复显示
     if (selectedValue) {
@@ -10545,6 +10174,9 @@ const BugManager = {
     const optionsContainer = container.querySelector(`#${fieldId}Options`);
 
     if (!display || !dropdown || !optionsContainer) return;
+
+    // 每次打开弹窗都会重新初始化：先撤掉上一次绑定的监听，避免同一元素上越绑越多
+    const listenerSignal = resetListenerScope(container);
 
     const selectedUsers = new Set();
 
@@ -10576,7 +10208,7 @@ const BugManager = {
             option.classList.add('selected');
           }
           this.updateMultiSelectDisplayById(fieldId, selectedUsers, users);
-        });
+        }, { signal: listenerSignal });
 
         optionsContainer.appendChild(option);
       });
@@ -10612,7 +10244,7 @@ const BugManager = {
                 option.classList.remove('selected');
               }
             });
-          });
+          }, { signal: listenerSignal });
 
           display.appendChild(tag);
         });
@@ -10623,7 +10255,7 @@ const BugManager = {
     display.addEventListener('click', (e) => {
       dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
       display.classList.toggle('active', dropdown.style.display !== 'none');
-    });
+    }, { signal: listenerSignal });
 
     // 点击其他地方关闭下拉
     document.addEventListener('click', (e) => {
@@ -10631,7 +10263,7 @@ const BugManager = {
         dropdown.style.display = 'none';
         display.classList.remove('active');
       }
-    });
+    }, { signal: listenerSignal });
 
     // 初始化渲染选项
     renderOptions();
@@ -10815,7 +10447,22 @@ const BugManager = {
       // 构造看板页面 URL
       const kanbanUrl = `${baseUrl}/zentao/execution-kanban-${bug.executionId}-bug.html`;
 
-      // 调用 background.js 修复 Bug（使用看板页面）
+      // 验证截图 / 附件：先作为「暂扣」存进本地附件区，再随解决动作一起提交
+      const attachmentItems = this.resolveAttachmentPicker ? this.resolveAttachmentPicker.getItems() : [];
+      let heldIds = [];
+      if (attachmentItems.length) {
+        const { uploaded, failed } = await AttachmentApi.uploadAll(bugId, attachmentItems, { hold: true });
+        if (failed.length) {
+          // 有附件没存进去：回收已存的，让用户处理后再提交，避免解决了却少了证据
+          await Promise.all(uploaded.map(a => AttachmentApi.remove(bugId, `local:${a.id}`).catch(() => { })));
+          ProgressToast.hide();
+          Toast.error(`附件添加失败，未提交解决：${failed.map(f => f.message).join('；')}`, 6000);
+          return;
+        }
+        heldIds = uploaded.map(a => a.id);
+      }
+
+      // 调用 background.js 修复 Bug（后端直连）
       const response = await chrome.runtime.sendMessage({
         action: 'resolveBugInZentao',
         baseUrl,
@@ -10823,10 +10470,17 @@ const BugManager = {
         bugId: bug.zentaoId,
         resolution,
         assignedTo,
-        comment
+        comment,
+        localId: bugId,
+        attachmentIds: heldIds
       });
 
       ProgressToast.hide();
+
+      if (!(response && response.success) && heldIds.length) {
+        // 解决没成功：回收这次暂扣的附件，重新提交时会重新上传
+        await Promise.all(heldIds.map(id => AttachmentApi.remove(bugId, `local:${id}`).catch(() => { })));
+      }
 
       if (response && response.success) {
         Toast.success('Bug 已修复');
@@ -10840,7 +10494,7 @@ const BugManager = {
         this.hideResolveModal();
         this.hideBugDetail(); // 同时关闭详情弹窗
       } else {
-        Toast.error('解决失败: ' + (response?.reason || '未知错误'));
+        Toast.error('解决失败: ' + (response?.reason || response?.message || '未知错误'));
       }
     } catch (err) {
       ProgressToast.hide();

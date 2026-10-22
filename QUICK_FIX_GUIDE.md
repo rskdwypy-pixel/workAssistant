@@ -17,7 +17,7 @@
 #### 步骤 1: 手动访问执行页面
 在浏览器中打开：
 ```
-http://10.128.1.8:8088/zentao/execution-bug-167.html
+http://zentao.example.com:8088/zentao/execution-bug-167.html
 ```
 
 #### 步骤 2: 检查页面状态
@@ -76,7 +76,7 @@ http://10.128.1.8:8088/zentao/execution-bug-167.html
 
 1. **打开禅道并登录**
    ```
-   http://10.128.1.8:8088/zentao/
+   http://zentao.example.com:8088/zentao/
    ```
 
 2. **创建测试Bug**
@@ -161,7 +161,7 @@ http://10.128.1.8:8088/zentao/execution-bug-167.html
 3. 点击你想使用的执行
 4. 查看浏览器地址栏，格式如：
    ```
-   http://10.128.1.8:8088/zentao/execution-view-167.html
+   http://zentao.example.com:8088/zentao/execution-view-167.html
    ```
    其中 `167` 就是执行ID
 

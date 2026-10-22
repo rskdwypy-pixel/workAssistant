@@ -1,10 +1,10 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { config } from '../config.js';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const LEARNING_FILE = join(__dirname, '../../data/executionLearning.json');
+// 数据目录取自 config.paths.data（调用时读取，测试可指向临时目录）
+const LEARNING_FILE_NAME = 'executionLearning.json';
+const learningFile = () => join(config.paths.data, LEARNING_FILE_NAME);
 
 const MAX_RECORDS = 200;
 
@@ -13,25 +13,25 @@ const MAX_RECORDS = 200;
  * @returns {Object} 学习数据 { corrections: [] }
  */
 function ensureLearningFile() {
-  if (!existsSync(LEARNING_FILE)) {
-    const dir = dirname(LEARNING_FILE);
+  if (!existsSync(learningFile())) {
+    const dir = dirname(learningFile());
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const defaultData = { corrections: [] };
-    writeFileSync(LEARNING_FILE, JSON.stringify(defaultData, null, 2), 'utf-8');
+    writeFileSync(learningFile(), JSON.stringify(defaultData, null, 2), 'utf-8');
     return defaultData;
   }
   try {
-    return JSON.parse(readFileSync(LEARNING_FILE, 'utf-8'));
+    return JSON.parse(readFileSync(learningFile(), 'utf-8'));
   } catch (e) {
     console.error('[ExecutionLearning] 学习文件损坏，重建:', e.message);
     const fresh = { corrections: [] };
-    writeFileSync(LEARNING_FILE, JSON.stringify(fresh, null, 2), 'utf-8');
+    writeFileSync(learningFile(), JSON.stringify(fresh, null, 2), 'utf-8');
     return fresh;
   }
 }
 
 function writeLearningFile(data) {
-  writeFileSync(LEARNING_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  writeFileSync(learningFile(), JSON.stringify(data, null, 2), 'utf-8');
 }
 
 /**

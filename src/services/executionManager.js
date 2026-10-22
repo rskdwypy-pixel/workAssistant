@@ -1,17 +1,16 @@
 import { join, dirname } from 'path';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { fileURLToPath } from 'url';
 import { config } from '../config.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const EXECUTIONS_FILE = join(__dirname, '../../data/executions.json');
+// 数据目录取自 config.paths.data（调用时读取，测试可指向临时目录）
+const EXECUTIONS_FILE_NAME = 'executions.json';
+const executionsFile = () => join(config.paths.data, EXECUTIONS_FILE_NAME);
 
 /**
  * 确保执行文件存在
  */
 function ensureExecutionsFile() {
-  if (!existsSync(EXECUTIONS_FILE)) {
+  if (!existsSync(executionsFile())) {
     // 从配置中获取默认执行ID
     const configuredExecutionId = config.zentao.executionId;
 
@@ -25,11 +24,11 @@ function ensureExecutionsFile() {
       favoriteExecutionIds: [],  // 新增：初始化收藏列表
       lastSync: null
     };
-    writeFileSync(EXECUTIONS_FILE, JSON.stringify(defaultData, null, 2), 'utf-8');
+    writeFileSync(executionsFile(), JSON.stringify(defaultData, null, 2), 'utf-8');
     return defaultData;
   }
 
-  const data = JSON.parse(readFileSync(EXECUTIONS_FILE, 'utf-8'));
+  const data = JSON.parse(readFileSync(executionsFile(), 'utf-8'));
 
   // 确保 favoriteExecutionIds 字段存在
   if (!data.favoriteExecutionIds) {
@@ -44,7 +43,7 @@ function ensureExecutionsFile() {
       isDefault: true
     });
     data.defaultExecutionId = String(config.zentao.executionId);
-    writeFileSync(EXECUTIONS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+    writeFileSync(executionsFile(), JSON.stringify(data, null, 2), 'utf-8');
   }
 
   return data;
@@ -54,7 +53,7 @@ function ensureExecutionsFile() {
  * 写入执行文件
  */
 function writeExecutionsFile(data) {
-  writeFileSync(EXECUTIONS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  writeFileSync(executionsFile(), JSON.stringify(data, null, 2), 'utf-8');
 }
 
 /**
@@ -103,105 +102,47 @@ async function getExecutions() {
 }
 
 /**
- * 从禅道同步执行列表
- * @param {Array} executionsFromFrontend - 从前端获取的执行列表（可选）
+ * 从禅道同步执行列表（后端直连，保留收藏与默认执行）
+ * @returns {Promise<Array>} 执行列表
+ * @throws {Error} 禅道不可达或解析失败时抛出（不再静默返回旧数据）
  */
-async function syncExecutionsFromZentao(executionsFromFrontend = null) {
-  // 如果从前端传入了执行数据，需要处理并添加类型字段
-  if (executionsFromFrontend && Array.isArray(executionsFromFrontend)) {
-    const data = ensureExecutionsFile();
-    const existingFavorites = new Set(data.favoriteExecutionIds || []);
-
-    // 为前端传入的执行数据补充类型字段
-    console.log('[ExecutionManager] 前端传入的执行数量:', executionsFromFrontend.length);
-    console.log('[ExecutionManager] 前3个执行的type:', executionsFromFrontend.slice(0, 3).map(e => ({ id: e.id, name: e.name, type: e.type })));
-
-    const processedExecutions = executionsFromFrontend.map(ex => {
-      // 如果已有type字段，保留；否则根据名称判断
-      if (ex.type) {
-        return {
-          ...ex,
-          kanbanId: ex.type === 'kanban' ? (ex.kanbanId || ex.id) : null
-        };
-      }
-
-      // 根据名称判断执行类型
-      const name = (ex.name || '').toLowerCase();
-      let executionType = 'execution';
-
-      if (name.includes('看板') || name.includes('kanban')) {
-        executionType = 'kanban';
-      } else if (name.includes('迭代') || name.includes('sprint')) {
-        executionType = 'sprint';
-      } else if (name.includes('阶段') || name.includes('stage')) {
-        executionType = 'stage';
-      }
-
-      return {
-        ...ex,
-        type: executionType,
-        kanbanId: executionType === 'kanban' ? ex.id : null
-      };
-    });
-
-    console.log('[ExecutionManager] 处理后前3个执行的type:', processedExecutions.slice(0, 3).map(e => ({ id: e.id, name: e.name, type: e.type })));
-
-    data.executions = processedExecutions;
-    data.favoriteExecutionIds = Array.from(existingFavorites);
-    data.lastSync = new Date().toISOString();
-    writeExecutionsFile(data);
-
-    // 统计执行类型分布
-    const typeStats = processedExecutions.reduce((acc, ex) => {
-      acc[ex.type] = (acc[ex.type] || 0) + 1;
-      return acc;
-    }, {});
-    console.log('[ExecutionManager] 同步成功，获取到', processedExecutions.length, '个执行，类型分布:', typeStats);
-    return processedExecutions;
-  }
-
-  // 否则尝试从服务端同步（使用 zentaoService 获取准确的 type 字段）
+async function syncExecutionsFromZentao() {
   if (!config.zentao.enabled) {
     throw new Error('禅道未启用');
   }
-
   if (!config.zentao.url) {
     throw new Error('禅道 URL 未配置');
   }
 
-  try {
-    // 使用 zentaoService 的 getExecutions 方法，它从 HTML 页面解析准确的 type 字段
-    const { getExecutions } = await import('./zentaoService.js');
-    const executions = await getExecutions();
-
-    if (!executions || executions.length === 0) {
-      throw new Error('未获取到执行列表');
-    }
-
-    console.log('[ExecutionManager] 从 zentaoService 获取到', executions.length, '个执行');
-    console.log('[ExecutionManager] 执行类型分布:', executions.reduce((acc, ex) => {
-      acc[ex.type] = (acc[ex.type] || 0) + 1;
-      return acc;
-    }, {}));
-
-    // 保存到本地，保留收藏的执行ID
-    const data = ensureExecutionsFile();
-    const existingFavorites = new Set(data.favoriteExecutionIds || []);
-    data.executions = executions;
-    data.favoriteExecutionIds = Array.from(existingFavorites);
-    data.lastSync = new Date().toISOString();
-    writeExecutionsFile(data);
-
-    console.log('[ExecutionManager] 同步成功，获取到', executions.length, '个执行，保留收藏', existingFavorites.size, '个');
-
-    return executions;
-  } catch (err) {
-    console.error('[ExecutionManager] 同步执行列表失败:', err.message);
-
-    // 返回现有的执行列表
-    const data = ensureExecutionsFile();
-    return data.executions || [];
+  // zentaoService.getExecutions 从 HTML 页面解析，能拿到准确的 type 字段
+  const { getExecutions } = await import('./zentaoService.js');
+  const executions = await getExecutions();
+  if (executions.length === 0) {
+    throw new Error('禅道返回的执行列表为空');
   }
+
+  const data = ensureExecutionsFile();
+  const defaultId = data.defaultExecutionId ? String(data.defaultExecutionId) : '';
+  data.executions = executions.map(ex => ({ ...ex, isDefault: ex.id === defaultId }));
+  data.favoriteExecutionIds = Array.from(new Set(data.favoriteExecutionIds || []));
+  data.lastSync = new Date().toISOString();
+  writeExecutionsFile(data);
+
+  const typeStats = executions.reduce((acc, ex) => {
+    acc[ex.type] = (acc[ex.type] || 0) + 1;
+    return acc;
+  }, {});
+  console.log('[ExecutionManager] 同步成功，获取到', executions.length, '个执行，类型分布:', typeStats);
+
+  // 项目列表顺带刷新（失败不影响执行同步）
+  try {
+    const { syncProjectsFromZentao } = await import('./projectManager.js');
+    await syncProjectsFromZentao();
+  } catch (err) {
+    console.warn('[ExecutionManager] 顺带刷新项目列表失败:', err.message);
+  }
+
+  return data.executions;
 }
 
 /**
@@ -418,8 +359,11 @@ async function getAiCandidateExecutions(options = {}) {
   const defaultExec = defaultId ? executions.find(e => String(e.id) === defaultId) : null;
   const ordered = [];
   if (defaultExec) ordered.push({ ...defaultExec, isDefault: true });
+  // 已关闭/已取消的执行不再作为候选：新任务不会建到关闭的执行里，
+  // 留着只会拉长提示词、拖慢模型，还可能被误选
+  const inactive = new Set(['closed', 'cancel', '已关闭', '已取消']);
   for (const e of executions) {
-    if (String(e.id) !== defaultId) ordered.push(e);
+    if (String(e.id) !== defaultId && !inactive.has(e.status)) ordered.push(e);
   }
 
   const candidates = ordered.slice(0, limit);

@@ -31,6 +31,10 @@ HOST_DESC="工作助手本地后端服务"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LAUNCHER="$PROJECT_DIR/scripts/backend-launcher.sh"
 NODE_PATH_FILE="$PROJECT_DIR/scripts/.node-path"
+# shellcheck source=common.sh
+source "$PROJECT_DIR/scripts/common.sh"
+# Firefox 扩展 ID（about:debugging 中可见）；不提供则跳过 Firefox，避免写一个必然连不上的空授权清单
+FIREFOX_EXT_ID="${WORKASSISTANT_FIREFOX_EXT_ID:-}"
 
 DETECT_ONLY=0
 ONLY_BROWSER=""
@@ -168,17 +172,14 @@ write_host_file() {
   mkdir -p "$target_dir"
 
   if [[ "$kind" == "firefox" ]]; then
-    # Firefox 的 native messaging 清单格式不同：
-    #   - 用 allowed_extensions（Firefox 扩展 ID），不是 allowed_origins
-    #   - 没有扩展 ID 时留空数组，Firefox 会拒绝连接，需用户在 about:debugging
-    #     查看临时安装扩展的 ID 后填入（README 有说明）
+    # Firefox 的 native messaging 清单格式不同：用 allowed_extensions（Firefox 扩展 ID）
     cat > "$target_dir/$HOST_NAME.json" <<JSON
 {
   "name": "$HOST_NAME",
   "description": "$HOST_DESC",
   "path": "$LAUNCHER",
   "type": "stdio",
-  "allowed_extensions": []
+  "allowed_extensions": ["$FIREFOX_EXT_ID"]
 }
 JSON
   else
@@ -210,7 +211,7 @@ fi
 
 chmod +x "$LAUNCHER"
 
-NODE_BIN="${WORKASSISTANT_NODE:-$(command -v node || true)}"
+NODE_BIN="$(wa_resolve_node_for_install || true)"
 
 # ── 解析扩展 ID（Chromium 系授权必需；Firefox 分支不使用） ──
 if [[ -n "$EXT_ID_OVERRIDE" ]]; then
@@ -301,6 +302,12 @@ while IFS=$'\t' read -r bid name rel kind app; do
     continue
   fi
 
+  if [[ "$kind" == "firefox" && -z "$FIREFOX_EXT_ID" ]]; then
+    echo "        ⏭  跳过：Firefox 需要扩展 ID 才能授权，设置 WORKASSISTANT_FIREFOX_EXT_ID=<ID> 后重跑"
+    SKIPPED=$((SKIPPED + 1))
+    continue
+  fi
+
   write_host_file "$kind" "$target_dir"
   REGISTERED=$((REGISTERED + 1))
 done <<< "$DETECTED"
@@ -316,7 +323,7 @@ fi
 # 固化 node 路径：浏览器启动宿主时不继承 shell 环境变量，
 # 启动器必须能从文件读到 node 的绝对路径。
 if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
-  echo "⚠️  当前 shell 里找不到 node，未固化路径"
+  echo "⚠️  找不到可用的 node（需要 18 及以上版本），未固化路径"
   echo "   宿主将回退用 PATH 查找，换机后可能失败。"
   echo "   如 node 不在 PATH 中，请执行："
   echo "     WORKASSISTANT_NODE=/path/to/node bash scripts/install-native-host.sh"
@@ -331,7 +338,7 @@ echo "✅ 已注册 $REGISTERED 个浏览器"
 echo ""
 
 if [[ $REGISTERED -eq 0 ]]; then
-  echo "⚠️  没有匹配到指定浏览器（--browser $ONLY_BROWSER）"
+  echo "⚠️  没有匹配到指定浏览器（--browser ${ONLY_BROWSER}）"
   exit 1
 fi
 
@@ -341,7 +348,7 @@ echo "     Chrome/Edge: chrome://extensions   Edge: edge://extensions"
 echo "  2. 打开新标签页，后端会自动在 127.0.0.1:3721 启动"
 echo ""
 echo "启动/停止：插件「设置 → 本地服务」里有「启动服务 / 停止服务」按钮"
-echo "命令行停止：pkill -f 'node src/index.js'"
+echo "命令行停止：curl -X POST http://127.0.0.1:3721/api/admin/shutdown"
 echo ""
 echo "💡 若浏览器启动后端仍不生效，改用开机自启（与浏览器无关，最稳）："
 echo "     npm run setup:auto-start"

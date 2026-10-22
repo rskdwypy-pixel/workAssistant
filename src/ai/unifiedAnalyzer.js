@@ -12,7 +12,7 @@
  *   AI 直接推 ISO 时间戳时，跨天/跨周/跨月容易算错，且无法验证。
  */
 
-import { config } from '../config.js';
+import { config, aiModelFor } from '../config.js';
 import { buildLearningHint } from '../services/executionLearning.js';
 import { rankCandidates } from './candidateRanker.js';
 
@@ -212,7 +212,7 @@ export async function analyzeTaskUnified(content, options = {}) {
 
   try {
     const response = await client.chat.completions.create({
-      model: config.ai.model,
+      model: aiModelFor('task'),
       response_format: { type: 'json_object' },
       messages: [
         {
@@ -222,7 +222,12 @@ export async function analyzeTaskUnified(content, options = {}) {
         { role: 'user', content: prompt }
       ],
       temperature: 0.1,
-      max_tokens: 400
+      // 只是上限：普通模型输出不到 100 token；推理模型（如 hy3）要先思考几百 token，给小了正文是空的
+      max_tokens: 1500
+    }, {
+      // 交互场景（用户正看着弹窗）：超时就降级本地解析，不重试（SDK 默认重试 2 次，最坏要等三倍时间）
+      timeout: options.timeoutMs || 8000,
+      maxRetries: 0
     });
 
     let raw = response?.choices?.[0]?.message?.content?.trim() || '';

@@ -100,7 +100,7 @@ launchctl kickstart -k gui/$(id -u)/com.workassistant.backend
 
 ## 已知坑（`MIGRATION.md` 有完整版）
 
-- **Clash Verge TUN 模式**会劫持内网流量，禅道 `10.128.1.8:8088` 表现是「TCP 通但 HTTP 空响应，curl exit 52」。解法：给 `10.0.0.0/8` 加 DIRECT 规则。
+- **Clash Verge TUN 模式**会劫持内网流量，禅道 `zentao.example.com:8088` 表现是「TCP 通但 HTTP 空响应，curl exit 52」。解法：给 `10.0.0.0/8` 加 DIRECT 规则。
 - **macOS TCC**：项目若放在 `~/Documents` 下，后台进程（launchd、浏览器拉起的宿主）访问时会**阻塞**而非报错，表现为进程存在但无套接字、日志无输出。排查：`sample <pid> 2`，栈停在 `node::ReadFileSync → uv_fs_open → open()` 即确诊。解法：项目移到非受保护目录。
 - **扩展 ID 按安装路径哈希派生**，换机必变，宿主清单必须重生成。
 - **改服务配置后要 `launchctl bootout` 再 bootstrap**，否则 launchd 继续用内存里的旧定义，出现「配置已改、进程没换」的假生效。

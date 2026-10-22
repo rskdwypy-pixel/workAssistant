@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(npm start)",
-      "Bash(grep -l \"executionSelect\\\\|flipModeBtn\\\\|tagCloud\" extension/*.js)"
+      "Bash(grep -l \"executionSelect\\\\|flipModeBtn\\\\|tagCloud\" extension/*.js)",
+      "Bash(node -e ':*)"
     ]
   }
 }
