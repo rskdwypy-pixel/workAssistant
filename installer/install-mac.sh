@@ -317,8 +317,8 @@ else
   bash "$WA_HOME/versions/$VERSION/scripts/install-launchagent.sh" >/dev/null
   ok "开机自启已注册"
   bash "$WA_HOME/versions/$VERSION/scripts/install-native-host.sh" >/dev/null && ok "浏览器宿主已注册（插件可按需拉起后台）" || warn "浏览器宿主注册失败（不影响使用，开机自启会拉起后台）"
-  for _ in $(seq 1 60); do backend_alive && break; sleep 0.5; done
-  backend_alive || { diagnose; die "后台服务 30 秒内没有启动（排查信息见上，日志：~/Library/Logs/WorkAssistant/backend.log）"; }
+  for _ in $(seq 1 120); do backend_alive && break; sleep 0.5; done
+  backend_alive || { diagnose; die "后台服务 60 秒内没有启动（排查信息见上，日志：~/Library/Logs/WorkAssistant/backend.log）"; }
   RUNNING="$(curl -s -m 2 "http://127.0.0.1:${PORT}/health" | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).version||"")}catch{console.log("")}})')"
   [[ "$RUNNING" == "$VERSION" ]] || { diagnose; die "后台服务版本是 ${RUNNING:-未知}，应为 ${VERSION}（日志：~/Library/Logs/WorkAssistant/backend.log）"; }
   ok "后台服务已启动（版本 ${VERSION}）"

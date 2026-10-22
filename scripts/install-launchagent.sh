@@ -97,12 +97,16 @@ $PROGRAM_ARGS
   <string>$X_LOG</string>
 
   <key>ProcessType</key>
-  <string>Background</string>
+  <string>Standard</string>
 </dict>
 </plist>
 PLIST_EOF
 )"
 
+# ProcessType 用 Standard 而不是 Background 是刻意的：
+#   Background 会被 macOS 限制 CPU 和磁盘 IO，实测后端启动从 1 秒变成 20～45 秒，
+#   安装器等不到、插件也长时间连不上。后端平时几乎空闲，Standard 不会多耗资源。
+#
 # KeepAlive 用 SuccessfulExit=false 而不是 true 是刻意的：
 #   正常退出（插件里点「停止服务」、端口已被本项目后端占用时让位）以 0 退出，不重启；
 #   崩溃（非 0 退出）才自动拉起。

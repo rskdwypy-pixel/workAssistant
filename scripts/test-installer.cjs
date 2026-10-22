@@ -131,6 +131,9 @@ try {
   const plist = path.join(HOME, 'Library', 'LaunchAgents', 'com.workassistant.backend.plist');
   const progArg = execFileSync('/usr/libexec/PlistBuddy', ['-c', 'Print :ProgramArguments:0', plist], { encoding: 'utf8' }).trim();
   check('登录项指向固定入口（切换版本不用改登录项）', progArg === path.join(WA, 'bin', 'workassistant-run'), progArg);
+  // Background 会被系统限制 CPU / 磁盘 IO，后端启动从 1 秒拖到 20～45 秒
+  const procType = execFileSync('/usr/libexec/PlistBuddy', ['-c', 'Print :ProcessType', plist], { encoding: 'utf8' }).trim();
+  check('登录项不用 Background 进程类型（否则启动被系统限速）', procType === 'Standard', procType);
   const hosts = spawnSync('find', [path.join(HOME, 'Library'), '-name', 'com.workassistant.backend.json'], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean);
   const manifests = hosts.map(f => JSON.parse(fs.readFileSync(f, 'utf8')));
   check('浏览器宿主：指向固定入口，只允许固定扩展 ID', manifests.length > 0 && manifests.every(m => m.path === path.join(WA, 'bin', 'native-host') && m.allowed_origins.join() === `chrome-extension://${fixedId}/`), JSON.stringify(manifests));
