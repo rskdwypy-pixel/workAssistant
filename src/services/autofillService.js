@@ -519,6 +519,7 @@ async function runJob(job, plan, days, deps) {
     if (!known.has(taskId)) known.set(taskId, new Set((await getTaskEfforts(taskId, CH)).map(e => e.id)));
     return known.get(taskId);
   };
+  let aborted = false;
   const addResult = (r) => { job.results.push(r); job.done++; };
 
   for (const d of days) {
@@ -551,15 +552,17 @@ async function runJob(job, plan, days, deps) {
         await updateLog((log) => { const b = log.batches.find(x => x.id === job.batchId); if (b) b.entries.push(entry); });
       } catch (err) {
         addResult({ ...base, taskName: t.name, status: 'failed', error: err.message });
-        if (/登录|会话|超时/.test(err.message)) { job.state = 'aborted'; job.message = '禅道登录失效，已停止；已写入的保留，可撤销'; break; }
+        if (/登录|会话|超时/.test(err.message)) { aborted = true; job.message = '禅道登录失效，已停止；已写入的保留，可撤销'; break; }
       }
       if (gap) await sleep(gap);
     }
-    if (job.state === 'aborted') break;
+    if (aborted) break;
   }
-  if (job.state === 'running') job.state = job.stop ? 'stopped' : 'done';
+  // 先把补填记录写好，再对外宣布完成：别人（界面、撤销）一看到 done，记录里的状态就已经是最终的
+  const finalState = aborted ? 'aborted' : job.stop ? 'stopped' : 'done';
+  await updateLog((log) => { const b = log.batches.find(x => x.id === job.batchId); if (b) { b.state = finalState; b.finishedAt = new Date().toISOString(); } });
   job.finishedAt = Date.now();
-  await updateLog((log) => { const b = log.batches.find(x => x.id === job.batchId); if (b) { b.state = job.state; b.finishedAt = new Date().toISOString(); } });
+  job.state = finalState;
 }
 
 function getJob(id) {
