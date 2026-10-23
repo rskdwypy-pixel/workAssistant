@@ -358,6 +358,34 @@ try {
   check('同号 Bug 不受任务同步影响', all.find(t => t.id === 'b801').status === 'activated' && all.find(t => t.id === 'b801').type === 'bug');
   check('同步结果 total 为活跃任务数', syncResult.total === 1 && syncResult.refreshed === 2, JSON.stringify(syncResult));
 
+  // ============ 同步：最近填过工时的已完成任务也收进来，落在最后一次填工时的那天 ============
+  {
+    const es = await import('../src/services/effortService.js');
+    const day = new Date(Date.now() - 5 * 86400000);
+    const dayStr = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+    es._caches.mine.write({ syncedAt: Date.now(), tasks: {
+      804: { sig: 'a', at: Date.now(), name: '补过工时的已完成任务', exec: '', efforts: [{ id: '9', account: 'u', date: dayStr, consumed: 2, left: 0, work: 'x' }] }
+    } });
+    seed([]);
+    mock.handler = (url, init) => {
+      const lr = loginHandler(url, init);
+      if (lr) return lr;
+      if (url.includes('/zentao/my-task-')) return zentaoJson({ tasks: [
+        { id: 804, name: '补过工时的已完成任务', status: 'done', pri: 3 },
+        { id: 805, name: '没填过工时的历史任务', status: 'done', pri: 3 }
+      ], pager: { pageTotal: 1 } });
+      return zentaoJson({ bugs: [], pager: { pageTotal: 1 } });
+    };
+    await zs.syncMyTasks();
+    all = await read();
+    const t804 = all.find(t => String(t.zentaoId) === '804');
+    check('同步：近期填过工时的已完成任务被收进来（状态完成）', !!t804 && t804.status === 'done');
+    check('同步：它的日期落在最后一次填工时那天，不是"今天"', t804 && t804.createdAt.slice(0, 10) === dayStr && t804.updatedAt.slice(0, 10) === dayStr, t804 && t804.createdAt);
+    check('同步：没填过工时的历史已完成任务仍不收', !all.some(t => String(t.zentaoId) === '805'));
+    const view = await getAllTasks({ date: dayStr });
+    check('同步后：任务页按那天看，能看到这个任务', view.some(t => String(t.zentaoId) === '804'));
+  }
+
   // ============ C1/E1：请求来源校验 ============
   const guard = createRequestGuard({ port: 3721, projectRoot: '/Users/x/workAssistant' });
   const extId = extensionIdFromPath('/Users/x/workAssistant/extension');

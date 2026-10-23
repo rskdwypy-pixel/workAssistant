@@ -843,6 +843,30 @@ const TASK_STATUS_TO_LOCAL = {
 };
 
 /**
+ * 最近 N 天里我填过工时的任务：taskId → 最后一次填工时的日期。
+ * 读工时缓存（先把近几个月同步到够新）；工时没配置 / 读不到都当没有，不影响任务同步。
+ */
+async function recentWorkedTasks(days) {
+  const out = new Map();
+  try {
+    const es = await import('./effortService.js');
+    const since = new Date(Date.now() - days * 86400000);
+    const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const months = new Set();
+    for (let d = new Date(since); d <= new Date(); d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) months.add(ymd(d).slice(0, 7));
+    for (const m of months) await es.getMonthEfforts(m, { maxAge: 5 * 60 * 1000 });
+    const sinceStr = ymd(since);
+    for (const [taskId, list] of es.myEffortsByTask()) {
+      const last = list[list.length - 1].date;
+      if (last >= sinceStr) out.set(String(taskId), last);
+    }
+  } catch (err) {
+    console.warn('[ZentaoService] 读取近期工时任务失败（忽略）:', err.message);
+  }
+  return out;
+}
+
+/**
  * 后端同步「我的任务」和「我的 Bug」到本地
  * 任务：拉取 my-task（全部分页）→ 新增/更新 wait / doing 的活跃任务；
  *       本地已有的任务无论禅道里是什么状态都刷新（禅道里被完成/关闭/取消的，本地也跟着完成），
@@ -867,9 +891,12 @@ async function syncMyTasks() {
     [...localTaskIds].filter(id => !listed.has(id)),
     cookiesToString(await getZentaoCookies())
   );
+  // 最近 60 天里我填过工时的任务也要有（哪怕已完成）：补填 / 在禅道网页上填的，任务页按日期看才找得到
+  const worked = await recentWorkedTasks(60);
   const picked = raw.filter((t) =>
-    t.status === 'wait' || t.status === 'doing' || localTaskIds.has(String(t.id)));
+    t.status === 'wait' || t.status === 'doing' || localTaskIds.has(String(t.id)) || worked.has(String(t.id)));
   const mapped = picked.map((t) => ({
+    touchedAt: worked.get(String(t.id)) || '',
     zentaoId: t.id,
     title: t.name,
     status: TASK_STATUS_TO_LOCAL[t.status] || 'todo',

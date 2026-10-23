@@ -645,6 +645,9 @@ async function importZentaoTasks(zentaoTasks) {
           incoming.progress = zentaoTask.progress;
         }
         const existingTask = existingByKey.get(`task:${zentaoId}`);
+        // 新收进来的已完成任务，按最后一次填工时的日期落位（否则全按"今天创建"，会堆到今天）
+        const touched = /^\d{4}-\d{2}-\d{2}$/.test(String(zentaoTask.touchedAt || '')) && zentaoTask.status === 'done'
+          ? new Date(`${zentaoTask.touchedAt}T12:00:00`).toISOString() : '';
 
         if (existingTask) {
           // 只覆盖禅道侧字段，保留本地修改的字段
@@ -675,8 +678,8 @@ async function importZentaoTasks(zentaoTasks) {
             executionName: zentaoTask.executionName || '',
             projectName: zentaoTask.projectName || '',
             projectId: zentaoTask.projectId || '',
-            createdAt: now,
-            updatedAt: now
+            createdAt: touched || now,
+            updatedAt: touched || now
           };
           tasks.unshift(newTask);
           existingByKey.set(`task:${zentaoId}`, newTask);

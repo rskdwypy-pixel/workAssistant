@@ -627,6 +627,10 @@ async function runJob(job, plan, days, deps) {
   await updateLog((log) => { const b = log.batches.find(x => x.id === job.batchId); if (b) { b.state = finalState; b.finishedAt = new Date().toISOString(); } });
   job.finishedAt = Date.now();
   job.state = finalState;
+  // 补过工时的任务（哪怕已完成）顺手同步进任务页，按日期看才找得到；失败不影响补填结果
+  if (job.written > 0 && deps.syncTasks !== false) {
+    import('./zentaoService.js').then((z) => z.syncMyTasks()).catch((err) => console.warn('[Autofill] 补填后同步任务失败（忽略）:', err.message));
+  }
 }
 
 function getJob(id) {
