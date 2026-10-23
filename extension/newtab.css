@@ -3334,3 +3334,32 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
 .mode-card.active { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); }
 .mode-card .report-page, .mode-card .doc-page, .mode-card .story-page { padding: 20px; }
 .mode-card .sync-hint { margin-left: auto; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+
+/* 工作日历：日格子的工时状态 + 日抽屉 */
+.report-day.is-full { background: rgba(16, 185, 129, .07); border-color: rgba(16, 185, 129, .35); }
+.report-day.is-full .report-day-mine { color: #047857; font-weight: 600; }
+.report-day.is-partial { background: rgba(245, 158, 11, .07); border-color: rgba(245, 158, 11, .4); }
+.report-day.is-partial .report-day-mine { color: #b45309; font-weight: 600; }
+.report-day-bar { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; margin: 3px 0; }
+.report-day-bar span { display: block; height: 100%; border-radius: 2px; background: var(--primary); }
+.report-day.is-full .report-day-bar span { background: var(--success); }
+.report-day.is-partial .report-day-bar span { background: var(--warning); }
+.stat-value.is-warn { color: var(--danger); }
+.effort-progress { height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; margin-bottom: 18px; }
+.effort-progress span { display: block; height: 100%; border-radius: 4px; background: var(--primary); transition: width .25s; }
+.effort-progress span.is-partial { background: var(--warning); }
+.effort-progress span.is-full { background: var(--success); }
+.effort-section-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin: 6px 0 8px; display: flex; align-items: center; gap: 6px; }
+.effort-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+.effort-item { display: flex; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-surface); }
+.effort-hours { flex: none; min-width: 44px; font-weight: 700; color: var(--primary); }
+.effort-main { min-width: 0; flex: 1; }
+.effort-task { font-size: 13px; font-weight: 600; }
+.effort-task em { font-style: normal; font-weight: 400; color: var(--text-muted); margin-left: 8px; font-size: 12px; }
+.effort-work { margin-top: 2px; font-size: 13px; color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; }
+.effort-empty, .effort-note { padding: 18px 0; text-align: center; color: var(--text-muted); font-size: 13px; margin-bottom: 14px; }
+.effort-form { border-top: 1px solid var(--border); padding-top: 14px; display: flex; flex-direction: column; gap: 12px; }
+.effort-form .doc-field select, .effort-form .doc-field input, .effort-form .doc-field textarea { width: 100%; box-sizing: border-box; }
+.effort-fill { align-self: flex-start; border: 1px dashed var(--border); background: transparent; color: var(--primary); border-radius: var(--radius-sm); padding: 5px 10px; font-size: 12px; cursor: pointer; }
+.effort-fill:hover { border-color: var(--primary); }
+.effort-actions { display: flex; justify-content: flex-end; }

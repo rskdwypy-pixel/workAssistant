@@ -1205,6 +1205,7 @@ async function updateTaskStatus(taskId, status, options = {}) {
  * @param {string} effortData.work - 工作内容描述
  * @param {number} effortData.consumed - 消耗工时（小时）
  * @param {number} effortData.left - 剩余工时（小时）
+ * @param {string} [effortData.date] - 工时日期 YYYY-MM-DD，默认今天（补填过去的日期时传）
  * @returns {Promise<{success: boolean, message?: string}>}
  */
 async function recordTaskEstimate(taskId, effortData) {
@@ -1214,7 +1215,8 @@ async function recordTaskEstimate(taskId, effortData) {
     const endpoint = `${config.zentao.url}/zentao/task-recordEstimate-${taskId}.html?onlybody=yes`;
 
     const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const today = /^\d{4}-\d{2}-\d{2}$/.test(String(effortData.date || '')) ? effortData.date : todayStr;
 
     console.log('[ZentaoService] 记录任务工时:', { taskId, ...effortData });
 
@@ -1263,6 +1265,8 @@ async function recordTaskEstimate(taskId, effortData) {
       const detail = consumedAfter != null ? `累计消耗 ${consumedAfter} 小时` : '禅道已确认';
       console.log('[ZentaoService] 工时记录成功:', taskId,
         `${consumedBefore} -> ${consumedAfter}`, submitted ? '(禅道收尾脚本确认)' : '(回读确认)');
+      // 工时日历的缓存以任务为单位，记了工时就让这个任务的缓存失效（动态导入：工时服务也引用本文件，避免循环依赖）
+      import('./effortService.js').then(m => m.invalidateTask(taskId)).catch(() => {});
       return { success: true, message: `工时已记录（${detail}）`, consumed: consumedAfter };
     }
 
@@ -2646,7 +2650,7 @@ async function getTaskEfforts(taskId, CH) {
   const inner = await getZentaoJson(`task-recordEstimate-${taskId}.json?onlybody=yes`, CH);
   return ((inner && inner.efforts) || [])
     .filter(e => String(e.deleted) !== '1')
-    .map(e => ({ account: String(e.account), date: String(e.date).slice(0, 10), consumed: Number(e.consumed) || 0, work: e.work || '' }));
+    .map(e => ({ id: String(e.id || ''), account: String(e.account), date: String(e.date).slice(0, 10), consumed: Number(e.consumed) || 0, left: Number(e.left) || 0, work: e.work || '' }));
 }
 
 /** 删除禅道里的一个附件 */

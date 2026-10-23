@@ -717,6 +717,7 @@ router.post('/config', async (req, res) => {
       aiReportModel,
       morningHour,
       eveningHour,
+      workHours,
       webhookUrl,
       webhookType
     } = req.body;
@@ -737,6 +738,11 @@ router.post('/config', async (req, res) => {
     if (aiReportModel !== undefined) configModule.config.ai.reportModel = String(aiReportModel || '').trim();
     if (morningHour !== undefined) configModule.config.schedule.morningHour = parseInt(morningHour);
     if (eveningHour !== undefined) configModule.config.schedule.eveningHour = parseInt(eveningHour);
+    if (workHours !== undefined) {
+      const wh = parseFloat(workHours);
+      if (!(wh > 0 && wh <= 24)) return res.status(400).json({ success: false, message: '每日标准工时应大于 0 且不超过 24 小时' });
+      configModule.config.schedule.workHours = wh;
+    }
     if (webhookUrl !== undefined) configModule.config.webhook.url = webhookUrl;
     if (webhookType !== undefined) configModule.config.webhook.type = webhookType;
 
@@ -749,6 +755,7 @@ router.post('/config', async (req, res) => {
     if (aiReportModel !== undefined) envUpdates.OPENAI_REPORT_MODEL = configModule.config.ai.reportModel;
     if (morningHour !== undefined) envUpdates.MORNING_HOUR = morningHour;
     if (eveningHour !== undefined) envUpdates.EVENING_HOUR = eveningHour;
+    if (workHours !== undefined) envUpdates.WORK_HOURS_PER_DAY = configModule.config.schedule.workHours;
     if (webhookUrl !== undefined) envUpdates.WEBHOOK_URL = webhookUrl;
     if (webhookType !== undefined) envUpdates.WEBHOOK_TYPE = webhookType;
 
@@ -820,7 +827,8 @@ router.get('/config', async (req, res) => {
         },
         schedule: {
           morningHour: cfg.schedule.morningHour,
-          eveningHour: cfg.schedule.eveningHour
+          eveningHour: cfg.schedule.eveningHour,
+          workHours: cfg.schedule.workHours
         },
         webhook: {
           hasUrl: !!cfg.webhook.url,
@@ -902,35 +910,19 @@ router.post('/prompts', async (req, res) => {
 // ==================== 工时相关接口 ====================
 
 /**
- * POST /api/workHours - 保存今日工时
- */
-router.post('/workHours', async (req, res) => {
-  try {
-    const { hours } = req.body;
-    if (typeof hours !== 'number' || hours < 0) {
-      return res.status(400).json({ error: '无效的工时数据' });
-    }
-    const { saveTodayWorkHours } = await import('../utils/storage.js');
-    await saveTodayWorkHours(hours);
-    console.log(`[API] 今日工时已保存: ${hours} 小时`);
-    res.json({ success: true, data: { hours } });
-  } catch (err) {
-    console.error('[API] 保存工时失败:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/**
- * GET /api/workHours - 获取今日工时
+ * GET /api/workHours - 今日已填工时（以禅道为准，由工时服务汇总；缓存 60 秒内不重复请求禅道）
+ * 返回 { hours, standard, date }。以前的 POST（前端自己累加再存）已去掉：工时只有一个来源，就是禅道。
  */
 router.get('/workHours', async (req, res) => {
   try {
-    const { readTodayWorkHours } = await import('../utils/storage.js');
-    const hours = await readTodayWorkHours();
-    res.json({ success: true, data: { hours } });
+    const { getDayHours } = await import('../services/effortService.js');
+    const r = await getDayHours();
+    res.json({ success: true, data: { hours: r.hours, standard: r.standard, date: r.date } });
   } catch (err) {
+    // 禅道没配置 / 连不上：今日工时记为 0，不影响其它功能
+    if (err && err.code === 'ZENTAO_DISABLED') return res.json({ success: true, data: { hours: 0, standard: 8, date: '' } });
     console.error('[API] 获取工时失败:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

@@ -87,7 +87,9 @@ const config = {
   // 定时任务配置
   schedule: {
     morningHour: parseInt(process.env.MORNING_HOUR || '9', 10),
-    eveningHour: parseInt(process.env.EVENING_HOUR || '21', 10)
+    eveningHour: parseInt(process.env.EVENING_HOUR || '21', 10),
+    // 每天标准工时（小时）：工作日历用它判断「填满 / 不足 / 缺填」
+    workHours: parseFloat(process.env.WORK_HOURS_PER_DAY || '8') || 8
   },
 
   // 报告页：全员部分只统计这些账号（逗号分隔；空 = 团队全员）

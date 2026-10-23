@@ -183,32 +183,6 @@ async function writeHistory(data) {
 }
 
 /**
- * 读取今日工时
- */
-async function readTodayWorkHours() {
-  const history = await readHistory();
-  const today = new Date().toISOString().split('T')[0];
-  return history.dailyWorkHours?.[today] || 0;
-}
-
-/**
- * 保存今日工时
- * 注意：前端已经处理了累加逻辑，这里直接覆盖即可
- */
-async function saveTodayWorkHours(hours) {
-  const history = await readHistory();
-  if (!history.dailyWorkHours) {
-    history.dailyWorkHours = {};
-  }
-  const today = new Date().toISOString().split('T')[0];
-  // 直接覆盖工时（前端已经处理了累加逻辑）
-  history.dailyWorkHours[today] = hours;
-  await writeHistory(history);
-  console.log(`[Storage] 今日工时已保存: ${hours} 小时`);
-  return true;
-}
-
-/**
  * 按日期获取任务
  */
 function getTasksByDate(tasks, dateStr) {
@@ -251,8 +225,6 @@ export {
   zentaoKeyOf,
   readHistory,
   writeHistory,
-  readTodayWorkHours,
-  saveTodayWorkHours,
   getTasksByDate,
   getTasksByDateRange
 };

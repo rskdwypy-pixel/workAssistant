@@ -1,8 +1,8 @@
 /**
- * 报告页（与任务、Bug 同级的标签页）
+ * 工作日历（原「报告」页，与任务、Bug 同级的标签页）
  *
  *   ReportApi     后端 /api/reports/* 的封装
- *   ReportPage    当月日历：每天一份日报、每周一份周报、当月一份月报
+ *   ReportPage    当月日历：每天的工时（以禅道为准，点开可填报 / 补填，见 efforts.js）、日报、每周周报、当月月报
  *   ReportViewer  报告窗口（居中弹窗）：「我的」/「全员」两部分；全员再分「按人」/「按项目」；
  *                 推送、复制、重新生成只作用于当前看的那部分；也承载「历史报告」列表
  *   ReportMembersPicker  设置 → 禅道集成：全员报告只统计哪些人
@@ -41,6 +41,7 @@ const REPORT_KIND_LABEL = { daily: '日报', weekly: '周报', monthly: '月报'
 const reportEsc = (s) => (typeof escapeHtml === 'function' ? escapeHtml(String(s ?? '')) : String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
 const reportPad = (n) => String(n).padStart(2, '0');
 const reportYmd = (d) => `${d.getFullYear()}-${reportPad(d.getMonth() + 1)}-${reportPad(d.getDate())}`;
+const reportClock = (ms) => { if (!ms) return '--:--'; const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const fmtHours = (h) => `${Math.round((Number(h) || 0) * 10) / 10}h`;
 const shortDate = (s) => { const [, m, d] = String(s).split('-').map(Number); return `${m}/${d}`; };
 const WEEKDAY = ['日', '一', '二', '三', '四', '五', '六'];
@@ -57,16 +58,16 @@ const ReportPage = {
     // 本地模式（没登录禅道）：报告数据都来自禅道，给出登录入口
     if (typeof Account !== 'undefined' && Account.isLocalMode()) {
       this.rendered = false;
-      root.innerHTML = `<div class="task-board-header"><div class="task-board-left"><h2>📊 报告</h2><div class="task-board-stats"></div></div></div><section class="report-page"><div class="report-empty report-login-empty">
-        <p><strong>报告数据来自禅道</strong></p>
-        <p class="report-muted">日报 / 周报 / 月报统计的是禅道里的工时记录与任务，登录禅道后即可查看与生成。</p>
+      root.innerHTML = `<div class="task-board-header"><div class="task-board-left"><h2>📅 工作日历</h2><div class="task-board-stats" id="reportStats"></div></div><span class="sync-hint" id="reportSyncHint"></span></div><section class="report-page"><div class="report-empty report-login-empty">
+        <p><strong>工时与报告数据来自禅道</strong></p>
+        <p class="report-muted">这里查看和填报禅道里的工时，并生成日报 / 周报 / 月报，登录禅道后即可使用。</p>
         <button type="button" class="btn-primary" data-report-login>登录禅道</button></div></section>`;
       root.querySelector('[data-report-login]').addEventListener('click', () => Account.showLogin({ fromButton: true }));
       return;
     }
     if (!this.rendered) {
       this.rendered = true;
-      root.innerHTML = `<div class="task-board-header"><div class="task-board-left"><h2>📊 报告</h2><div class="task-board-stats"></div></div></div>
+      root.innerHTML = `<div class="task-board-header"><div class="task-board-left"><h2>📅 工作日历</h2><div class="task-board-stats" id="reportStats"></div></div><span class="sync-hint" id="reportSyncHint"></span></div>
         <section class="report-page">
           <div class="report-head">
             <div class="report-month-nav">
@@ -85,18 +86,57 @@ const ReportPage = {
     this.load(this.month || reportYmd(new Date()).slice(0, 7));
   },
 
+  efforts: null,       // 当前月份的工时（EffortApi.month 的整个响应）
+  loadToken: 0,
+
+  setHint(text) {
+    const el = document.getElementById('reportSyncHint');
+    if (el) el.textContent = text || '';
+  },
+
   async load(month) {
     this.month = month;
+    const token = ++this.loadToken;
     const root = document.getElementById('reportMode');
     const grid = root && root.querySelector('.report-calendar');
     if (!grid) return;
+    if (!this.efforts || this.efforts.data.month !== month) this.efforts = null;
     if (!this.data || this.data.month !== month) grid.innerHTML = '<div class="report-loading">加载中…</div>';
     try {
       const { data } = await ReportApi.calendar(month);
+      if (token !== this.loadToken) return;
       this.data = data;
       this.render();
     } catch (err) {
       grid.innerHTML = `<div class="report-error">读取报告日历失败：${reportEsc(err.message)}</div>`;
+      return;
+    }
+    // 工时：先画后端的本地缓存（几乎瞬时），再向禅道要最新的
+    try {
+      const c = await EffortApi.month(month, { cacheOnly: true });
+      if (token !== this.loadToken) return;
+      if (c.data.days) {
+        this.efforts = c;
+        this.render();
+        this.setHint(`缓存 ${reportClock(c.syncedAt)} · 正在更新…`);
+      } else {
+        this.setHint('正在从禅道读取工时…（第一次会慢一点）');
+      }
+    } catch { /* 没缓存就等最新的 */ }
+    await this.reloadEfforts(token);
+  },
+
+  /** 向禅道要最新工时并重画（填报之后也调用） */
+  async reloadEfforts(token = this.loadToken) {
+    try {
+      const e = await EffortApi.month(this.month);
+      if (token !== this.loadToken) return;
+      this.efforts = e;
+      this.render();
+      this.setHint(`已同步 ${reportClock(e.syncedAt)}`);
+    } catch (err) {
+      if (token !== this.loadToken) return;
+      this.setHint(this.efforts ? '更新失败，当前显示的是缓存' : `工时读取失败：${err.message}`);
     }
   },
 
@@ -127,43 +167,86 @@ const ReportPage = {
       return cells.join('');
     }).join('');
     root.querySelector('.report-calendar').innerHTML = head + rows;
+    this.renderStats();
+  },
+
+  /** 某天的工时：{hours, items}；工时还没读到时 loaded=false */
+  effortOf(date) {
+    const days = this.efforts && this.efforts.data && this.efforts.data.days;
+    return { loaded: !!days, entry: (days && days[date]) || { hours: 0, items: [] } };
+  },
+
+  standard() { return (this.efforts && this.efforts.data && this.efforts.data.standard) || 8; },
+
+  /** 页头统计：本月累计、缺填天数（过去的工作日里不满标准工时的）。点「缺填」跳到第一个缺填日 */
+  renderStats() {
+    const el = document.getElementById('reportStats');
+    if (!el) return;
+    const days = this.efforts && this.efforts.data && this.efforts.data.days;
+    if (!days || !this.data) { el.innerHTML = ''; return; }
+    const std = this.standard();
+    let total = 0;
+    for (const v of Object.values(days)) total += v.hours;
+    const missing = this.data.days.filter(d => !d.weekend && !d.future && !d.today && (days[d.date] ? days[d.date].hours : 0) < std);
+    this.firstMissing = missing.length ? missing[0].date : null;
+    el.innerHTML = `
+      <div class="stat-item"><span class="stat-label">本月累计</span><span class="stat-value">${fmtHours(total)}</span></div>
+      <div class="stat-item"><span class="stat-label">缺填</span><span class="stat-value${missing.length ? ' is-warn' : ''}"${missing.length ? ' data-effort-day="' + missing[0].date + '" style="cursor:pointer" title="点击跳到第一个缺填的日子"' : ''}>${missing.length} 天</span></div>`;
   },
 
   dayCell(day, cal) {
     const n = Number(day.date.slice(8));
     const r = day.report;
+    const std = this.standard();
+    const { loaded, entry } = this.effortOf(day.date);
     const cls = ['report-day'];
     if (day.weekend) cls.push('is-weekend');
     if (day.today) cls.push('is-today');
     if (day.future) cls.push('is-future');
+    if (r) cls.push('has-report');
     let body = '';
-    if (r) {
-      cls.push('has-report');
-      const missing = !day.weekend && r.myHours === 0;
-      if (missing) cls.push('is-missing');
-      body = `
-        <div class="report-day-mine">${missing ? '未填工时' : `我 ${fmtHours(r.myHours)}`}</div>
-        <div class="report-day-team">全员 ${fmtHours(r.teamHours)} · ${r.activeCount}/${r.memberCount} 人</div>`;
-    } else if (day.future) {
-      body = '';
-    } else if (day.today) {
-      body = `<div class="report-day-pending">${cal.eveningHour}:00 生成</div>`;
-    } else if (day.legacy) {
-      body = '<div class="report-day-pending">旧版日报</div>';
-    } else {
-      body = `<div class="report-day-pending">${day.weekend ? '' : '点击生成'}</div>`;
+    if (loaded && !day.future) {
+      if (entry.hours >= std) cls.push('is-full');
+      else if (entry.hours > 0) cls.push('is-partial');
+      else if (!day.weekend && !day.today) cls.push('is-missing');
+      if (entry.hours > 0) {
+        const pct = Math.min(100, Math.round((entry.hours / std) * 100));
+        body += `<div class="report-day-mine">${fmtHours(entry.hours)}</div><div class="report-day-bar"><span style="width:${pct}%"></span></div>`;
+      } else if (!day.weekend && !day.today) {
+        body += '<div class="report-day-mine">未填工时</div>';
+      } else if (day.today) {
+        body += '<div class="report-day-pending">今天还没填</div>';
+      }
+    } else if (!loaded && !day.future && r) {
+      // 工时还没读到：先显示报告快照里的数
+      if (r.myHours === 0 && !day.weekend) cls.push('is-missing');
+      body += `<div class="report-day-mine">${r.myHours === 0 ? '未填工时' : `我 ${fmtHours(r.myHours)}`}</div>`;
     }
-    const attrs = day.future ? 'aria-disabled="true"' : `data-report-open="daily" data-report-key="${day.date}" tabindex="0" role="button"`;
+    if (r) body += `<div class="report-day-team">全员 ${fmtHours(r.teamHours)} · ${r.activeCount}/${r.memberCount} 人</div>`;
+    else if (day.legacy) body += '<div class="report-day-pending">旧版日报</div>';
+    const attrs = day.future ? 'aria-disabled="true"' : `data-effort-day="${day.date}" tabindex="0" role="button"`;
     return `<div class="${cls.join(' ')}" ${attrs} title="${reportEsc(day.date)} ${WEEKDAY[day.weekday]}">
-      <div class="report-day-num">${n}${r ? '<span class="report-dot"></span>' : ''}</div>${body}</div>`;
+      <div class="report-day-num">${n}${r ? '<span class="report-dot" title="已有日报"></span>' : ''}</div>${body}</div>`;
   },
 
   weekCell(w) {
     const r = w.report;
     const attrs = w.future ? 'aria-disabled="true"' : `data-report-open="weekly" data-report-key="${w.key}" tabindex="0" role="button"`;
+    // 本周累计工时：日历里这一周的每一天（跨月的那几天不在本月数据里，只统计本月内的）
+    let live = null;
+    if (this.efforts && this.efforts.data.days) {
+      live = 0;
+      for (let i = 0; i < 7; i++) {
+        const dt = new Date(...w.begin.split('-').map((v, j) => (j === 1 ? Number(v) - 1 : Number(v))));
+        dt.setDate(dt.getDate() + i);
+        const e = this.efforts.data.days[reportYmd(dt)];
+        if (e) live += e.hours;
+      }
+    }
+    const mine = live !== null ? `<div class="report-day-mine">${fmtHours(live)}</div>` : (r ? `<div class="report-day-mine">我 ${fmtHours(r.myHours)}</div>` : '');
     return `<div class="report-week ${r ? 'has-report' : ''} ${w.future ? 'is-future' : ''}" ${attrs} title="${reportEsc(w.label)}">
       <div class="report-week-label">${shortDate(w.begin)}–${shortDate(w.end)}</div>
-      ${r ? `<div class="report-day-mine">我 ${fmtHours(r.myHours)}</div><div class="report-day-team">全员 ${fmtHours(r.teamHours)}</div>` : (w.future ? '' : '<div class="report-day-pending">周报</div>')}
+      ${mine}${r ? `<div class="report-day-team">全员 ${fmtHours(r.teamHours)}</div>` : (w.future ? '' : '<div class="report-day-pending">周报</div>')}
     </div>`;
   },
 
@@ -176,6 +259,8 @@ const ReportPage = {
       const d = new Date(y, m - 1 + step, 1);
       return this.load(`${d.getFullYear()}-${reportPad(d.getMonth() + 1)}`);
     }
+    const day = e.target.closest('[data-effort-day]');
+    if (day) return EffortDrawer.open(day.dataset.effortDay);
     const open = e.target.closest('[data-report-open]');
     if (open && !open.disabled) ReportViewer.open(open.dataset.reportOpen, open.dataset.reportKey || this.month);
   },
@@ -196,7 +281,7 @@ const ReportPage = {
 // 键盘：日历格子回车打开
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
-  const cell = e.target && e.target.closest && e.target.closest('.report-calendar [data-report-open]');
+  const cell = e.target && e.target.closest && e.target.closest('.report-calendar [data-report-open], .report-calendar [data-effort-day]');
   if (cell) { e.preventDefault(); cell.click(); }
 });
 

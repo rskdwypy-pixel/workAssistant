@@ -20,6 +20,7 @@ const { JSDOM } = require('jsdom');
 const EXT = path.join(__dirname, '..', 'extension');
 const SRC = fs.readFileSync(path.join(EXT, 'newtab.js'), 'utf8');
 const REP = fs.readFileSync(path.join(EXT, 'reports.js'), 'utf8');
+const EFF = fs.readFileSync(path.join(EXT, 'efforts.js'), 'utf8');
 const HTML = fs.readFileSync(path.join(EXT, 'newtab.html'), 'utf8').replace(/<script[\s\S]*?<\/script>/g, '');
 const AST = acorn.parse(SRC, { ecmaVersion: 'latest', sourceType: 'script' });
 
@@ -125,7 +126,7 @@ function setup(state) {
   win.Confirm = { show: async () => true };
   win.openInZentao = (type, id) => state.opened.push([type, id]);
   win.navigator.clipboard = { writeText: async (t) => { state.copied = t; } };
-  win.eval(`const API_BASE_URL = 'http://127.0.0.1:3721';\n${REP}\nwindow.ReportApi = ReportApi;`);
+  win.eval(`const API_BASE_URL = 'http://127.0.0.1:3721';\n${REP}\n${EFF}\nwindow.ReportApi = ReportApi;`);
   return { win, doc: win.document };
 }
 
@@ -140,7 +141,7 @@ function setup(state) {
   check('标题显示月份', root.querySelector('.report-month-title').textContent === '2025年3月');
   const heads = [...root.querySelectorAll('.report-col-head')].map(h => h.textContent).join('');
   check('表头：周一到周日 + 周报', heads === '一二三四五六日周报', heads);
-  const cell = (d) => root.querySelector(`[data-report-key="2025-03-${pad(d)}"]`);
+  const cell = (d) => root.querySelector(`[data-effort-day="2025-03-${pad(d)}"]`);
   check('已生成的日报显示我的 / 全员工时', /我 3h/.test(cell(12).textContent) && /全员 13h · 3\/3 人/.test(cell(12).textContent) && cell(12).classList.contains('has-report'));
   check('工作日我没填工时：标红「未填工时」', cell(11).classList.contains('is-missing') && /未填工时/.test(cell(11).textContent));
   check('旧版日报标记', /旧版日报/.test(cell(5).textContent));
@@ -157,8 +158,11 @@ function setup(state) {
   root.querySelector('[data-report-nav="-1"]').click();
   await tick(20);
 
-  // ============ 点以前的日期：直接生成 ============
+  // ============ 点以前的日期：先开日抽屉（工时），点「查看日报」才进日报 ============
   cell(13).click();
+  await tick(5);
+  check('点日期：打开工时抽屉', doc.getElementById('effortDrawer').classList.contains('active') && /3月13日|3月13/.test(doc.getElementById('effortDrawerTitle').textContent));
+  doc.querySelector('#effortDrawer [data-eff="report"]').click();
   await tick(5);
   const drawer = () => doc.getElementById('reportDrawer');
   check('没有报告的以前日期：显示生成中', /正在从禅道读取数据/.test(drawer().textContent));

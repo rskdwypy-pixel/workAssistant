@@ -238,7 +238,7 @@
         <button class="tab-btn" data-mode="bug">🐛 Bug</button>
         <button class="tab-btn" data-mode="story">📝 需求</button>
         <button class="tab-btn" data-mode="doc">📁 文档</button>
-        <button class="tab-btn" data-mode="report">📊 报告</button>
+        <button class="tab-btn" data-mode="report">📅 工作日历</button>
         <!-- 右上角：读取账号时显示加载提示；已登录显示头像（点开是用户信息与设置）；未登录显示「登录禅道」和设置图标 -->
         <div class="account-area" id="accountArea">
           <span id="accountLoading" class="account-loading" role="status"><span class="account-spinner" aria-hidden="true"></span>正在读取禅道账号…</span>
@@ -993,6 +993,16 @@
             </div>
 
             <div class="set-row">
+              <div class="sr-label">每日标准工时</div>
+              <div class="sr-control">
+                <div class="row">
+                  <input type="number" class="set-input" id="workHours" min="1" max="24" step="0.5" value="8" style="width:80px">
+                  <span class="input-hint">小时，工作日历用它判断「填满 / 不足 / 缺填」</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="set-row">
               <div class="sr-label">Webhook<small>可选</small></div>
               <div class="sr-control">
                 <input type="text" class="set-input" id="webhookUrl" placeholder="飞书 / 钉钉 / 企业微信 Webhook 地址" style="max-width:340px">
@@ -1276,6 +1286,7 @@
   <script src="docs.js"></script>
   <script src="stories.js"></script>
   <script src="todos.js"></script>
+  <script src="efforts.js"></script>
   <script src="platform.js"></script>
   <script src="account.js"></script>
   <script src="update-ui.js"></script>

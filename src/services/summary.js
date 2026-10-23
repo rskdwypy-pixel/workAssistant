@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import { config } from '../config.js';
 import { getTodayTasks } from './taskManager.js';
-import { readHistory, writeHistory, readTodayWorkHours } from '../utils/storage.js';
+import { readHistory, writeHistory } from '../utils/storage.js';
 import { generateSummary } from '../ai/openai.js';
 import { sendEveningSummary } from '../utils/webhook.js';
 import { sendSystemNotification } from './reminder.js';
@@ -127,8 +127,12 @@ async function eveningSummary() {
       console.warn('[Summary] 获取 Bug 数据失败:', err.message);
     }
 
-    // 获取今日工时
-    const todayHours = await readTodayWorkHours();
+    // 今日工时：以禅道为准（工时服务汇总）；取不到（没连禅道）按 0 处理
+    let todayHours = 0;
+    try {
+      const { getDayHours } = await import('./effortService.js');
+      todayHours = (await getDayHours()).hours;
+    } catch { /* 没连禅道就没有工时信息 */ }
     const workTimeInfo = todayHours > 0 ? { hours: todayHours } : null;
 
     // AI生成日报

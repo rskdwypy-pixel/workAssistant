@@ -17,9 +17,9 @@ let draggingProgressTask = null; // 正在拖拽的任务 ID
 let draggingProgressElement = null; // 正在拖拽的进度条元素
 let draggingProgressOriginalValue = null; // 拖拽前的原始进度值
 
-// 今日工时追踪
+// 今日工时：以禅道为准，由后端汇总（GET /api/workHours）；这里只在内存里持有显示用的数字，不写任何本地存储
 let todayWorkHours = 0; // 今日已工作时长（小时）
-const DAILY_WORK_HOURS = 8; // 每日标准工时
+let dailyWorkHours = 8; // 每日标准工时（后端配置，随 /api/workHours 一起返回）
 
 // ==================== 禅道同步状态 ====================
 const STORAGE_KEY_LAST_SYNC = 'zentao_last_sync_time';
@@ -832,13 +832,15 @@ function showConfirm(title, message, okText = '确定', cancelText = '取消') {
   return Confirm.show(title, message, okText, cancelText);
 }
 
-// ==================== 今日工时追踪 ====================
+// ==================== 今日工时 ====================
+// 今日已填工时以禅道为准：后端读禅道汇总，前端不做任何累加或本地存储。
+// （以前用 localStorage 自己累加：在禅道网页上填的、换浏览器 / 电脑都对不上。）
 
 // 缓存当前日期，用于检测跨天
 let currentDateStr = null;
 
 /**
- * 获取当前日期字符串（YYYY-MM-DD 格式）
+ * 获取当前日期字符串（YYYY_M_D 格式），只用来检测跨天
  */
 function getCurrentDateStr() {
   const today = new Date();
@@ -846,158 +848,57 @@ function getCurrentDateStr() {
 }
 
 /**
- * 检查日期是否变化，如果变化则重置工时
+ * 检查日期是否变化，如果变化则重新向后端要今日工时
  */
 function checkDateChange() {
   const newDateStr = getCurrentDateStr();
   if (currentDateStr && currentDateStr !== newDateStr) {
-    console.log('[WorkTime] 检测到日期变化，重置工时:', currentDateStr, '->', newDateStr);
-    // 日期已变化，重置工时
-    todayWorkHours = 0;
     currentDateStr = newDateStr;
+    todayWorkHours = 0;
     updateTodayWorkTimeDisplay();
+    refreshTodayWorkHours();
   } else if (!currentDateStr) {
-    // 首次初始化
     currentDateStr = newDateStr;
   }
 }
 
 /**
- * 获取今日工时存储键
+ * 向后端要今日已填工时（后端读禅道，60 秒内走缓存）
  */
-function getTodayWorkTimeKey() {
-  // 先检查日期变化
-  checkDateChange();
-  const today = new Date();
-  return `workTime_${today.getFullYear()}_${today.getMonth() + 1}_${today.getDate()}`;
-}
-
-/**
- * 获取今日任务工时记录的存储键
- * 用于记录每个任务今日记录的工时，删除任务时可以减去
- */
-function getTodayTaskWorkTimeKey() {
-  const today = new Date();
-  return `taskWorkTime_${today.getFullYear()}_${today.getMonth() + 1}_${today.getDate()}`;
-}
-
-/**
- * 记录任务今日工时
- */
-function recordTaskWorkTime(taskId, hours) {
-  const key = getTodayTaskWorkTimeKey();
-  const record = JSON.parse(localStorage.getItem(key) || '{}');
-  record[taskId] = (record[taskId] || 0) + hours;
-  localStorage.setItem(key, JSON.stringify(record));
-}
-
-/**
- * 获取任务今日工时
- */
-function getTaskWorkTime(taskId) {
-  const key = getTodayTaskWorkTimeKey();
-  const record = JSON.parse(localStorage.getItem(key) || '{}');
-  return record[taskId] || 0;
-}
-
-/**
- * 移除任务今日工时记录（删除任务时调用）
- */
-function removeTaskWorkTime(taskId) {
-  const key = getTodayTaskWorkTimeKey();
-  const record = JSON.parse(localStorage.getItem(key) || '{}');
-  const hours = record[taskId] || 0;
-  if (hours > 0) {
-    delete record[taskId];
-    localStorage.setItem(key, JSON.stringify(record));
-    // 从今日总工时中减去
-    todayWorkHours = Math.max(0, todayWorkHours - hours);
-    const totalKey = getTodayWorkTimeKey();
-    localStorage.setItem(totalKey, todayWorkHours.toString());
-    updateTodayWorkTimeDisplay();
-    // 同步到后端
-    fetch(`${API_BASE_URL}/api/workHours`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hours: todayWorkHours })
-    }).catch(() => {});
+async function refreshTodayWorkHours() {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/workHours`);
+    const data = await res.json();
+    if (data.success) {
+      todayWorkHours = data.data.hours || 0;
+      if (data.data.standard > 0) dailyWorkHours = data.data.standard;
+      updateTodayWorkTimeDisplay();
+    }
+  } catch (err) {
+    console.log('[WorkTime] 获取今日工时失败:', err.message);
   }
-  return hours;
 }
 
 /**
- * 初始化今日工时（从本地存储加载）
+ * 刚记了一笔工时：先在界面上加上（只在内存里，不存储），
+ * 禅道写入在后台完成，过几秒再向后端核对一次，以禅道的数为准
  */
-function initTodayWorkTime() {
-  // 初始化当前日期
-  currentDateStr = getCurrentDateStr();
-
-  const key = getTodayWorkTimeKey();
-  const saved = localStorage.getItem(key);
-  if (saved !== null) {
-    todayWorkHours = parseFloat(saved);
-  } else {
-    todayWorkHours = 0;
-  }
+function updateTodayWorkTime(hours) {
+  todayWorkHours += hours;
   updateTodayWorkTimeDisplay();
+  setTimeout(refreshTodayWorkHours, 4000);
+  setTimeout(refreshTodayWorkHours, 15000);
 }
 
 /**
  * 获取工时输入框的 placeholder 文本
  */
 function getWorkTimePlaceholder() {
-  if (todayWorkHours >= DAILY_WORK_HOURS) {
-    const overtimeHours = (todayWorkHours - DAILY_WORK_HOURS).toFixed(1);
+  if (todayWorkHours >= dailyWorkHours) {
+    const overtimeHours = (todayWorkHours - dailyWorkHours).toFixed(1);
     return `今日已加班 ${overtimeHours}h`;
   } else {
     return `今日已工作 ${todayWorkHours.toFixed(1)}h`;
-  }
-}
-
-/**
- * 更新今日工时（本地+后端）
- */
-async function updateTodayWorkTime(hours) {
-  todayWorkHours += hours;
-  const key = getTodayWorkTimeKey();
-  localStorage.setItem(key, todayWorkHours.toString());
-  updateTodayWorkTimeDisplay();
-
-  // 同步到后端
-  try {
-    await fetch(`${API_BASE_URL}/api/workHours`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hours: todayWorkHours })
-    });
-  } catch (err) {
-    console.log('[WorkTime] 后端同步失败:', err.message);
-  }
-}
-
-/**
- * 初始化时同步工时到后端
- * 优先使用后端数据（后端是真实数据源）
- */
-async function syncWorkHoursToBackend() {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/workHours`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success) {
-        // 后端有工时数据，始终使用后端数据作为真实数据源
-        const backendHours = data.data.hours || 0;
-        console.log(`[WorkTime] 从后端加载工时: ${backendHours} 小时`);
-
-        todayWorkHours = backendHours;
-        const key = getTodayWorkTimeKey();
-        localStorage.setItem(key, todayWorkHours.toString());
-        updateTodayWorkTimeDisplay();
-      }
-    }
-  } catch (err) {
-    console.log('[WorkTime] 获取后端工时失败:', err.message);
-    // 失败时使用本地缓存数据
   }
 }
 
@@ -1007,8 +908,8 @@ async function syncWorkHoursToBackend() {
 function updateTodayWorkTimeDisplay() {
   const el = document.getElementById('todayWorkTime');
   if (el) {
-    if (todayWorkHours >= DAILY_WORK_HOURS) {
-      const overtimeHours = (todayWorkHours - DAILY_WORK_HOURS).toFixed(1);
+    if (todayWorkHours >= dailyWorkHours) {
+      const overtimeHours = (todayWorkHours - dailyWorkHours).toFixed(1);
       el.textContent = `今日已加班 ${overtimeHours}h`;
       el.style.color = '#ef4444'; // 红色表示加班
     } else {
@@ -1022,8 +923,8 @@ function updateTodayWorkTimeDisplay() {
  * 获取今日工时记录话术（用于报告生成）
  */
 function getTodayWorkTimeReport() {
-  if (todayWorkHours >= DAILY_WORK_HOURS) {
-    const overtimeHours = (todayWorkHours - DAILY_WORK_HOURS).toFixed(1);
+  if (todayWorkHours >= dailyWorkHours) {
+    const overtimeHours = (todayWorkHours - dailyWorkHours).toFixed(1);
     return `今日已工作 ${todayWorkHours.toFixed(1)}h（加班 ${overtimeHours}h）`;
   } else {
     return `今日已工作 ${todayWorkHours.toFixed(1)}h`;
@@ -1167,9 +1068,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 预取禅道地址：点卡片上的禅道 ID 时要在用户手势内同步申请访问权限，来不及再请求配置
   ZentaoBrowserClient.initConfig().catch(() => { });
 
-  // 初始化今日工时
-  initTodayWorkTime();
-  syncWorkHoursToBackend(); // 同步后端工时数据
+  // 清掉老版本留在浏览器里的业务数据副本（今日工时累加值、用户列表缓存）；这些数据现在只在后端 / 禅道
+  try { Object.keys(localStorage).filter(k => /^(workTime_|taskWorkTime_)/.test(k) || k === 'zentao_users').forEach(k => localStorage.removeItem(k)); } catch { /* 无痕等环境 */ } // legacy-cleanup
+
+  // 初始化今日工时（向后端要，以禅道为准）
+  currentDateStr = getCurrentDateStr();
+  refreshTodayWorkHours();
 
   // 初始化 Toast
   Toast.init();
@@ -1447,7 +1351,7 @@ const AiModelPicker = {
     }
     set('aiModel', ai.aiModel);
     if (ai.aiReportModel !== undefined) { const el = document.getElementById('aiReportModel'); if (el) el.value = ai.aiReportModel || ''; }
-    if (d.schedule) { set('morningHour', d.schedule.morningHour); set('eveningHour', d.schedule.eveningHour); }
+    if (d.schedule) { set('morningHour', d.schedule.morningHour); set('eveningHour', d.schedule.eveningHour); set('workHours', d.schedule.workHours); }
     if (d.webhook) {
       if (d.webhook.url !== undefined) { const el = document.getElementById('webhookUrl'); if (el) el.value = d.webhook.url || ''; }
       set('webhookType', d.webhook.type);
@@ -2135,6 +2039,8 @@ async function importAllConfig() {
             aiReportModel: config.aiReportModel || '',
             morningHour: config.morningHour || '9',
             eveningHour: config.eveningHour || '21',
+            // 每日标准工时只存后端，不放进 config（config 会被存成浏览器里的副本）
+            workHours: document.getElementById('workHours')?.value || '8',
             webhookUrl: config.webhookUrl || '',
             webhookType: config.webhookType || 'generic'
           })
@@ -4698,8 +4604,6 @@ async function updateTaskProgress(taskId, progress) {
     // 「进度没更新、工时却加了」的账目错乱。
     if (consumedTime > 0) {
       updateTodayWorkTime(consumedTime);
-      // 记录该任务今日工时，用于删除时减去
-      recordTaskWorkTime(taskId, consumedTime);
     }
 
     // —— 第四步：禅道同步放到后台，不再阻塞界面 ——
@@ -5084,12 +4988,6 @@ async function deleteSelectedTask() {
   }
 
   try {
-    // 从今日工时中减去该任务今日记录的工时
-    const removedHours = removeTaskWorkTime(taskId);
-    if (removedHours > 0) {
-      console.log(`[DeleteTask] 已从今日工时中减去: ${removedHours}h`);
-    }
-
     // 先调用后端 API 删除任务
     const response = await fetch(`${API_BASE_URL}/api/task/${taskId}`, { method: 'DELETE' });
     const result = await response.json();
@@ -5152,12 +5050,6 @@ async function handleTaskAction(taskId, action) {
       if (!task) {
         deletingTaskIds.delete(taskId);
         return;
-      }
-
-      // 从今日工时中减去该任务今日记录的工时
-      const removedHours = removeTaskWorkTime(taskId);
-      if (removedHours > 0) {
-        console.log(`[HandleTask] 已从今日工时中减去: ${removedHours}h`);
       }
 
       // 先调用后端 API 删除任务
@@ -6202,21 +6094,9 @@ const ZentaoBrowserClient = {
   usersLoaded: false, // 用户列表是否已加载
 
   /**
-   * 初始化（从 localStorage 加载缓存的用户列表）
+   * 初始化。用户列表以后端为准（data/zentao-users.json），前端不再留本地副本，用到时再向后端要
    */
-  init() {
-    // 尝试从 localStorage 加载用户列表
-    try {
-      const cachedUsers = localStorage.getItem('zentao_users');
-      if (cachedUsers) {
-        this.users = JSON.parse(cachedUsers);
-        this.usersLoaded = true;
-        console.log('[ZentaoBrowser] 从缓存加载用户列表成功:', Object.keys(this.users).length, '个用户');
-      }
-    } catch (e) {
-      console.warn('[ZentaoBrowser] 从缓存加载用户列表失败:', e);
-    }
-  },
+  init() {},
 
   /**
    * 初始化配置（每次都重新获取，确保使用最新配置）
@@ -6258,7 +6138,6 @@ const ZentaoBrowserClient = {
       if (result.success && result.data && Object.keys(result.data).length > 0) {
         this.users = result.data;
         this.usersLoaded = true;
-        try { localStorage.setItem('zentao_users', JSON.stringify(this.users)); } catch (e) { /* 忽略 */ }
         return this.users;
       }
       console.warn('[ZentaoBrowser] 从禅道刷新用户列表失败:', result.message || result.error);
@@ -6294,23 +6173,12 @@ const ZentaoBrowserClient = {
 
   /**
    * 获取用户列表（供外部调用）
-   * 优先从内存获取，如果没有则尝试从 localStorage 和后端加载
+   * 优先从内存获取，如果没有则从后端加载
    */
   async getUsers() {
-    // 如果内存中没有用户列表，尝试从 localStorage 恢复
+    // 内存中没有用户列表时从后端取
     if (!this.usersLoaded || Object.keys(this.users).length === 0) {
-      try {
-        const cachedUsers = localStorage.getItem('zentao_users');
-        if (cachedUsers) {
-          this.users = JSON.parse(cachedUsers);
-          this.usersLoaded = true;
-          console.log('[ZentaoBrowser] 从 localStorage 恢复用户列表:', Object.keys(this.users).length, '个用户');
-        }
-      } catch (e) {
-        console.warn('[ZentaoBrowser] 从 localStorage 恢复用户列表失败:', e);
-      }
-
-      // 如果 localStorage 也没有，尝试从后端加载
+      // 从后端加载
       if (Object.keys(this.users).length === 0) {
         const backendUsers = await this.loadUsersFromBackend();
         if (Object.keys(backendUsers).length > 0) {
