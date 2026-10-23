@@ -35,6 +35,8 @@ const SUITES = [
   'test-stories-ui',
   'test-efforts.mjs',
   'test-efforts-write.mjs',
+  'test-autofill.mjs',
+  'test-autofill-ui',
   'test-efforts-ui',
   'test-no-local-data',
   'test-todos.mjs',

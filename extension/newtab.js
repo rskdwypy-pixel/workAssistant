@@ -1124,6 +1124,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (debugModeToggle) {
     debugModeToggle.addEventListener('change', () => {
       debugMode = debugModeToggle.checked;
+      if (typeof ReportPage !== 'undefined' && ReportPage.rendered && ReportPage.data) ReportPage.render();   // 日历里的「补」随调试开关出现 / 消失
       const testButtons = document.getElementById('testButtons');
 
       if (debugMode) {

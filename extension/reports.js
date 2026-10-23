@@ -75,6 +75,7 @@ const ReportPage = {
               <h2 class="report-month-title"></h2>
               <button type="button" class="report-nav-btn" data-report-nav="1" title="下个月">›</button>
               <button type="button" class="report-today-btn" data-report-nav="0">本月</button>
+              <button type="button" class="report-today-btn report-fill-month" data-fill-month title="补全本月缺少的工时（调试模式）" hidden>补</button>
             </div>
             <div class="report-lens" role="tablist" aria-label="工时范围">
               <button type="button" class="active" data-report-lens="mine" role="tab">我的</button>
@@ -208,6 +209,16 @@ const ReportPage = {
     }).join('');
     root.querySelector('.report-calendar').innerHTML = head + rows;
     root.querySelectorAll('[data-report-lens]').forEach(b => b.classList.toggle('active', b.dataset.reportLens === this.lens));
+    const fm = root.querySelector('[data-fill-month]');
+    if (fm) {
+      const show = this.isDebug() && this.lens === 'mine';
+      fm.hidden = !show;
+      if (show) {
+        const n = this.data.days.filter(d => this.canFill(d)).length;
+        fm.disabled = n === 0;
+        fm.title = n ? `补全本月缺少工时的 ${n} 天（调试模式）` : '本月没有缺工时的日子';
+      }
+    }
     this.renderStats();
     this.renderPanel();
   },
@@ -216,6 +227,18 @@ const ReportPage = {
   effortOf(date) {
     const days = this.efforts && this.efforts.data && this.efforts.data.days;
     return { loaded: !!days, entry: (days && days[date]) || { hours: 0, items: [] } };
+  },
+
+  /** 调试模式（设置 → 调试）：「补」只在调试模式下出现，关闭时连 DOM 都不生成 */
+  isDebug() {
+    try { return typeof debugMode !== 'undefined' && debugMode === true; } catch { return false; }
+  },
+
+  /** 这一天能不能补：过去的工作日（不含今天、周末、将来），而且工时不满标准工时 */
+  canFill(day) {
+    if (!this.isDebug() || this.lens !== 'mine' || day.weekend || day.future || day.today) return false;
+    const { loaded, entry } = this.effortOf(day.date);
+    return loaded && this.standard() - entry.hours >= 0.5;
   },
 
   standard() { return (this.efforts && this.efforts.data && this.efforts.data.standard) || 8; },
@@ -368,6 +391,7 @@ const ReportPage = {
     }
     if (r) body += `<div class="report-day-team">全员 ${fmtHours(r.teamHours)} · ${r.activeCount}/${r.memberCount} 人</div>`;
     else if (day.legacy) body += '<div class="report-day-pending">旧版日报</div>';
+    if (this.canFill(day)) body += `<button type="button" class="report-fill-btn" data-fill-day="${day.date}" title="补填 ${day.date} 缺少的工时">补</button>`;
     const attrs = day.future ? 'aria-disabled="true"' : `data-effort-day="${day.date}" tabindex="0" role="button"`;
     return `<div class="${cls.join(' ')}" ${attrs} title="${reportEsc(day.date)} ${WEEKDAY[day.weekday]}">
       <div class="report-day-num"><span class="report-day-n">${n}</span>${day.today ? '<span class="report-today-tag">今天</span>' : ''}${r ? '<span class="report-dot" title="已有日报"></span>' : ''}</div>${body}</div>`;
@@ -404,6 +428,10 @@ const ReportPage = {
       const d = new Date(y, m - 1 + step, 1);
       return this.load(`${d.getFullYear()}-${reportPad(d.getMonth() + 1)}`);
     }
+    const fillDay = e.target.closest('[data-fill-day]');
+    if (fillDay) { e.stopPropagation(); return typeof AutofillDialog !== 'undefined' && AutofillDialog.openDay(fillDay.dataset.fillDay); }
+    const fillMonth = e.target.closest('[data-fill-month]');
+    if (fillMonth) return !fillMonth.disabled && typeof AutofillDialog !== 'undefined' && AutofillDialog.openMonth(this.month);
     const lens = e.target.closest('[data-report-lens]');
     if (lens) {
       if (lens.dataset.reportLens === this.lens) return;
@@ -434,6 +462,7 @@ const ReportPage = {
 // 键盘：日历格子回车打开
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
+  if (e.target && e.target.closest && e.target.closest('[data-fill-day]')) return;   // 焦点在「补」按钮上：回车就是点这个按钮，别当成点了整格
   const cell = e.target && e.target.closest && e.target.closest('.report-calendar [data-report-open], .report-calendar [data-effort-day]');
   if (cell) { e.preventDefault(); cell.click(); }
 });

@@ -393,6 +393,23 @@ function storeTaskEfforts(entries) {
   teamCache.write({ tasks, syncedAt: (c && c.syncedAt) || 0 });
 }
 
+/**
+ * 我自己在各任务上填过的工时（来自缓存）：taskId → [{date, work, consumed}]，按日期升序。
+ * 自动补填用它来判断哪些任务前后几天在做、学习我平时的写法。
+ */
+function myEffortsByTask() {
+  const me = String(config.zentao.username || '').toLowerCase();
+  const out = new Map();
+  const c = cache.read();
+  for (const [taskId, t] of Object.entries((c && c.tasks) || {})) {
+    const mine = (t.efforts || []).filter(e => String(e.account).toLowerCase() === me && e.consumed > 0)
+      .map(e => ({ date: e.date, work: String(e.work || ''), consumed: e.consumed }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    if (mine.length) out.set(taskId, mine);
+  }
+  return out;
+}
+
 /* ───────────────────────── 缺填提醒 ───────────────────────── */
 
 /**
@@ -418,7 +435,7 @@ async function getEffortGaps({ now = new Date(), lookback = 7, limit = 3 } = {})
 
 export {
   getMonthEfforts, getTeamMonthEfforts, getDayHours, listFillableTasks, addEffort, editEffort, deleteEffort, invalidateTask, getEffortGaps, normalizeEffortInput,
-  cachedTaskEfforts, storeTaskEfforts, aggregate, aggregateTeam, monthRange, standardHours
+  cachedTaskEfforts, storeTaskEfforts, aggregate, aggregateTeam, monthRange, standardHours, myEffortsByTask
 };
 
 /** 仅供测试：服务内部用的缓存实例（同名缓存各实例各有内存镜像，测试必须操作同一个实例） */
