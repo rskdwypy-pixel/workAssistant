@@ -2,7 +2,7 @@
 #
 # 禅道助手 · Mac 一条命令安装 / 升级 / 卸载
 #
-#   安装 / 升级：curl -fsSL https://gitee.com/iTreeNewBee/work-assistant/releases/latest/download/install.sh | bash
+#   安装 / 升级：curl -fsSL https://gitee.com/iTreeNewBee/work-assistant/raw/main/installer/install-mac.sh | bash
 #   （Gitee 连不上时换成 https://github.com/rskdwypy-pixel/workAssistant/... 的地址）
 #   卸载：       bash install.sh --uninstall          （保留数据）
 #                bash install.sh --uninstall --purge  （连数据一起删）
@@ -73,6 +73,21 @@ die() { printf '\n\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+
+# >>> release_base
+# Gitee 不支持 .../releases/latest/download/<文件>（404），但 .../releases/latest 会跳到 .../releases/tag/vX.Y.Z，
+# .../releases/download/vX.Y.Z/<文件> 能下载（GitHub 两种都行）：先解析出具体版本再下载
+release_base() {
+  local b="$1" root tag
+  if [[ "$b" =~ ^(.*/releases)/latest/download$ ]]; then
+    root="${BASH_REMATCH[1]}"
+    # 只看第一跳的 Location（跟到底的话 Gitee 会落到源码压缩包）
+    tag="$(curl -sI --connect-timeout 10 --max-time 25 "$root/latest" 2>/dev/null | tr -d '\r' | awk 'tolower($1)=="location:"{print $2}' | sed -n 's#.*/releases/tag/\(v[0-9][0-9.]*\)$#\1#p')"
+    [[ -n "$tag" ]] && { printf '%s' "$root/download/$tag"; return; }
+  fi
+  printf '%s' "$b"
+}
+# <<< release_base
 
 download() {
   curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 --progress-bar -o "$2" "$1"
@@ -203,6 +218,7 @@ else
   GOT=""
   for B in "${RELEASE_BASES[@]}"; do
     SRC_HOST="$(printf '%s' "$B" | awk -F/ '{print $3}')"
+    B="$(release_base "$B")"
     echo "  下载安装包（${SRC_HOST}）"
     if download "$B/workassistant.tar.gz" "$PKG_FILE" && download "$B/workassistant.tar.gz.sha256" "$TMP/pkg.sha256"; then
       PKG_SHA="$(awk '{print $1}' "$TMP/pkg.sha256")"

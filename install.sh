@@ -4,6 +4,6 @@
 # 会认出并停掉以前从仓库目录启动的后台，把仓库里的 .env 和 data/ 迁移过去（仓库目录不动）。
 #
 # 推荐直接运行（默认 Gitee，连不上换成 github.com/rskdwypy-pixel/workAssistant/... 的地址）：
-#   curl -fsSL https://gitee.com/iTreeNewBee/work-assistant/releases/latest/download/install.sh | bash
+#   curl -fsSL https://gitee.com/iTreeNewBee/work-assistant/raw/main/installer/install-mac.sh | bash
 # Windows 见 README。
 exec bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/installer/install-mac.sh" "$@"

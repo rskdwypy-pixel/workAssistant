@@ -2,7 +2,7 @@
 # 禅道助手 · Windows 一条命令安装 / 升级 / 卸载
 #
 #   安装 / 升级（在 PowerShell 里粘贴运行）：
-#     curl.exe -fsSL -o "$env:TEMP\wa-install.ps1" https://gitee.com/iTreeNewBee/work-assistant/releases/latest/download/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\wa-install.ps1"
+#     curl.exe -fsSL -o "$env:TEMP\wa-install.ps1" https://gitee.com/iTreeNewBee/work-assistant/raw/main/installer/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\wa-install.ps1"
 #   （Gitee 连不上时，把上面地址换成 https://github.com/rskdwypy-pixel/workAssistant/... 即可）
 #   卸载：在上面命令末尾加 -Uninstall（保留数据），或 -Uninstall -Purge（连数据一起删）
 #
@@ -95,6 +95,18 @@ function Read-Text($file) {
 }
 
 # 下载用系统自带的 curl.exe（Windows 10 1803 起都有；走代理设置，与自动更新一致）
+# Gitee 不支持 .../releases/latest/download/<文件>（404），但 .../releases/latest 会跳到 .../releases/tag/vX.Y.Z，
+# .../releases/download/vX.Y.Z/<文件> 能下载（GitHub 两种都行）：先解析出具体版本再下载
+function Resolve-ReleaseBase($b) {
+  if ($b -match '^(.*/releases)/latest/download$') {
+    $root = $Matches[1]
+    # 只看第一跳的 Location（跟到底的话 Gitee 会落到源码压缩包）
+    $head = (& curl.exe -sI --connect-timeout 10 --max-time 25 "$root/latest" 2>$null) -join "`n"
+    if ($head -match '(?im)^location:\s*\S*/releases/tag/(v\d[\d.]*)\s*$') { return "$root/download/$($Matches[1])" }
+  }
+  return $b
+}
+
 function Download($url, $out) {
   & curl.exe -fL --retry 3 --retry-delay 2 --connect-timeout 15 --progress-bar -o $out $url
   return ($LASTEXITCODE -eq 0)
@@ -284,6 +296,7 @@ if ($Package -and (Test-Path -LiteralPath $Package)) {
   $got = $false
   foreach ($b in $ReleaseBases) {
     $srcHost = ($b -split '/')[2]
+    $b = Resolve-ReleaseBase $b
     Write-Host "  下载安装包（$srcHost）"
     if ((Download "$b/workassistant.tar.gz" $pkgFile) -and (Download "$b/workassistant.tar.gz.sha256" "$pkgFile.sha256")) {
       $pkgSha = ((Read-Text "$pkgFile.sha256") -split '\s+')[0].ToLower()

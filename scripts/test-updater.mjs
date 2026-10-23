@@ -58,7 +58,9 @@ const server = http.createServer((req, res) => {
     res.writeHead(302, { Location: `/releases/tag/${latestTag}` });
     return res.end();
   }
-  if (req.url.startsWith('/releases/tag/')) { res.writeHead(200); return res.end('release page'); }
+  // 模拟 Gitee：tag 页面还会再跳到源码压缩包（跟到底就读不到版本号）
+  if (req.url.startsWith('/releases/tag/')) { res.writeHead(302, { Location: `/archive/${req.url.split('/').pop()}.zip` }); return res.end(); }
+  if (req.url.startsWith('/archive/')) { res.writeHead(200); return res.end('zip bytes'); }
   const m = req.url.match(/^\/releases\/download\/(v[\d.]+)\/(.+)$/);
   const file = m && path.join(RELEASES, m[1], m[2]);
   if (!file || !fs.existsSync(file)) { res.writeHead(404); return res.end(); }

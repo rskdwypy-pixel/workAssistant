@@ -10,6 +10,7 @@
 
 ### 修复
 
+- **从 Gitee 安装 / 自动更新一直悄悄回退 GitHub**：Gitee 不支持 `releases/latest/download/<文件>`（404），自动更新读版本号时又会被 Gitee 的二次跳转带到源码压缩包。现在安装器（Mac / Windows）先查出具体版本再下载，自动更新只看 `/releases/latest` 的第一跳；README 里 Gitee 的一条命令改成取仓库里的安装脚本。纯内网（连不上 GitHub）的电脑现在才真正能用 Gitee 安装和更新。
 - 安装脚本：终端所在目录已被删除时，不再在每个步骤后刷 `shell-init: error retrieving current directory`（脚本开头先回到家目录）。
 
 ## 1.4.1（2026-10-23）

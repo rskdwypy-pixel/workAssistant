@@ -37,10 +37,10 @@
 打开「终端」，粘贴运行：
 
 ```bash
-curl -fsSL https://gitee.com/iTreeNewBee/work-assistant/releases/latest/download/install.sh | bash
+curl -fsSL https://gitee.com/iTreeNewBee/work-assistant/raw/main/installer/install-mac.sh | bash
 ```
 
-> 默认从 Gitee 下载（国内更稳）；安装器下载安装包时会在 Gitee 连不上时自动回退 GitHub。
+> 默认从 Gitee 下载（国内更稳）；安装器下载安装包时会在 Gitee 连不上时自动回退 GitHub。（Gitee 不支持 `releases/latest/download/<文件>` 这种地址，所以上面直接取仓库里的安装脚本；脚本再自己查出最新版本去下载。）
 > 若连 `install.sh` 这步都拿不到（Gitee、GitHub 都不通，如纯内网），把域名在 gitee / github 间换一个再试；仍不行可让管理员用离线安装包（`install.ps1 -Package <本地包>`，Windows 还支持 `-NodeZip <本地 Node>`）。
 
 安装器不问任何问题，大约 1～3 分钟（主要是下载）。它会：
@@ -68,7 +68,7 @@ curl -fsSL https://gitee.com/iTreeNewBee/work-assistant/releases/latest/download
 打开「PowerShell」（开始菜单搜索 PowerShell），粘贴运行：
 
 ```powershell
-curl.exe -fsSL -o "$env:TEMP\wa-install.ps1" https://gitee.com/iTreeNewBee/work-assistant/releases/latest/download/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\wa-install.ps1"
+curl.exe -fsSL -o "$env:TEMP\wa-install.ps1" https://gitee.com/iTreeNewBee/work-assistant/raw/main/installer/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\wa-install.ps1"
 ```
 
 与 Mac 一样不问任何问题、不需要管理员权限，装到 `%LOCALAPPDATA%\WorkAssistant`，注册开机自启（当前用户的启动项）和浏览器宿主（Chrome、Edge、Brave、Chromium、Vivaldi），启动后台并打开扩展页、把扩展目录复制到剪贴板。然后在扩展页打开 **开发者模式** → **加载已解压的扩展程序** → 在选择框的地址栏粘贴目录：
@@ -108,13 +108,13 @@ curl.exe -fsSL -o "$env:TEMP\wa-install.ps1" https://gitee.com/iTreeNewBee/work-
 Mac：
 
 ```bash
-curl -fsSL https://gitee.com/iTreeNewBee/work-assistant/releases/latest/download/install.sh | bash -s -- --uninstall
+curl -fsSL https://gitee.com/iTreeNewBee/work-assistant/raw/main/installer/install-mac.sh | bash -s -- --uninstall
 ```
 
 Windows（PowerShell）：
 
 ```powershell
-curl.exe -fsSL -o "$env:TEMP\wa-install.ps1" https://gitee.com/iTreeNewBee/work-assistant/releases/latest/download/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\wa-install.ps1" -Uninstall
+curl.exe -fsSL -o "$env:TEMP\wa-install.ps1" https://gitee.com/iTreeNewBee/work-assistant/raw/main/installer/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\wa-install.ps1" -Uninstall
 ```
 
 - 默认 **保留数据和配置**（重新安装后自动使用）；

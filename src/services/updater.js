@@ -23,7 +23,6 @@ import {
   chmodSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync,
   readdirSync, renameSync, rmSync, unlinkSync, writeFileSync
 } from 'fs';
-import { devNull } from 'os';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { RELEASE_PUBLIC_KEY } from './releaseKey.js';
@@ -163,10 +162,12 @@ export function createUpdater(opts = {}) {
     let lastErr = null;
     for (const base of bases) {
       try {
-        const finalUrl = await run('curl', ['-fsSL', '-o', devNull, '--connect-timeout', '15', '--max-time', '60', '-w', '%{url_effective}', `${base}/latest`], 70 * 1000);
-        const m = finalUrl.trim().match(/\/tag\/v?(\d+\.\d+\.\d+)$/);
+        // 只看第一跳的 Location：Gitee 的 tag 页面会再跳到源码压缩包，跟到底就读不到版本号了
+        const head = await run('curl', ['-sI', '--connect-timeout', '15', '--max-time', '60', `${base}/latest`], 70 * 1000);
+        const loc = (head.match(/^location:\s*(\S+)/im) || [])[1] || '';
+        const m = loc.match(/\/tag\/v?(\d+\.\d+\.\d+)$/);
         if (m) { activeBase = base; return m[1]; }
-        lastErr = new Error(`没有读到最新版本号（${finalUrl.trim() || '空'}）`);
+        lastErr = new Error(`没有读到最新版本号（${loc || '没有跳转'}）`);
       } catch (err) {
         lastErr = err;
       }
