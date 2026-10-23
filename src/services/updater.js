@@ -28,7 +28,10 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { RELEASE_PUBLIC_KEY } from './releaseKey.js';
 
-const REPO = 'rskdwypy-pixel/workAssistant';
+// 发布源：默认先 Gitee（国内 / 内网更稳），连不上再回退 GitHub。
+// 可用 WA_UPDATE_URL 覆盖成单一地址（测试、私有镜像用）。
+const GITEE_RELEASES = 'https://gitee.com/iTreeNewBee/work-assistant/releases';
+const GITHUB_RELEASES = 'https://github.com/rskdwypy-pixel/workAssistant/releases';
 const ROOT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 const CHECK_DELAY_MS = 60 * 1000;
@@ -86,7 +89,11 @@ export function createUpdater(opts = {}) {
   const root = opts.root || ROOT_DIR;
   const waHome = opts.waHome !== undefined ? opts.waHome : (process.env.WA_HOME || '');
   const dataDir = opts.dataDir || process.env.WA_DATA_DIR || join(root, 'data');
-  const baseUrl = (opts.baseUrl || process.env.WA_UPDATE_URL || `https://github.com/${REPO}/releases`).replace(/\/$/, '');
+  // 发布源列表：显式指定（opts / 环境变量）时只用这一个；否则 Gitee 优先、GitHub 兜底
+  const override = opts.baseUrl || process.env.WA_UPDATE_URL || '';
+  const bases = (opts.bases || (override ? [override] : [GITEE_RELEASES, GITHUB_RELEASES])).map(u => u.replace(/\/$/, ''));
+  // fetchLatestVersion 选中哪个源能用，后续下载就走那个
+  let activeBase = bases[0];
   const publicKey = opts.publicKey || RELEASE_PUBLIC_KEY;
   const now = opts.now || (() => new Date());
   const scheduleHours = opts.scheduleHours || (() => []);
@@ -148,12 +155,23 @@ export function createUpdater(opts = {}) {
     };
   }
 
-  /** 最新版本号：/releases/latest 会跳到 /releases/tag/vX.Y.Z */
+  /**
+   * 最新版本号：/releases/latest 会跳到 /releases/tag/vX.Y.Z（Gitee 与 GitHub 规则一致）。
+   * 依次尝试各发布源，第一个能解析出版本号的即选为后续下载源（activeBase）。
+   */
   async function fetchLatestVersion() {
-    const finalUrl = await run('curl', ['-fsSL', '-o', devNull, '--connect-timeout', '15', '--max-time', '60', '-w', '%{url_effective}', `${baseUrl}/latest`], 70 * 1000);
-    const m = finalUrl.trim().match(/\/tag\/v?(\d+\.\d+\.\d+)$/);
-    if (!m) throw new Error(`没有读到最新版本号（${finalUrl.trim() || '空'}）`);
-    return m[1];
+    let lastErr = null;
+    for (const base of bases) {
+      try {
+        const finalUrl = await run('curl', ['-fsSL', '-o', devNull, '--connect-timeout', '15', '--max-time', '60', '-w', '%{url_effective}', `${base}/latest`], 70 * 1000);
+        const m = finalUrl.trim().match(/\/tag\/v?(\d+\.\d+\.\d+)$/);
+        if (m) { activeBase = base; return m[1]; }
+        lastErr = new Error(`没有读到最新版本号（${finalUrl.trim() || '空'}）`);
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    throw lastErr || new Error('没有读到最新版本号');
   }
 
   async function download(url, file) {
@@ -173,10 +191,10 @@ export function createUpdater(opts = {}) {
     const tgz = join(work, 'workassistant.tar.gz');
     status = { ...status, state: 'downloading', error: '' };
     log(`下载 ${version}`);
-    await download(`${baseUrl}/download/${tag}/workassistant.tar.gz`, tgz);
-    await download(`${baseUrl}/download/${tag}/workassistant.tar.gz.sha256`, `${tgz}.sha256`);
+    await download(`${activeBase}/download/${tag}/workassistant.tar.gz`, tgz);
+    await download(`${activeBase}/download/${tag}/workassistant.tar.gz.sha256`, `${tgz}.sha256`);
     try {
-      await download(`${baseUrl}/download/${tag}/workassistant.tar.gz.sig`, `${tgz}.sig`);
+      await download(`${activeBase}/download/${tag}/workassistant.tar.gz.sig`, `${tgz}.sig`);
     } catch {
       throw new Error(`${version} 没有签名文件，不自动安装（可重新运行安装命令手动更新）`);
     }

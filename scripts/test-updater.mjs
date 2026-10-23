@@ -114,6 +114,16 @@ try {
   check('检查：发现新版本，下载、校验后解压到 versions/1.1.0', s.state === 'ready' && s.readyVersion === '1.1.0' && fs.existsSync(path.join(home, 'versions', '1.1.0', 'src', 'index.js')) && !fs.existsSync(path.join(home, 'downloads')), JSON.stringify(s));
   check('检查：记下检查时间', !!JSON.parse(fs.readFileSync(path.join(home, 'data', 'update.json'), 'utf8')).lastCheck);
 
+  // 发布源回退：主源（这里用一个会立刻拒连的地址模拟 Gitee 不通）连不上时，自动改用备用源（BASE 模拟 GitHub）
+  const fbHome = makeHome('home-fallback');
+  const fb = createUpdater({
+    root: path.join(fbHome, 'versions', '1.0.0'), waHome: fbHome, dataDir: path.join(fbHome, 'data'),
+    bases: ['http://127.0.0.1:1/releases', BASE], publicKey: PUB, log: () => {}
+  });
+  const fbs = await fb.check({ manual: true });
+  check('发布源回退：主源连不上时自动改用备用源，照常发现并下载新版本',
+    fbs.state === 'ready' && fbs.readyVersion === '1.1.0' && fs.existsSync(path.join(fbHome, 'versions', '1.1.0', 'src', 'index.js')), JSON.stringify(fbs));
+
   u._setLastActivity(Date.now());
   check('空闲判断：3 分钟内有请求不算空闲', !u.isIdle());
   u._setLastActivity(Date.now() - 10 * 60 * 1000);

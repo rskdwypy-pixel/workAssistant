@@ -2,7 +2,8 @@
 # 禅道助手 · Windows 一条命令安装 / 升级 / 卸载
 #
 #   安装 / 升级（在 PowerShell 里粘贴运行）：
-#     curl.exe -fsSL -o "$env:TEMP\wa-install.ps1" https://github.com/rskdwypy-pixel/workAssistant/releases/latest/download/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\wa-install.ps1"
+#     curl.exe -fsSL -o "$env:TEMP\wa-install.ps1" https://gitee.com/iTreeNewBee/work-assistant/releases/latest/download/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\wa-install.ps1"
+#   （Gitee 连不上时，把上面地址换成 https://github.com/rskdwypy-pixel/workAssistant/... 即可）
 #   卸载：在上面命令末尾加 -Uninstall（保留数据），或 -Uninstall -Purge（连数据一起删）
 #
 # 不问任何问题，不需要管理员权限：禅道账号在插件的登录卡片里填，AI 在设置里配（或在插件里导入加密配置文件）。
@@ -21,15 +22,24 @@
 # 开机自启：当前用户的启动项（HKCU\...\Run\WorkAssistant）；浏览器宿主：Chrome / Edge / Brave / Chromium / Vivaldi
 #
 # 参数（一般用不到）：
-#   -Package <文件或地址>   使用指定的安装包（默认下载 GitHub 上的最新版本）
+#   -Package <文件或地址>   使用指定的安装包（默认下载 GitHub 上的最新版本）；内网 / GitHub 连不上时，
+#                           先在能联网的机器上拿到 workassistant.tar.gz（+ .sha256），拷到本机后用它离线安装
+#   -NodeZip <文件>         使用本地的 Node 压缩包（node-v<版本>-win-x64.zip），彻底离线时用；
+#                           不填则按默认从 nodejs.org / 国内镜像下载
 #   -NoService              只安装文件，不注册开机自启 / 宿主程序、不启动服务（测试用）
 #   -MigrateFrom <目录>     从旧的仓库目录迁移配置和数据（.env 与 data\）
 #   -Uninstall [-Purge]     卸载（-Purge 连数据一起删）
+#
+# 内网 / 连不上 GitHub 时的离线安装（三样文件拷到本机同一目录）：
+#   install.ps1、workassistant.tar.gz、workassistant.tar.gz.sha256
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Package .\workassistant.tar.gz
+#   若连 Node 镜像也下不动，再加 -NodeZip .\node-v22.20.0-win-x64.zip
 #
 # 注意：本文件必须保存为 UTF-8 带 BOM、CRLF 换行，Windows PowerShell 5.1 才能正确读取中文。
 #
 param(
   [string]$Package = '',
+  [string]$NodeZip = '',
   [switch]$NoService,
   [string]$MigrateFrom = '',
   [switch]$Uninstall,
@@ -46,7 +56,11 @@ if ($PSVersionTable.PSEdition -ne 'Core') {
   $env:PSModulePath = (@((Join-Path $PSHOME 'Modules'), $machinePaths) | Where-Object { $_ }) -join ';'
 }
 
-$Repo = 'rskdwypy-pixel/workAssistant'
+# 发布源：默认先 Gitee（国内 / 内网更稳），连不上再回退 GitHub
+$ReleaseBases = @(
+  'https://gitee.com/iTreeNewBee/work-assistant/releases/latest/download',
+  'https://github.com/rskdwypy-pixel/workAssistant/releases/latest/download'
+)
 $NodeVersion = '22.20.0'
 $AppName = 'WorkAssistant'
 $HostName = 'com.workassistant.backend'
@@ -209,6 +223,20 @@ if (Test-Path -LiteralPath $Node) {
 }
 if ($haveNode) {
   Ok "已就绪（$Arch）"
+} elseif ($NodeZip) {
+  # 彻底离线：用本地提供的 Node 压缩包（信任本地文件，不再校验远端 SHASUMS）
+  if (-not (Test-Path -LiteralPath $NodeZip)) { Die "找不到指定的 Node 压缩包：$NodeZip" }
+  $zipName = "node-v$NodeVersion-win-$Arch.zip"
+  $zip = Join-Path $Tmp $zipName
+  Copy-Item -LiteralPath (Resolve-Path -LiteralPath $NodeZip).Path -Destination $zip -Force
+  $unzip = Join-Path $Tmp 'node'
+  New-Item -ItemType Directory -Path $unzip -Force | Out-Null
+  if (-not (Expand-Tar $Tmp $zipName 'node' '-xf')) { Expand-Archive -LiteralPath $zip -DestinationPath $unzip -Force }
+  $extracted = Join-Path $unzip "node-v$NodeVersion-win-$Arch"
+  if (-not (Test-Path -LiteralPath (Join-Path $extracted 'node.exe'))) { Die "本地 Node 压缩包不是 node-v$NodeVersion-win-$Arch（解压后没找到 node.exe）" }
+  if (Test-Path -LiteralPath $NodeDir) { Remove-Item -LiteralPath $NodeDir -Recurse -Force }
+  Move-Item -LiteralPath $extracted -Destination $NodeDir
+  Ok "已安装（$Arch，来自本地文件）"
 } else {
   $zipName = "node-v$NodeVersion-win-$Arch.zip"
   $got = $false
@@ -238,17 +266,32 @@ if ($haveNode) {
 
 # ==================== 2. 程序 ====================
 Step '安装禅道助手'
-if (-not $Package) { $Package = "https://github.com/$Repo/releases/latest/download/workassistant.tar.gz" }
 $pkgSha = ''
-if (Test-Path -LiteralPath $Package) {
+if ($Package -and (Test-Path -LiteralPath $Package)) {
+  # 指定了本地安装包
   $pkgFile = (Resolve-Path -LiteralPath $Package).Path
   if (Test-Path -LiteralPath "$pkgFile.sha256") { $pkgSha = ((Read-Text "$pkgFile.sha256") -split '\s+')[0].ToLower() }
-} else {
+} elseif ($Package) {
+  # 指定了下载地址
   $pkgFile = Join-Path $Tmp 'workassistant.tar.gz'
   Write-Host "  下载 $Package"
   if (-not (Download $Package $pkgFile)) { Die '安装包下载失败（请检查网络后重试）' }
   if (-not (Download "$Package.sha256" "$pkgFile.sha256")) { Die '安装包校验文件下载失败' }
   $pkgSha = ((Read-Text "$pkgFile.sha256") -split '\s+')[0].ToLower()
+} else {
+  # 默认：Gitee 优先，连不上回退 GitHub
+  $pkgFile = Join-Path $Tmp 'workassistant.tar.gz'
+  $got = $false
+  foreach ($b in $ReleaseBases) {
+    $srcHost = ($b -split '/')[2]
+    Write-Host "  下载安装包（$srcHost）"
+    if ((Download "$b/workassistant.tar.gz" $pkgFile) -and (Download "$b/workassistant.tar.gz.sha256" "$pkgFile.sha256")) {
+      $pkgSha = ((Read-Text "$pkgFile.sha256") -split '\s+')[0].ToLower()
+      $got = $true; break
+    }
+    Warn "$srcHost 下载失败，换下一个源"
+  }
+  if (-not $got) { Die '安装包下载失败（Gitee 和 GitHub 都连不上，请检查网络或用 -Package 指定本地包）' }
 }
 if ($pkgSha) {
   if ((Get-Sha256 $pkgFile) -ne $pkgSha) { Die '安装包校验不通过（文件不完整或被改动）' }

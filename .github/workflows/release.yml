@@ -23,6 +23,9 @@ jobs:
     needs: windows
     # 安装器测试要用到 macOS 的 launchctl / PlistBuddy 等
     runs-on: macos-latest
+    # 把 Gitee 令牌提到任务级环境变量，好在步骤的 if 里判断是否配置了（secrets 不能直接用于 if）
+    env:
+      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -75,3 +78,13 @@ jobs:
           \`\`\`
           curl.exe -fsSL -o \"\$env:TEMP\\wa-install.ps1\" https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File \"\$env:TEMP\\wa-install.ps1\"
           \`\`\`"
+
+      # 同步发布到 Gitee（默认下载源）。需要仓库 Secret：GITEE_TOKEN（Gitee 私人令牌，发行版权限）。
+      # 没配 GITEE_TOKEN 时自动跳过，不影响 GitHub 发布。release/ 里就是上一步的全部产物。
+      - name: 同步发布到 Gitee
+        if: ${{ env.GITEE_TOKEN != '' }}
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_REPO: iTreeNewBee/work-assistant
+          GITEE_BRANCH: main
+        run: node scripts/publish-gitee.mjs "$GITHUB_REF_NAME" release
