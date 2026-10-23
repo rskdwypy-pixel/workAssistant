@@ -68,6 +68,7 @@ const EffortDrawer = {
       else if (act.dataset.eff === 'edit') { this.editingId = act.dataset.id; this.render(true); }
       else if (act.dataset.eff === 'edit-cancel') { this.editingId = null; this.render(true); }
       else if (act.dataset.eff === 'del') this.remove(act.dataset.id);
+      else if (act.dataset.eff === 'open-task') { e.preventDefault(); if (typeof openInZentao === 'function') openInZentao('task', act.dataset.taskId); }
     });
     el.addEventListener('submit', (e) => {
       e.preventDefault();
@@ -199,7 +200,7 @@ const EffortDrawer = {
     return `<div class="effort-item">
       <span class="effort-hours">${efHours(i.consumed)}</span>
       <div class="effort-main">
-        <div class="effort-task">${efEsc(i.taskName)}${i.execName ? `<em>${efEsc(i.execName)}</em>` : ''}</div>
+        <div class="effort-task">${i.taskId ? `<a href="#" class="effort-task-id" data-eff="open-task" data-task-id="${efEsc(i.taskId)}" title="在禅道打开任务 #${efEsc(i.taskId)}">#${efEsc(i.taskId)}</a> ` : ''}${efEsc(i.taskName)}${i.execName ? `<em>${efEsc(i.execName)}</em>` : ''}</div>
         <div class="effort-work">${efEsc(i.work || '（没写工作内容）')}</div>
       </div>
       ${canEdit ? `<span class="effort-ops"><button type="button" data-eff="edit" data-id="${efEsc(i.effortId)}" title="修改">✎</button><button type="button" data-eff="del" data-id="${efEsc(i.effortId)}" title="删除">🗑</button></span>` : ''}

@@ -179,6 +179,11 @@ function setup(state = {}) {
   check('抽屉：已填 3.5 / 8，还差 4.5', /已填 3\.5h \/ 8h/.test(meta()) && /还差 4\.5h/.test(meta()), meta());
   check('抽屉：列出当天 2 条明细（任务、小时、工作内容）', drawer.querySelectorAll('.effort-item').length === 2 && /对字段/.test(drawer.textContent) && /补接口文档/.test(drawer.textContent));
   check('抽屉：任务下拉来自接口（含未开始的）', drawer.querySelectorAll('select[name="taskId"] option').length === 3 && /未开始/.test(drawer.querySelector('select[name="taskId"]').textContent));
+  const idLink = drawer.querySelector('.effort-task-id[data-task-id="10"]');
+  check('抽屉：每条明细带禅道任务编号 #10，可点', !!idLink && idLink.textContent === '#10' && drawer.querySelectorAll('.effort-task-id').length === 2);
+  const opened = []; win.openInZentao = (t, id) => opened.push([t, id]);
+  if (idLink) idLink.click();
+  check('抽屉：点编号 → 在禅道打开该任务（type=task）', opened.length === 1 && opened[0][0] === 'task' && opened[0][1] === '10');
   check('抽屉：有「查看日报」入口', !!drawer.querySelector('[data-eff="report"]'));
 
   const f = drawer.querySelector('.effort-form');

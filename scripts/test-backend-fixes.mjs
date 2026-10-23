@@ -101,6 +101,25 @@ try {
   const listed = await getAllTasks();
   check('B1 读侧去重不再把同号任务/Bug 合并', listed.length === 2, `返回 ${listed.length} 条`);
 
+  // ============ B1b：日期视图包含「那天填过工时」的任务（补填后任务页能看到） ============
+  {
+    const es = await import('../src/services/effortService.js');
+    es._caches.mine.write({ syncedAt: Date.now(), tasks: {
+      721: { sig: 'a', at: Date.now(), name: '补填的任务', exec: '', efforts: [{ id: '1', account: 'u', date: '2026-10-09', consumed: 3, left: 0, work: 'x' }] },
+      722: { sig: 'b', at: Date.now(), name: '别人的', exec: '', efforts: [{ id: '2', account: 'other', date: '2026-10-09', consumed: 3, left: 0, work: 'x' }] }
+    } });
+    seed([
+      { id: 'w1', type: 'task', zentaoId: '721', title: '补填的任务', status: 'done', createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-20T00:00:00.000Z' },
+      { id: 'w2', type: 'task', zentaoId: '722', title: '别人的', status: 'done', createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-20T00:00:00.000Z' },
+      { id: 'w3', type: 'bug', zentaoId: '721', title: '同号 Bug', status: 'done', createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-20T00:00:00.000Z' }
+    ]);
+    const day = await getAllTasks({ date: '2026-10-09' });
+    check('B1b 已完成、完成日不在当天，但当天填过工时的任务出现在当天', day.some(t => t.id === 'w1'), JSON.stringify(day.map(t => t.id)));
+    check('B1b 别人填的工时 / 同号 Bug 不会把任务带进来', !day.some(t => t.id === 'w2') && !day.some(t => t.id === 'w3'));
+    const other = await getAllTasks({ date: '2026-10-10' });
+    check('B1b 没填工时的其他日子不受影响', !other.some(t => t.id === 'w1'));
+  }
+
   // ============ B2：同类型重复记录去重不抛错 ============
   seed([
     { id: 'a', type: 'task', zentaoId: '700', title: 'x', createdAt: OLD, updatedAt: OLD },

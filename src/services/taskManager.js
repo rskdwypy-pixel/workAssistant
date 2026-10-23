@@ -29,6 +29,18 @@ function migrateReminderFlags(tasks) {
   return migrated;
 }
 
+/** 那天我填过工时的禅道任务 ID（读工时缓存，缓存 5 分钟内不请求禅道；任何失败都当没有） */
+async function taskIdsWorkedOn(dateStr) {
+  try {
+    const { getMonthEfforts } = await import('./effortService.js');
+    const r = await getMonthEfforts(String(dateStr).slice(0, 7), { maxAge: 5 * 60 * 1000 });
+    return new Set(((r.days || {})[dateStr] || { items: [] }).items.map(i => String(i.taskId)));
+  } catch {
+    return new Set();
+  }
+}
+
+
 /**
  * 获取所有任务
  */
@@ -72,7 +84,10 @@ async function getAllTasks(filters = {}) {
 
   // 按日期筛选
   if (filters.date) {
-    tasks = getTasksByDate(tasks, filters.date);
+    // 那天填过工时的任务也算那天的任务（补填、在禅道网页上填的都算），否则补过的日子在任务页看不到
+    const worked = await taskIdsWorkedOn(filters.date);
+    const byDate = new Set(getTasksByDate(tasks, filters.date));
+    tasks = tasks.filter(t => byDate.has(t) || (t.type !== 'bug' && t.zentaoId && worked.has(String(t.zentaoId))));
   }
 
   // 排序规则：

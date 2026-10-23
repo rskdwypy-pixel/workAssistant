@@ -3525,3 +3525,5 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
 .tl-results .is-ok { color: var(--success); }
 .tl-results .is-fail { color: var(--danger); }
 @media (max-width: 720px) { .tl-row { grid-template-columns: 1fr 1fr; } .tl-grid-head { display: none; } .tl-grid-row { grid-template-columns: 1fr 1fr; } }
+.effort-task-id { color: var(--primary); font-size: 12px; text-decoration: none; margin-right: 2px; }
+.effort-task-id:hover { text-decoration: underline; }
