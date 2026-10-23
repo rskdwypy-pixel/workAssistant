@@ -234,8 +234,10 @@
       <!-- Tab 切换 -->
       <div class="mode-tabs">
         <button class="tab-btn active" data-mode="task">📋 任务</button>
+        <button class="tab-btn" data-mode="story">📝 需求</button>
         <button class="tab-btn" data-mode="bug">🐛 Bug</button>
         <button class="tab-btn" data-mode="report">📊 报告</button>
+        <button class="tab-btn" data-mode="doc">📁 文档</button>
         <!-- 右上角：读取账号时显示加载提示；已登录显示头像（点开是用户信息与设置）；未登录显示「登录禅道」和设置图标 -->
         <div class="account-area" id="accountArea">
           <span id="accountLoading" class="account-loading" role="status"><span class="account-spinner" aria-hidden="true"></span>正在读取禅道账号…</span>
@@ -247,6 +249,12 @@
 
       <!-- 报告模式（内容由 reports.js 渲染） -->
       <div class="mode-content" id="reportMode"></div>
+
+      <!-- 文档模式（内容由 docs.js 渲染） -->
+      <div class="mode-content" id="docMode"></div>
+
+      <!-- 需求模式（内容由 stories.js 渲染） -->
+      <div class="mode-content" id="storyMode"></div>
 
       <!-- 任务模式 -->
       <div class="mode-content active" id="taskMode">
@@ -1261,6 +1269,8 @@
   <!-- 任务 / Bug 附件 -->
   <script src="attachments.js"></script>
   <script src="reports.js"></script>
+  <script src="docs.js"></script>
+  <script src="stories.js"></script>
   <script src="platform.js"></script>
   <script src="account.js"></script>
   <script src="update-ui.js"></script>

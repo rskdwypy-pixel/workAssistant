@@ -154,7 +154,9 @@ try {
   r = await call('/api/zentao/open', { type: 'bug', id: '308', browserSid: 'browser-ok' });
   check('Bug：在「测试」应用里打开 Bug 详情页', r.url === 'http://z.test/zentao/index-index.html#app=qa&url=' + encodeURIComponent('/zentao/bug-view-308.html'), r.url);
   check('直接打开禅道主框架地址（单独打开详情页会被禅道脚本再跳一次）', /\/zentao\/index-index\.html#app=/.test(r.url));
-  r = await call('/api/zentao/open', { type: 'story', id: '1' });
+  r = await call('/api/zentao/open', { type: 'story', id: '129', browserSid: 'browser-ok' });
+  check('需求：在「产品」应用里打开需求详情页', r.url === 'http://z.test/zentao/index-index.html#app=product&url=' + encodeURIComponent('/zentao/story-view-129.html'), r.url);
+  r = await call('/api/zentao/open', { type: 'hack', id: '1' });
   check('非法类型被拒绝', r.status === 400);
 
   // ============ 新建任务：截止日期格式 ============

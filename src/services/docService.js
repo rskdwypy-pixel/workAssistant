@@ -1,0 +1,391 @@
+/**
+ * 禅道文档中心（与任务、Bug、报告同级）
+ *
+ *   listLibs()      汇总各空间（产品 / 项目 / 迭代 / 自定义 / 我的）的文档库
+ *   listDocs()      当前账号可见的全部文档（翻页拉 doc-browse 全量，按库分组由前端完成）
+ *   getDoc(id)      文档详情：正文（已消毒 + 内联图改写为后端代理）与附件
+ *
+ * 路由基于真实实例（ZenTao 18+, vision=rnd）抓取冻结，见 docs/DOC-FEATURE-PRD.md。
+ * 按库列出不走 doc-browse-{libID}（各版本参数位不同、实测易返回空），统一拉全量再分组。
+ * 文件预览/下载复用已有的 GET /api/zentao/files/:fileId/content。
+ */
+import { getZentaoJson, isConfigured, zentaoFetch, getZentaoCookies, cookiesToString } from './zentaoService.js';
+import { config } from '../config.js';
+import { decodeZentaoText } from '../utils/text.js';
+import { marked } from 'marked';
+import { randomBytes } from 'crypto';
+
+marked.setOptions({ gfm: true, breaks: true });
+
+/** 各文档库空间：type → 中文标签 */
+const SPACE_LABEL = {
+  product: '产品库',
+  project: '项目库',
+  execution: '迭代库',
+  custom: '自定义库',
+  mine: '我的空间'
+};
+const LIB_SPACES = ['product', 'project', 'execution', 'custom'];
+
+/** 文档类型 → 展示用图标与标签（text 为正文，其余为文件/外链型） */
+const DOC_TYPE_META = {
+  text: { icon: '📄', label: '正文' },
+  markdown: { icon: '📝', label: 'Markdown' },
+  word: { icon: '📘', label: 'Word' },
+  ppt: { icon: '📙', label: 'PPT' },
+  excel: { icon: '📗', label: 'Excel' },
+  attachment: { icon: '📎', label: '附件' },
+  url: { icon: '🔗', label: '链接' }
+};
+
+function assertReady() {
+  if (!isConfigured()) {
+    const err = new Error('禅道未启用或未配置');
+    err.code = 'ZENTAO_DISABLED';
+    throw err;
+  }
+}
+
+/** 禅道返回的 map/array 统一成数组 */
+function toArray(v) {
+  if (!v) return [];
+  return Array.isArray(v) ? v : Object.values(v);
+}
+
+/**
+ * 文档库列表：合并各空间的 libs。
+ * @returns {Promise<Array<{id,name,space,spaceLabel,docCount}>>}
+ */
+async function listLibs() {
+  assertReady();
+  const seen = new Map();
+  for (const space of LIB_SPACES) {
+    let data;
+    try {
+      data = await getZentaoJson(`doc-objectLibs-${space}.json`);
+    } catch {
+      continue; // 某空间无权限或该版本无此 type，跳过
+    }
+    for (const lib of toArray(data && data.libs)) {
+      if (!lib || !lib.id || String(lib.deleted) === '1') continue;
+      const id = String(lib.id);
+      if (seen.has(id)) continue;
+      // 新建文档的接口 URL 需要 objectType/objectID：产品库→产品 id，项目/迭代库同理，自定义库为 0
+      const objectID = space === 'product' ? String(lib.product || '0')
+        : space === 'project' ? String(lib.project || '0')
+        : space === 'execution' ? String(lib.execution || '0')
+        : '0';
+      seen.set(id, {
+        id,
+        name: decodeZentaoText(lib.name || `文档库 ${id}`),
+        space,
+        spaceLabel: SPACE_LABEL[space] || space,
+        objectType: space,
+        objectID,
+        acl: String(lib.acl || 'open'),
+        docCount: Number(lib.allCount ?? lib.docCount ?? 0) || 0
+      });
+    }
+  }
+  return [...seen.values()];
+}
+
+/** 列表项精简字段 */
+function slimDoc(d) {
+  const type = String(d.type || 'text');
+  const meta = DOC_TYPE_META[type] || DOC_TYPE_META.text;
+  return {
+    id: String(d.id),
+    lib: String(d.lib || ''),
+    module: String(d.module || '0'),
+    title: decodeZentaoText(d.title || '(无标题)'),
+    type,
+    typeIcon: meta.icon,
+    typeLabel: meta.label,
+    editedBy: d.editedBy || d.addedBy || '',
+    editedDate: d.editedDate || d.addedDate || '',
+    draft: String(d.draft || '0') === '1'
+  };
+}
+
+/**
+ * 当前账号可见的全部文档（翻页拉全量，过滤已删除）。
+ * @param {{keyword?:string}} opts 可选标题关键字（后端兜底过滤）
+ */
+async function listDocs({ keyword = '' } = {}) {
+  assertReady();
+  const perPage = 200;
+  const out = [];
+  let page = 1;
+  let total = Infinity;
+  // 安全上限，防异常分页死循环
+  while (out.length < total && page <= 50) {
+    const data = await getZentaoJson(`doc-browse-all-0-id_desc-0-${perPage}-${page}.json`);
+    const docs = toArray(data && data.docs).filter(d => d && d.id && String(d.deleted) !== '1');
+    for (const d of docs) out.push(slimDoc(d));
+    total = Number(data && data.pager && data.pager.recTotal) || out.length;
+    if (docs.length === 0) break;
+    page += 1;
+  }
+  const kw = String(keyword || '').trim().toLowerCase();
+  const items = kw ? out.filter(d => d.title.toLowerCase().includes(kw)) : out;
+  return items;
+}
+
+/** 把正文里的禅道内联图片改写为后端代理地址，顺手去掉危险内容 */
+function sanitizeDocHtml(html) {
+  let s = String(html || '');
+  // 去掉脚本 / 样式 / 内嵌框架等危险块
+  s = s.replace(/<\s*(script|style|iframe|object|embed|link|meta)\b[\s\S]*?<\s*\/\s*\1\s*>/gi, '');
+  s = s.replace(/<\s*(script|iframe|object|embed|link|meta)\b[^>]*>/gi, '');
+  // 去掉所有 on* 事件属性（onload/onclick/onerror…）
+  s = s.replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+  // 去掉 javascript: 协议
+  s = s.replace(/(href|src)\s*=\s*("|')\s*javascript:[^"']*\2/gi, '$1=$2#$2');
+  // 内联图片 /zentao/file-read-N.ext（或 file-read-N）→ /api/zentao/files/N/content?ext=
+  s = s.replace(/(<img\b[^>]*\bsrc\s*=\s*)("|')([^"']*?)\2/gi, (m, pre, q, url) => {
+    const mm = String(url).match(/file-read-(\d+)(?:\.([a-z0-9]+))?/i);
+    if (!mm) return m;
+    const id = mm[1];
+    const ext = mm[2] ? `?ext=${encodeURIComponent(mm[2])}` : '';
+    return `${pre}${q}/api/zentao/files/${id}/content${ext}${q}`;
+  });
+  return s;
+}
+
+/**
+ * 正文型文档的内容渲染：
+ *   - html     → 直接消毒
+ *   - markdown → 先渲染成 HTML 再消毒（查看时渲染，不展示源码）
+ *   - 其他未知格式 → 当纯文本兜底
+ * @returns {{contentHtml:string, contentText:string}}
+ */
+function renderContent(type, contentType, raw) {
+  const ct = String(contentType || '').toLowerCase();
+  const isText = type === 'text' || type === 'markdown';
+  if (!isText) return { contentHtml: '', contentText: '' };
+  if (/^(markdown|md|raw)$/.test(ct) || type === 'markdown') {
+    return { contentHtml: sanitizeDocHtml(marked.parse(String(raw || ''))), contentText: '' };
+  }
+  if (/html/i.test(ct)) return { contentHtml: sanitizeDocHtml(raw), contentText: '' };
+  return { contentHtml: '', contentText: decodeZentaoText(String(raw || '')) };
+}
+
+/** 生成一次编辑会话 uid（禅道用它把本次上传的文件挂到这篇文档上），仿 PHP uniqid */
+function genUid() {
+  return Date.now().toString(16) + randomBytes(3).toString('hex');
+}
+
+const ZENTAO_PATH = () => `${(config.zentao.url || '').replace(/\/$/, '')}/zentao`;
+
+/**
+ * 新建正文文档（markdown 或 html）。
+ * 接口（真实抓包）：POST doc-create-{objectType}-{objectID}-{libID}-{module}-{contentType}.html，multipart：
+ *   title, uid, type=text, contentType, content(html) / contentMarkdown(md), lib, module, keywords, acl
+ * @param {{lib:string, module?:string, title:string, body?:string, contentType?:'markdown'|'html', keywords?:string, acl?:string, uid?:string}} opts
+ * @returns {Promise<{id:string|null, message:string}>}
+ */
+async function createDoc({ lib, module = '0', title, body = '', contentType = 'markdown', keywords = '', acl, uid } = {}) {
+  assertReady();
+  if (!title || !String(title).trim()) throw new Error('标题不能为空');
+  const libInfo = (await listLibs()).find(l => l.id === String(lib));
+  if (!libInfo) throw new Error('文档库不存在或无权限');
+  const ct = contentType === 'html' ? 'html' : 'markdown';
+  const u = uid || genUid();
+  const url = `${ZENTAO_PATH()}/doc-create-${libInfo.objectType}-${libInfo.objectID}-${lib}-${module || '0'}-${ct}.html`;
+  const fd = new FormData();
+  fd.set('title', String(title).trim());
+  fd.set('uid', u);
+  fd.set('type', 'text');
+  fd.set('contentType', ct);
+  if (ct === 'markdown') { fd.set('content', ''); fd.set('contentMarkdown', String(body || '')); }
+  else { fd.set('content', String(body || '')); }
+  fd.set('lib', String(lib));
+  fd.set('module', String(module || '0'));
+  fd.set('keywords', String(keywords || ''));
+  fd.set('acl', acl || libInfo.acl || 'open');
+  const resp = await zentaoFetch(url, {
+    method: 'POST',
+    headers: {
+      'X-Requested-With': 'XMLHttpRequest',
+      'Accept': 'application/json, text/javascript, */*; q=0.01',
+      'Cookie': cookiesToString(await getZentaoCookies())
+    },
+    body: fd
+  });
+  const text = await resp.text();
+  let json;
+  try { json = JSON.parse(text); } catch { throw new Error('创建失败：禅道没有接受这次提交（表单被退回）'); }
+  if (json.result !== 'success') {
+    const errs = json.errors && typeof json.errors === 'object' ? Object.values(json.errors).join('；') : '';
+    throw new Error(json.message || errs || '创建失败');
+  }
+  // locate 形如 /zentao/doc-objectLibs-product-24-75-13.html，末段即新文档 id
+  const id = (String(json.locate || '').match(/-(\d+)\.html/) || [])[1] || null;
+  return { id, message: json.message || '保存成功' };
+}
+
+/** 从 doc-view 响应里的 lib 对象推出接口 URL 需要的 objectType/objectID（任意库都适用） */
+function objectOfLib(lib) {
+  const type = String(lib && lib.type || 'custom');
+  const objectID = type === 'product' ? String(lib.product || '0')
+    : type === 'project' ? String(lib.project || '0')
+    : type === 'execution' ? String(lib.execution || '0')
+    : '0';
+  return { objectType: type, objectID };
+}
+
+/**
+ * 编辑文档正文 / 标题。
+ * 接口（真实抓包）：POST doc-edit-{id}-false-{objectType}-{objectID}-{libID}.html，multipart：
+ *   title, content, contentType, type=text, editedDate(并发校验), lib, module, keywords, acl
+ * editedDate 必须回传当前值，否则禅道会判为"文档已被他人修改"。
+ * @param {{id:string, title?:string, body?:string, keywords?:string, acl?:string}} opts
+ */
+async function editDoc({ id, title, body, keywords, acl } = {}) {
+  assertReady();
+  if (!/^\d+$/.test(String(id))) throw new Error('非法的文档 ID');
+  const data = await getZentaoJson(`doc-view-${id}.json?onlybody=yes`);
+  const doc = data && data.doc;
+  if (!doc || !doc.id) throw new Error('文档不存在或无权限');
+  const { objectType, objectID } = objectOfLib(data.lib || {});
+  const lib = String(doc.lib || '');
+  const ct = String(doc.contentType || 'markdown').toLowerCase();
+  const url = `${ZENTAO_PATH()}/doc-edit-${id}-false-${objectType}-${objectID}-${lib}.html`;
+  const fd = new FormData();
+  fd.set('title', String(title != null ? title : decodeZentaoText(doc.title || '')).trim());
+  // 正文：编辑接口 markdown 也放 content 字段（与抓包一致）；html 同理
+  fd.set('content', String(body != null ? body : (doc.content || '')));
+  fd.set('contentType', /^(markdown|md)$/.test(ct) ? 'markdown' : ct);
+  fd.set('type', String(doc.type || 'text'));
+  fd.set('editedDate', String(doc.editedDate || ''));
+  fd.set('lib', lib);
+  fd.set('module', String(doc.module || '0'));
+  fd.set('keywords', String(keywords != null ? keywords : decodeZentaoText(doc.keywords || '')));
+  fd.set('acl', String(acl || doc.acl || 'open'));
+  const resp = await zentaoFetch(url, {
+    method: 'POST',
+    headers: {
+      'X-Requested-With': 'XMLHttpRequest',
+      'Accept': 'application/json, text/javascript, */*; q=0.01',
+      'Cookie': cookiesToString(await getZentaoCookies())
+    },
+    body: fd
+  });
+  const text = await resp.text();
+  let json;
+  try { json = JSON.parse(text); } catch { throw new Error('保存失败：禅道没有接受这次修改（可能文档已被他人修改，请重新打开）'); }
+  if (json.result !== 'success') {
+    const errs = json.errors && typeof json.errors === 'object' ? Object.values(json.errors).join('；') : '';
+    throw new Error(json.message || errs || '保存失败');
+  }
+  return { id: String(id), message: json.message || '保存成功' };
+}
+
+/** 收藏 / 取消收藏文档。禅道：GET doc-collect-{id}-doc.html（再次调用取消）→ {status:'yes'|'no'} */
+async function collectDoc(id) {
+  assertReady();
+  if (!/^\d+$/.test(String(id))) throw new Error('非法的文档 ID');
+  const resp = await zentaoFetch(`${ZENTAO_PATH()}/doc-collect-${id}-doc.html`, {
+    headers: {
+      'X-Requested-With': 'XMLHttpRequest',
+      'Accept': 'application/json, text/javascript, */*; q=0.01',
+      'Cookie': cookiesToString(await getZentaoCookies())
+    }
+  });
+  const text = await resp.text();
+  let json;
+  try { json = JSON.parse(text); } catch { throw new Error('操作失败'); }
+  // status: 'yes' = 已收藏，'no' = 已取消
+  return { collected: json.status === 'yes' };
+}
+
+/**
+ * 删除文档（放回收站）。禅道删除动作统一是 GET {module}-delete-{id}-yes-.html（-yes- 即确认），
+ * 与任务/Bug 一致；成功后回查列表确认已消失。
+ */
+async function deleteDoc(id) {
+  assertReady();
+  if (!/^\d+$/.test(String(id))) throw new Error('非法的文档 ID');
+  await zentaoFetch(`${ZENTAO_PATH()}/doc-delete-${id}-yes-.html`, {
+    headers: {
+      'X-Requested-With': 'XMLHttpRequest',
+      'Accept': 'application/json, text/javascript, */*; q=0.01',
+      'Cookie': cookiesToString(await getZentaoCookies())
+    }
+  });
+  // 回查：禅道删除响应形态多变，以「列表里已不在」为准
+  const gone = !(await listDocs({})).some(d => String(d.id) === String(id));
+  if (!gone) throw new Error('删除未生效');
+  return { success: true };
+}
+
+/** 附件数组 → 前端需要的下载信息 */
+function slimFiles(files) {
+  return toArray(files)
+    .filter(f => f && f.id)
+    .map(f => {
+      const title = decodeZentaoText(f.title || f.pathname || f.realPath || `文件 ${f.id}`);
+      const ext = String(f.extension || (String(title).match(/\.([a-z0-9]+)$/i) || [])[1] || '').toLowerCase();
+      return {
+        id: String(f.id),
+        name: ext && !new RegExp(`\\.${ext}$`, 'i').test(title) ? `${title}.${ext}` : title,
+        ext,
+        size: Number(f.size || 0) || 0
+      };
+    });
+}
+
+/**
+ * 文档详情。
+ * @returns {Promise<{id,title,type,contentType,contentHtml,files,lib,module,editedBy,editedDate,addedBy,url}>}
+ */
+async function getDoc(id) {
+  assertReady();
+  if (!/^\d+$/.test(String(id))) throw new Error('非法的文档 ID');
+  let data;
+  try {
+    data = await getZentaoJson(`doc-view-${id}.json?onlybody=yes`);
+  } catch (err) {
+    // 文档不存在 / 无权限时禅道返回的不是合法 JSON（失败结果后拼着跳转脚本），解析失败即视为不存在
+    if (/JSON|Unexpected/.test(err.message)) {
+      const e = new Error('文档不存在或已删除');
+      e.code = 'DOC_NOT_FOUND';
+      throw e;
+    }
+    throw err;
+  }
+  const doc = data && data.doc;
+  if (!doc || !doc.id || String(doc.deleted) === '1') {
+    const err = new Error('文档不存在或已删除');
+    err.code = 'DOC_NOT_FOUND';
+    throw err;
+  }
+  const type = String(doc.type || 'text');
+  const contentType = String(doc.contentType || 'html').toLowerCase();
+  const { contentHtml, contentText } = renderContent(type, contentType, doc.content || '');
+  const isText = type === 'text' || type === 'markdown';
+  return {
+    id: String(doc.id),
+    title: decodeZentaoText(doc.title || '(无标题)'),
+    type,
+    contentType,
+    contentHtml,
+    contentText,
+    // 原始正文（编辑时回填用；仅正文型返回）
+    raw: isText ? String(doc.content || '') : '',
+    editable: isText,
+    keywords: decodeZentaoText(doc.keywords || ''),
+    files: slimFiles(doc.files),
+    lib: String(doc.lib || ''),
+    module: String(doc.module || '0'),
+    editedBy: doc.editedBy || '',
+    editedDate: doc.editedDate || '',
+    addedBy: doc.addedBy || '',
+    addedDate: doc.addedDate || '',
+    // 外链型文档的目标地址（type=url 时 content 存链接）
+    externalUrl: type === 'url' ? String(doc.content || '').trim() : ''
+  };
+}
+
+export { listLibs, listDocs, getDoc, createDoc, editDoc, deleteDoc, collectDoc, genUid, sanitizeDocHtml, slimFiles, renderContent, SPACE_LABEL, DOC_TYPE_META };

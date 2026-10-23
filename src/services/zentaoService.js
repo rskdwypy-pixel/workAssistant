@@ -606,7 +606,7 @@ const MY_LIST_PAGE_SIZE = 500;
  */
 async function fetchMyList(kind, type = 'assignedTo', cookieHeader) {
   const CH = cookieHeader || cookiesToString(await getZentaoCookies());
-  const listKey = kind === 'bug' ? 'bugs' : 'tasks';
+  const listKey = kind === 'bug' ? 'bugs' : kind === 'story' ? 'stories' : 'tasks';
   const items = [];
   let users = {};
   for (let page = 1; page <= 50; page++) {
@@ -2212,7 +2212,7 @@ async function createBrowserSession() {
  * onlybody 页只能放在框架里（单独打开会被脚本去掉 onlybody 重新加载，又落到看板），
  * 正好由主框架承载。onlybody 地址主框架识别不出所属应用，因此显式带上 app。
  */
-const VIEW_APPS = { task: 'execution', bug: 'qa' };
+const VIEW_APPS = { task: 'execution', bug: 'qa', doc: 'doc', story: 'product' };
 
 async function resolveViewPath(type, objectId, sid) {
   let page = `/zentao/${type}-view-${objectId}.html`;

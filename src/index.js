@@ -6,6 +6,8 @@ import apiRouter from './routes/api.js';
 import adminRouter from './routes/admin.js';
 import attachmentsRouter from './routes/attachments.js';
 import reportsRouter from './routes/reports.js';
+import docsRouter from './routes/docs.js';
+import storiesRouter from './routes/stories.js';
 import accountRouter from './routes/account.js';
 import { startAttachmentRetry } from './services/attachmentSync.js';
 import { startReminder } from './services/reminder.js';
@@ -44,6 +46,8 @@ app.use('/api', apiRouter);
 app.use('/api', adminRouter);
 app.use('/api', attachmentsRouter);
 app.use('/api', reportsRouter);
+app.use('/api', docsRouter);
+app.use('/api', storiesRouter);
 app.use('/api', accountRouter);
 app.use('/api', updateRouter);
 

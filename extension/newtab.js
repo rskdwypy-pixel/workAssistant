@@ -7429,6 +7429,10 @@ const TabSwitcher = {
     // 5. 优化：加载对应模式的数据
     if (mode === 'report') {
       if (typeof ReportPage !== 'undefined') ReportPage.show();
+    } else if (mode === 'doc') {
+      if (typeof DocPage !== 'undefined') DocPage.show();
+    } else if (mode === 'story') {
+      if (typeof StoryPage !== 'undefined') StoryPage.show();
     } else if (mode === 'bug') {
       if (typeof BugManager !== 'undefined' && BugManager.loadBugs) {
         BugManager.loadBugs();
