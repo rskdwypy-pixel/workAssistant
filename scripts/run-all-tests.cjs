@@ -29,6 +29,7 @@ const SUITES = [
   'test-reports.mjs',
   'test-reports-ui',
   'test-docs.mjs',
+  'test-docs-files.mjs',
   'test-docs-ui',
   'test-zentao-cache.mjs',
   'test-stories.mjs',

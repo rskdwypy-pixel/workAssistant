@@ -55,7 +55,7 @@
 | 文档详情 | `doc-view-{id}.json` → `data.doc` | ✅ |
 | 文件预览/下载 | 复用现有 `GET /api/zentao/files/:fileId/content?ext=&download=1`（后端转发 `file-read-N.ext` / `file-download-N`） | ✅ 已有 |
 | 新建正文文档（P1） | `doc-create-...` 表单 | 待抓 |
-| 上传文件文档（P1） | `doc-create` + `file-ajaxUpload`（复用附件上传） | 待抓 |
+| 给文档加附件（P1，已完成 2026-10-23） | 文档编辑表单的 `files[]` + `labels[]`（multipart，一次一个，回读确认附件数真的多了）；新建时先建文档再逐个追加 | 已实测。"文件型文档"（`doc-uploadDocs`）在目标禅道 18.3 开源版不可用（返回空），所以不做 |
 
 > 说明：**按库列出文档不走 `doc-browse-{libID}`**（实测该参数组合返回空，禅道各版本参数位不同、易碎）。改为拉 `doc-browse.json` 全量后端按 `lib`/`module` 分组，稳健且跨版本。全量随 `pager` 翻页。
 

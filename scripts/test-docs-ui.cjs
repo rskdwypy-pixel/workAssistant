@@ -57,7 +57,7 @@ function setup(state = {}) {
   win.fetch = async (url, init = {}) => {
     const u = String(url).replace('http://127.0.0.1:3721', '');
     const method = (init.method || 'GET').toUpperCase();
-    state.calls.push({ method, url: u, body: init.body ? JSON.parse(init.body) : null });
+    state.calls.push({ method, url: u, body: typeof init.body === 'string' ? JSON.parse(init.body) : null, file: init.body && typeof init.body !== 'string' ? { name: init.body.name, size: init.body.size } : null });
     const reply = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
     if (u === '/api/docs/libs?cache=only') return reply({ success: true, data: state.cache === undefined ? null : (state.libs || LIBS) });
     if (u === '/api/docs/list?cache=only') return reply({ success: true, data: state.cache === undefined ? null : state.cache, syncedAt: 1760000000000 });
@@ -77,6 +77,11 @@ function setup(state = {}) {
     if ((m = u.match(/^\/api\/docs\/(\d+)$/)) && method === 'PUT') return reply({ success: true, data: { id: m[1], message: '保存成功' } });
     if ((m = u.match(/^\/api\/docs\/(\d+)$/)) && method === 'DELETE') return reply({ success: true, data: { success: true } });
     if (u === '/api/docs' && method === 'POST') return reply({ success: true, data: { id: '99', message: '保存成功' } });
+    if ((m = u.match(/^\/api\/docs\/(\d+)\/files\?name=([^&]*)/)) && method === 'POST') {
+      const nm = decodeURIComponent(m[2]);
+      if (state.fileFail && state.fileFail.test(nm)) return reply({ success: false, message: '禅道没有收下这个文件' }, 500);
+      return reply({ success: true, data: { id: m[1], file: { id: '400', name: nm } } });
+    }
     if ((m = u.match(/^\/api\/docs\/(\d+)$/))) {
       const id = m[1];
       const map = { '12': DOC12, '20': DOC_WITH_FILE, '21': DOC_URL };
@@ -85,7 +90,8 @@ function setup(state = {}) {
     }
     return reply({ success: false, message: 'not mocked' }, 404);
   };
-  win.Toast = { success() {}, error() {}, info() {}, warning() {} };
+  win.__toasts = [];
+  win.Toast = { success(m) { win.__toasts.push(['ok', m]); }, error(m) { win.__toasts.push(['err', m]); }, info() {}, warning(m) { win.__toasts.push(['warn', m]); } };
   win.Confirm = { show: async () => (state.confirmAnswer !== undefined ? state.confirmAnswer : true) };
   win.openInZentao = (type, id) => state.opened.push([type, id]);
   win.Account = { isLocalMode: () => !!state.localMode, showLogin: () => { state.loginShown = true; } };
@@ -185,6 +191,39 @@ function setup(state = {}) {
   check('新建：POST /api/docs 带 lib/title/body/markdown', createCall && createCall.body.lib === '75' && createCall.body.title === '新文档标题' && createCall.body.contentType === 'markdown');
   check('新建：保存后关闭编辑器', editor.hidden);
   check('新建：保存后刷新列表', state.calls.filter(c => c.url.startsWith('/api/docs/list')).length >= 2);
+
+  // ============ 附件（新建时选文件，保存后逐个上传） ============
+  const pick = (ed, files) => {
+    const inp = ed.querySelector('[data-files]');
+    Object.defineProperty(inp, 'files', { value: files, configurable: true });
+    inp.dispatchEvent(new win.Event('change', { bubbles: true }));
+  };
+  const F = (name, size) => ({ name, size, type: 'text/plain' });
+  win.DocEditor.openNew(); await tick(10);
+  check('附件：编辑器有「添加附件」入口，初始没有文件', !!editor.querySelector('[data-pick]') && editor.querySelectorAll('[data-attach-list] li').length === 0);
+  pick(editor, [F('需求说明.txt', 2048), F('数据.csv', 5 * 1048576), F('空.txt', 0), F('超大.zip', 51 * 1048576)]);
+  check('附件：空文件和超过 50MB 的被挡下并提示，其余加入列表', editor.querySelectorAll('[data-attach-list] li').length === 2 && /超过 50MB/.test(editor.querySelector('[data-err]').textContent), editor.querySelector('[data-err]').textContent);
+  pick(editor, [F('需求说明.txt', 2048)]);
+  check('附件：同名同大小不重复添加', editor.querySelectorAll('[data-attach-list] li').length === 2);
+  check('附件：列表显示文件名和大小', /需求说明\.txt/.test(editor.querySelector('[data-attach-list]').textContent) && /5\.0MB/.test(editor.querySelector('[data-attach-list]').textContent));
+  editor.querySelector('[data-rm="1"]').click();
+  check('附件：可以移除一个', editor.querySelectorAll('[data-attach-list] li').length === 1);
+  editor.querySelector('[data-title]').value = '带附件的文档';
+  editor.querySelector('[data-lib]').value = '75';
+  pick(editor, [F('第二个.log', 100)]);
+  state.calls.length = 0;
+  state.fileFail = /\.log$/;
+  editor.querySelector('[data-save]').click();
+  await tick(40);
+  const ups = state.calls.filter(c => /\/files\?name=/.test(c.url));
+  check('附件：文档创建后，才对新文档(99)逐个上传，文件本体作为请求体', state.calls[0].url === '/api/docs' && ups.length === 2 && ups.every(c => c.url.startsWith('/api/docs/99/files?name=') && c.method === 'POST' && c.file) && ups[0].file.name === '需求说明.txt', JSON.stringify(ups.map(u => u.url)));
+  check('附件：其中一个失败不影响其它，也不影响文档本身；编辑器照常关闭', editor.hidden && state.calls.some(c => c.url === '/api/docs' && c.method === 'POST'));
+  check('附件：失败的文件名和原因提示给用户', (win.__toasts || []).some(t => t[0] === 'warn' && /第二个\.log/.test(t[1]) && /没有收下/.test(t[1])), JSON.stringify(win.__toasts));
+  state.fileFail = null;
+  state.calls.length = 0;
+  win.DocEditor.openNew(); await tick(10);
+  check('附件：重新打开编辑器，上次选的文件已清空', editor.querySelectorAll('[data-attach-list] li').length === 0);
+  win.DocEditor.close();
 
   // 标题为空不提交
   win.DocEditor.openNew(); await tick(10);

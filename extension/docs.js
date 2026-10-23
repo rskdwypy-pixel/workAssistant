@@ -32,6 +32,10 @@ const DocApi = {
   create(body) { return this.request('/api/docs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); },
   update(id, body) { return this.request(`/api/docs/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); },
   remove(id) { return this.request(`/api/docs/${encodeURIComponent(id)}`, { method: 'DELETE' }); },
+  /** 给文档追加一个附件（请求体就是文件本身，一次一个） */
+  addFile(id, file) {
+    return this.request(`/api/docs/${encodeURIComponent(id)}/files?name=${encodeURIComponent(file.name)}&mime=${encodeURIComponent(file.type || '')}`, { method: 'POST', body: file });
+  },
   collect(id) { return this.request(`/api/docs/${encodeURIComponent(id)}/collect`, { method: 'POST' }); },
   fileUrl(fileId, { download = false, ext = '', name = '' } = {}) {
     const q = new URLSearchParams();
@@ -402,10 +406,24 @@ const DocViewer = {
   }
 };
 
+const DOC_MAX_FILE = 50 * 1024 * 1024;
+const docSize = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)}MB` : `${Math.max(1, Math.round(n / 1024))}KB`);
+
 const DocEditor = {
   el: null,
   mode: 'new',   // 'new' | 'edit'
   docId: null,
+  files: [],     // 待上传的附件（File）
+
+  showErr(msg) {
+    const e = this.el.querySelector('[data-err]');
+    e.textContent = msg; e.hidden = false;
+  },
+
+  renderFiles() {
+    this.el.querySelector('[data-attach-list]').innerHTML = this.files.map((f, i) =>
+      `<li><span class="doc-attach-name">${docEsc(f.name)}</span><span class="doc-attach-size">${docSize(f.size)}</span><button type="button" data-rm="${i}" aria-label="移除 ${docEsc(f.name)}">✕</button></li>`).join('');
+  },
 
   ensure() {
     if (this.el) return this.el;
@@ -434,12 +452,35 @@ const DocEditor = {
             <span class="doc-field-label">正文（支持 Markdown）</span>
             <textarea data-content rows="14" placeholder="# 标题\n\n用 Markdown 书写，保存后按渲染效果展示"></textarea>
           </label>
+          <div class="doc-field doc-attach">
+            <span class="doc-field-label">附件（可选，单个不超过 50MB）</span>
+            <div class="doc-attach-row">
+              <input type="file" data-files multiple hidden />
+              <button type="button" class="btn-secondary" data-pick>＋ 添加附件</button>
+              <span class="doc-attach-hint">保存文档后上传到禅道；可以多选</span>
+            </div>
+            <ul class="doc-attach-list" data-attach-list></ul>
+          </div>
           <div class="doc-editor-err" data-err hidden></div>
         </div>
       </div>`;
     document.body.appendChild(wrap);
     wrap.querySelector('[data-close]').addEventListener('click', () => this.close());
     wrap.querySelector('[data-save]').addEventListener('click', () => this.save());
+    wrap.querySelector('[data-pick]').addEventListener('click', () => wrap.querySelector('[data-files]').click());
+    wrap.querySelector('[data-files]').addEventListener('change', (e) => {
+      for (const f of e.target.files) {
+        if (f.size > DOC_MAX_FILE) { this.showErr(`「${f.name}」超过 50MB，没有添加`); continue; }
+        if (!f.size) { this.showErr(`「${f.name}」是空文件，没有添加`); continue; }
+        if (!this.files.some(x => x.name === f.name && x.size === f.size)) this.files.push(f);
+      }
+      e.target.value = '';
+      this.renderFiles();
+    });
+    wrap.querySelector('[data-attach-list]').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-rm]');
+      if (b) { this.files.splice(Number(b.dataset.rm), 1); this.renderFiles(); }
+    });
     this._esc = (e) => { if (e.key === 'Escape') this.close(); };
     this.el = wrap;
     return wrap;
@@ -452,6 +493,7 @@ const DocEditor = {
     el.querySelector('[data-err]').hidden = true;
     el.querySelector('[data-title]').value = '';
     el.querySelector('[data-content]').value = '';
+    this.files = []; this.renderFiles();
     // 文档库下拉：可写入的库，默认选当前选中的库
     const libs = DocPage.writableLibs();
     const sel = el.querySelector('[data-lib]');
@@ -473,6 +515,7 @@ const DocEditor = {
     el.querySelector('[data-err]').hidden = true;
     el.querySelector('[data-title]').value = doc.title || '';
     el.querySelector('[data-content]').value = doc.raw || '';
+    this.files = []; this.renderFiles();
     el.querySelector('[data-liband]').style.display = 'none'; // 编辑不换库
     this.show();
   },
@@ -493,15 +536,32 @@ const DocEditor = {
     if (!title) { errEl.textContent = '请填写标题'; errEl.hidden = false; return; }
     saveBtn.disabled = true;
     try {
+      let docId = this.docId;
       if (this.mode === 'new') {
         const lib = el.querySelector('[data-lib]').value;
         if (!lib) throw new Error('请选择文档库');
-        await DocApi.create({ lib, module: '0', title, body, contentType: 'markdown' });
+        const r = await DocApi.create({ lib, module: '0', title, body, contentType: 'markdown' });
+        docId = r.data && r.data.id;
         if (typeof Toast !== 'undefined') Toast.success('文档已创建');
       } else {
         await DocApi.update(this.docId, { title, body });
         if (typeof Toast !== 'undefined') Toast.success('文档已保存');
       }
+      // 文档已经存好了，再逐个上传附件；失败的不影响文档，告诉用户哪些没传上
+      const failed = [];
+      if (this.files.length) {
+        if (!docId) failed.push(...this.files.map(f => `${f.name}（没拿到新文档的编号）`));
+        else {
+          for (let i = 0; i < this.files.length; i++) {
+            const f = this.files[i];
+            saveBtn.textContent = `上传附件 ${i + 1}/${this.files.length}…`;
+            try { await DocApi.addFile(docId, f); } catch (err) { failed.push(`${f.name}（${err.message}）`); }
+          }
+        }
+      }
+      if (failed.length && typeof Toast !== 'undefined') Toast.warning(`有 ${failed.length} 个附件没传上：${failed.join('；')}。文档已保存，可以编辑文档重新添加。`, 8000);
+      else if (this.files.length && typeof Toast !== 'undefined') Toast.success(`${this.files.length} 个附件已上传`);
+      this.files = [];
       this.close();
       DocPage.reload();
     } catch (err) {
@@ -509,6 +569,7 @@ const DocEditor = {
       errEl.hidden = false;
     } finally {
       saveBtn.disabled = false;
+      saveBtn.textContent = '保存';
     }
   },
 

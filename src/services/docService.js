@@ -316,7 +316,7 @@ function objectOfLib(lib) {
  * editedDate 必须回传当前值，否则禅道会判为"文档已被他人修改"。
  * @param {{id:string, title?:string, body?:string, keywords?:string, acl?:string}} opts
  */
-async function editDoc({ id, title, body, keywords, acl } = {}) {
+async function editDoc({ id, title, body, keywords, acl, files } = {}) {
   assertReady();
   if (!/^\d+$/.test(String(id))) throw new Error('非法的文档 ID');
   const data = await getZentaoJson(`doc-view-${id}.json?onlybody=yes`);
@@ -337,6 +337,11 @@ async function editDoc({ id, title, body, keywords, acl } = {}) {
   fd.set('module', String(doc.module || '0'));
   fd.set('keywords', String(keywords != null ? keywords : decodeZentaoText(doc.keywords || '')));
   fd.set('acl', String(acl || doc.acl || 'open'));
+  // 追加附件：与新建任务 / Bug 同款的 files[] + labels[]（标题用去掉扩展名的文件名，禅道下载时自动补回扩展名）
+  for (const f of files || []) {
+    fd.append('files[]', new Blob([f.buffer], { type: f.mime || 'application/octet-stream' }), f.name);
+    fd.append('labels[]', fileLabel(f.name));
+  }
   const resp = await zentaoFetch(url, {
     method: 'POST',
     headers: {
@@ -355,6 +360,35 @@ async function editDoc({ id, title, body, keywords, acl } = {}) {
   }
   invalidateDocs(id);
   return { id: String(id), message: json.message || '保存成功' };
+}
+
+/** 文件名去掉扩展名作为附件标题 */
+function fileLabel(name) {
+  const n = String(name || '附件');
+  const i = n.lastIndexOf('.');
+  return i > 0 ? n.slice(0, i) : n;
+}
+
+/**
+ * 给文档追加一个附件（走编辑表单的 files[]）。
+ * 提交后回读文档确认附件数真的多了——禅道对不允许的类型（可执行文件等）或超大文件会静默不收，不能报成功。
+ * 只对正文型文档（text）可用；文件型 / 外链型文档没有编辑表单。
+ * @param {{id:string, file:{name:string, mime?:string, buffer:Buffer}}} opts
+ * @returns {Promise<{id:string, file:{id:string,name:string,size:number}}>}
+ */
+async function addDocFile({ id, file } = {}) {
+  assertReady();
+  if (!file || !file.name || !file.buffer || !file.buffer.length) throw new Error('没有收到文件内容');
+  const before = await getDoc(id);
+  if (!before.editable) throw new Error('这种类型的文档不能追加附件（只有正文文档可以）');
+  const known = new Set(before.files.map(f => f.id));
+  invalidateDocs(id);
+  await editDoc({ id, files: [file] });
+  invalidateDocs(id);
+  const after = await getDoc(id);
+  const added = after.files.find(f => !known.has(f.id));
+  if (!added) throw new Error('禅道没有收下这个文件（可能是类型被禁止，或超过了禅道的上传大小限制）');
+  return { id: String(id), file: added };
 }
 
 /** 收藏 / 取消收藏文档。禅道：GET doc-collect-{id}-doc.html（再次调用取消）→ {status:'yes'|'no'} */
@@ -474,4 +508,4 @@ async function getDoc(id) {
   return result;
 }
 
-export { listLibs, listDocs, loadDocs, getDoc, createDoc, editDoc, deleteDoc, collectDoc, genUid, sanitizeDocHtml, slimFiles, renderContent, SPACE_LABEL, DOC_TYPE_META };
+export { listLibs, listDocs, loadDocs, getDoc, createDoc, editDoc, addDocFile, deleteDoc, collectDoc, genUid, sanitizeDocHtml, slimFiles, renderContent, SPACE_LABEL, DOC_TYPE_META };

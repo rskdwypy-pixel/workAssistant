@@ -8,6 +8,7 @@
  *   POST   /api/docs                      新建正文文档 body:{lib,module,title,body,contentType,keywords,acl}
  *   PUT    /api/docs/:id                  编辑文档 body:{title,body,keywords,acl}
  *   DELETE /api/docs/:id                  删除文档（放回收站）
+ *   POST   /api/docs/:id/files?name=&mime=  给文档追加一个附件（请求体为文件二进制，一次一个；回读确认禅道真的收下了）
  *   POST   /api/docs/:id/collect          收藏 / 取消收藏（切换）
  *
  * 文件预览 / 下载复用：GET /api/zentao/files/:fileId/content?ext=&download=1&name=
@@ -97,5 +98,21 @@ router.post('/docs/:id/collect', async (req, res) => {
     fail(res, err);
   }
 });
+
+const MAX_DOC_FILE_BYTES = 50 * 1024 * 1024;
+router.post('/docs/:id/files',
+  express.raw({ type: () => true, limit: MAX_DOC_FILE_BYTES + 1024 }),
+  async (req, res) => {
+    try {
+      const name = String(req.query.name || '').trim();
+      if (!name) return res.status(400).json({ success: false, message: '缺少文件名' });
+      const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      if (!buffer.length) return res.status(400).json({ success: false, message: '文件是空的' });
+      res.json({ success: true, data: await docService.addDocFile({ id: req.params.id, file: { name, mime: String(req.query.mime || ''), buffer } }) });
+    } catch (err) {
+      if (err && err.type === 'entity.too.large') return res.status(413).json({ success: false, message: '文件超过 50MB' });
+      fail(res, err);
+    }
+  });
 
 export default router;
