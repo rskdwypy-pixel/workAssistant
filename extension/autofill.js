@@ -365,7 +365,7 @@ const AutofillDialog = {
     this._poll = false;
     this.state = 'done';
     this.render();
-    if (typeof ReportPage !== 'undefined') ReportPage.reloadEfforts();
+    if (typeof ReportPage !== 'undefined') ReportPage.refreshAfterWrite();
     if (typeof Toast !== 'undefined' && this.job.written) Toast.success(`已补填 ${this.job.written} 条（${afH(this.job.hours)}）`);
   },
 
@@ -397,7 +397,7 @@ const AutofillDialog = {
     try {
       const { data } = await AutofillApi.undo(this.job.batchId || this.batchId);
       this.undoResult = data;
-      if (typeof ReportPage !== 'undefined') ReportPage.reloadEfforts();
+      if (typeof ReportPage !== 'undefined') ReportPage.refreshAfterWrite();
       if (typeof Toast !== 'undefined') Toast.success(`已撤销 ${data.undone} 条`);
     } catch (err) {
       if (typeof Toast !== 'undefined') Toast.error(`撤销失败：${err.message}`);

@@ -315,6 +315,13 @@ function setup(state = {}) {
   doc.querySelector('[data-report-lens="team"]').click(); await tick(80);
   const tcell = (d) => doc.querySelector(`[data-effort-day="2025-03-${pad(d)}"]`);
   check('切到全员：请求了全员工时', state.reqs.some(r => r.u === '/api/efforts/team?month=2025-03'));
+  // 回归：补填 / 填报 / 修改之后，全员热力图要跟着重取（以前只重取"我的"，热力图停在改动之前，补过的日子仍是灰的）
+  {
+    const before = state.reqs.filter(r => r.u === '/api/efforts/team?month=2025-03').length;
+    await win.ReportPage.refreshAfterWrite(); await tick(80);
+    const after = state.reqs.filter(r => r.u === '/api/efforts/team?month=2025-03').length;
+    check('写工时之后：全员工时（热力图的数据）也重新向后端要', after === before + 1, `${before} → ${after}`);
+  }
   check('全员视角下今天同样高亮', !!tcell(20).querySelector('.report-today-tag'));
   check('全员格子：团队总工时 + 几个人填报', /团队 16h/.test(tcell(17).textContent) && /2\/3 人填报/.test(tcell(17).textContent), tcell(17).textContent);
   check('全员格子：所有人都填满才标绿；有人没填满标琥珀；没人填的过去工作日标红', tcell(18).classList.contains('is-partial') && !tcell(17).classList.contains('is-full') && tcell(19).classList.contains('is-missing') && /没人填工时/.test(tcell(19).textContent));

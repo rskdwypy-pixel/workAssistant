@@ -166,6 +166,15 @@ const ReportPage = {
     }
   },
 
+  /**
+   * 工时被改动之后（填报 / 补填 / 修改 / 删除 / 撤销）调用：我的工时立刻重取；全员工时（热力图、全员视角）读过的话也要重取，
+   * 否则热力图还停在改动之前（补填过的日子仍是灰的）。全员那份比较慢，放后台刷新，不挡住界面。
+   */
+  async refreshAfterWrite() {
+    await this.reloadEfforts();
+    if (this.team || this.lens === 'team') this.loadTeam();
+  },
+
   /** 向禅道要最新工时并重画（填报之后也调用） */
   async reloadEfforts(token = this.loadToken) {
     try {

@@ -228,7 +228,7 @@ const EffortDrawer = {
     this.tasks = null;
     this.leftTouched = false;
     this.editingId = null;
-    if (typeof ReportPage !== 'undefined') await ReportPage.reloadEfforts();
+    if (typeof ReportPage !== 'undefined') await ReportPage.refreshAfterWrite();
     this.render();
     EffortApi.tasks().then(r => { this.tasks = r.data || []; if (this.isOpen()) this.render(true); }).catch(() => {});
   },
