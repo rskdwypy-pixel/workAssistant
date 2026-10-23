@@ -1,6 +1,6 @@
 /**
  * 真函数测试：我的待办（前端）
- *   - 没有顶部总览卡；两列四张卡片：第一列 任务 / Bug，第二列 需求 / 文档
+ *   - 没有顶部总览卡；四张卡片排成两排：第一排 任务 | Bug，第二排 需求 | 文档
  *   - 逾期 / 今天标记；空卡片提示；页头统计与标签角标（总数，有紧急的变红）
  *   - 点击：切到对应标签页，并让目标那一条滚动 + 闪烁；需求 / 文档会先清掉过滤
  *   - 菜单顺序：待办 任务 Bug 需求 文档 报告；各页没有刷新按钮
@@ -27,7 +27,7 @@ const DATA = {
       { kind: 'bug', id: 'b-1', title: '登录超时', pri: 2, due: 'today', meta: '未确认' } ] },
     { key: 'story', label: '我的需求', items: [
       { kind: 'story', id: '172', title: '需求测试', pri: 3, due: '', meta: '评审中' } ] },
-    { key: 'doc', label: '我的文档', items: [
+    { key: 'doc', label: '文档', items: [
       { kind: 'doc', id: '9', title: '接口说明', pri: 3, due: '', meta: '产品主库 · 2026-10-20' },
       { kind: 'doc', id: '10', title: '部署手册', pri: 3, due: '', meta: '产品主库 · 2026-10-19' } ] }
   ]
@@ -57,11 +57,12 @@ const addTarget = (doc, parentSel, html) => { const p = doc.querySelector(parent
   win.TodoPage.show(); await tick(20);
   check('没有顶部总览卡', !doc.querySelector('.todo-hero') && !doc.querySelector('.todo-chip'));
   check('没有刷新按钮', !doc.getElementById('todoRefresh'));
-  const cols = doc.querySelectorAll('.todo-col');
-  check('两列', cols.length === 2);
-  const keys = (c) => [...c.querySelectorAll('.todo-card')].map(x => x.dataset.card).join();
-  check('第一列：任务、Bug（上下两张）', keys(cols[0]) === 'task,bug', keys(cols[0]));
-  check('第二列：需求、文档（上下两张）', keys(cols[1]) === 'story,doc', keys(cols[1]));
+  const cards = [...doc.querySelectorAll('#todoBody .todo-card')].map(x => x.dataset.card);
+  check('四张卡片按 任务、Bug、需求、文档 的顺序平铺（CSS 网格排成两排）', cards.join() === 'task,bug,story,doc', cards.join());
+  const css = fs.readFileSync(path.join(EXT, 'newtab.css'), 'utf8');
+  const grid = (css.match(/\.todo-grid \{[^}]*\}/) || [''])[0];
+  check('网格是 2 列 × 2 行，每排各占一半高度', /grid-template-columns:\s*1fr 1fr/.test(grid) && /grid-template-rows:\s*1fr 1fr/.test(grid));
+  check('不再有按列分组的容器', !doc.querySelector('.todo-col'));
   check('卡片头部显示条数', doc.querySelector('[data-card="task"] .todo-count').textContent === '2' && doc.querySelector('[data-card="doc"] .todo-count').textContent === '2');
   check('逾期 / 今天有标记', doc.querySelector('.due-overdue') && doc.querySelector('.due-today'));
   check('页头统计：待处理 6 / 逾期+今天 2', doc.getElementById('todoStatTotal').textContent === '6' && doc.getElementById('todoStatUrgent').textContent === '2');
@@ -109,7 +110,7 @@ const addTarget = (doc, parentSel, html) => { const p = doc.querySelector(parent
   // ── 空卡片 / 缺分组 ──
   ({ win, doc, st } = setup({ today: 'x', total: 0, errors: [], groups: [{ key: 'task', label: '任务', items: [] }] }));
   win.TodoPage.show(); await tick(20);
-  check('取不到的来源也显示空卡片和提示', doc.querySelectorAll('.todo-card').length === 4 && /没有与你相关的需求/.test(doc.getElementById('todoBody').textContent));
+  check('取不到的来源也显示空卡片和提示', doc.querySelectorAll('.todo-card').length === 4 && /没有指派给你或评审中的需求/.test(doc.getElementById('todoBody').textContent));
   check('全空：不显示角标', !doc.querySelector('.tab-badge'));
 
   ({ win, doc, st } = setup({ ...DATA, errors: ['需求：禅道未启用或未配置'] }));

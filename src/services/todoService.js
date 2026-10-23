@@ -4,9 +4,9 @@
  *   getTodos()  → { groups:[{key,label,items:[...]}], total, today, errors:[] }
  *
  * 每个数据源独立取，某个源失败（如禅道没连上）只记进 errors，不影响其它分组。
- * 任务 / Bug / 需求按紧急度排序：逾期 > 今天到期 > 3 天内 > 优先级；文档按最近修改。
- * 「与我相关」：需求 = 禅道里指派给我 / 我提的 / 我评审的 / 抄送我的（未关闭）；
- *               文档 = 我创建或最后由我修改的。
+ * 任务 / Bug / 需求按紧急度排序：逾期 > 今天到期 > 3 天内 > 优先级；文档列出全部，最近修改的在前。
+ * 「与我相关」：需求 = 与我相关（指派 / 我提的 / 我评审的 / 抄送）里，指派给我的，或评审中的；
+ *               文档 = 全部（最近修改的在前）。
  */
 import { getAllTasks } from './taskManager.js';
 import { getBugs } from './bugManager.js';
@@ -62,8 +62,14 @@ function storyItem(s) {
   };
 }
 
-/** 文档最多列这么多条（最近修改的在前），再多的去文档页找 */
-const DOC_LIMIT = 50;
+/** 待办里的需求：未关闭，且 指派给我 或 处于评审中（评审中的排前面） */
+function pickStories(stories, me) {
+  const mine = String(me || '').toLowerCase();
+  const reviewing = (s) => s.status === 'reviewing';
+  return stories
+    .filter(s => s.status !== 'closed' && (reviewing(s) || (mine && String(s.assignedToAccount || '').toLowerCase() === mine)))
+    .sort((a, b) => (reviewing(a) ? 0 : 1) - (reviewing(b) ? 0 : 1) || (a.pri || 3) - (b.pri || 3) || Number(b.id) - Number(a.id));
+}
 
 function docItem(d, libName) {
   return {
@@ -95,30 +101,24 @@ async function getTodos(now = new Date()) {
     groups.push({ key: 'bug', label: '待处理 Bug', items: bugs });
   } catch (e) { errors.push(`Bug：${e.message}`); }
 
-  // 需求：与我相关（四种关联之一）、未关闭；评审中 / 变更中的排前面
+  // 需求：指派给我的，或评审中的（未关闭）
   try {
-    const rank = (s) => (s.status === 'reviewing' || s.status === 'changing' ? 0 : 1);
-    const items = (await listStories({ maxAge: 60 * 1000 }))
-      .filter(s => s.status !== 'closed')
-      .sort((a, b) => rank(a) - rank(b) || (a.pri || 3) - (b.pri || 3) || Number(b.id) - Number(a.id))
-      .map(storyItem);
+    const items = pickStories(await listStories({ maxAge: 60 * 1000 }), me).map(storyItem);
     groups.push({ key: 'story', label: '我的需求', items });
   } catch (e) { errors.push(`需求：${e.message}`); }
 
-  // 文档：我创建或最后由我修改的，最近修改的在前
+  // 文档：全部文档，最近修改的在前
   try {
     const [docs, libs] = await Promise.all([listDocs({ maxAge: 60 * 1000 }), listLibs().catch(() => [])]);
     const libName = new Map(libs.map(l => [l.id, l.name]));
-    const items = docs
-      .filter(d => me && (String(d.editedBy || '').toLowerCase() === me || String(d.addedBy || '').toLowerCase() === me))
+    const items = [...docs]
       .sort((a, b) => String(b.editedDate).localeCompare(String(a.editedDate)))
-      .slice(0, DOC_LIMIT)
       .map(d => docItem(d, libName.get(d.lib) || ''));
-    groups.push({ key: 'doc', label: '我的文档', items });
+    groups.push({ key: 'doc', label: '文档', items });
   } catch (e) { errors.push(`文档：${e.message}`); }
 
   const total = groups.reduce((n, g) => n + g.items.length, 0);
   return { today, total, groups, errors };
 }
 
-export { getTodos, dueState, bySeverity };
+export { getTodos, dueState, bySeverity, pickStories };

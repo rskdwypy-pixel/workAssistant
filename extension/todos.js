@@ -2,7 +2,7 @@
  * 我的待办（与任务、Bug、需求、文档、报告同级的标签页）
  *
  *   TodoApi      后端 /api/todos 的封装
- *   TodoPage     两列四张卡片：第一列 任务 / Bug（上下各占一半），第二列 需求 / 文档（上下各占一半）；
+ *   TodoPage     四张卡片排成两排：第一排 任务 | Bug，第二排 需求 | 文档（每排各占一半高度）；
  *                点一条跳到对应标签页，并让那一条高亮闪烁
  *   WaHighlight  滚动到目标并闪烁（目标可能还在加载，会等它出现；列表重绘后会对新节点再闪一次）
  *
@@ -28,8 +28,8 @@ const TODO_DUE_LABEL = { overdue: '已逾期', today: '今天', soon: '3 天内'
 const TODO_CARDS = [
   { key: 'task', icon: '📋', title: '任务', empty: '没有未完成的任务' },
   { key: 'bug', icon: '🐛', title: 'Bug', empty: '没有待处理的 Bug' },
-  { key: 'story', icon: '📝', title: '我的需求', empty: '没有与你相关的需求' },
-  { key: 'doc', icon: '📁', title: '我的文档', empty: '没有你创建或修改过的文档' }
+  { key: 'story', icon: '📝', title: '我的需求', empty: '没有指派给你或评审中的需求' },
+  { key: 'doc', icon: '📁', title: '文档', empty: '还没有文档' }
 ];
 
 const WaHighlight = {
@@ -143,8 +143,8 @@ const TodoPage = {
     if (ta) ta.textContent = String(this.totalCount(d));
     if (tu) tu.textContent = String(this.urgentCount(d));
     const byKey = new Map(d.groups.map(g => [g.key, g]));
-    const col = (keys) => `<div class="todo-col">${keys.map(k => this.renderCard(TODO_CARDS.find(c => c.key === k), byKey.get(k))).join('')}</div>`;
-    let html = col(['task', 'bug']) + col(['story', 'doc']);
+    // 按顺序平铺，由 CSS 网格排成两排：任务 | Bug / 需求 | 文档
+    let html = TODO_CARDS.map(c => this.renderCard(c, byKey.get(c.key))).join('');
     if (d.errors && d.errors.length) {
       html += `<div class="todo-errors">部分来源没取到：${d.errors.map(tdEsc).join('；')}</div>`;
     }
