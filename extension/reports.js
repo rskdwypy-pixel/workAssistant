@@ -238,7 +238,7 @@ const ReportPage = {
   canFill(day) {
     if (!this.isDebug() || this.lens !== 'mine' || day.weekend || day.future || day.today) return false;
     const { loaded, entry } = this.effortOf(day.date);
-    return loaded && this.standard() - entry.hours >= 0.5;
+    return loaded && this.standard() - entry.hours > 1e-9;   // 只要不满标准工时就能补（补完不会少于标准工时）
   },
 
   standard() { return (this.efforts && this.efforts.data && this.efforts.data.standard) || 8; },

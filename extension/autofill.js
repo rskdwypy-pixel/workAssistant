@@ -170,7 +170,7 @@ const AutofillDialog = {
       <div class="af-day-head">
         ${this.mode === 'month' ? `<input type="checkbox" data-af="pick" ${d.selected ? 'checked' : ''} aria-label="选中这一天" />` : ''}
         <button type="button" class="af-day-toggle" data-af="toggle"><b>${afMD(d.date)} ${afWeek(d.date)}</b>
-          <span class="af-day-meta">已填 ${afH(d.existing)} → 补 ${afH(d.gap)}</span>
+          <span class="af-day-meta">已填 ${afH(d.existing)} → 补 ${afH(d.gap)}${d.overtime > 0 ? `（含加班 ${afH(d.overtime)}）` : ''}</span>
           <span class="af-day-sum">${d.open ? '' : summary}</span></button>
         <span class="af-day-tip ${cls}" data-af-tip>${tip}</span>
       </div>

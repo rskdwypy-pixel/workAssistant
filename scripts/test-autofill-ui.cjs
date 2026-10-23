@@ -41,12 +41,12 @@ const EFFORTS = { month: '2025-03', standard: 8, me: 'lijc', days: {
   '2025-03-18': { hours: 3.5, items: [{ effortId: '2', taskId: '10', taskName: '接口联调', execName: '项目甲', consumed: 3.5, left: 6, work: '对字段' }] }
 } };
 const POOL = [{ id: '10', name: '接口联调', execName: '项目甲', left: 6, status: 'doing' }, { id: '11', name: '写文档', execName: '项目甲', left: 4, status: 'doing' }, { id: '15', name: '新任务', execName: '', left: 0, status: 'done' }];
-const dayPlan = (date, variant = 0) => {
-  const existing = date === '2025-03-18' ? 3.5 : 0, gap = 8 - existing;
+const dayPlan = (date, variant = 0, overtime = 0) => {
+  const existing = date === '2025-03-18' ? 3.5 : 0, need = 8 - existing, gap = need + overtime;
   const a = variant ? 2 : (gap > 5 ? 5 : 3), tid = variant ? '15' : '10';
   const e1 = { taskId: tid, taskName: variant ? '新任务' : '接口联调', execName: '项目甲', taskStatus: variant ? 'done' : 'doing', hours: a, work: variant ? '梳理新需求并评估' : '联调订单接口并核对字段', source: 'ai' };
   const e2 = { taskId: '11', taskName: '写文档', execName: '项目甲', taskStatus: 'doing', hours: gap - a, work: '整理接口文档', source: variant ? 'template' : 'ai' };
-  return { date, existing, gap, pool: POOL, entries: [e1, e2] };
+  return { date, existing, need, overtime, gap, pool: POOL, entries: [e1, e2] };
 };
 
 function setup(state = {}) {
@@ -67,7 +67,7 @@ function setup(state = {}) {
       if (state.planFail) return reply({ success: false, message: '一次最多补 31 天，请分批' }, 400);
       if (state.emptyPlan) return reply({ success: true, data: { planId: 'p0', standard: 8, aiUsed: false, aiAvailable: true, days: [], skipped: [{ date: (body.dates || ['2025-03-19'])[0], reason: '这天没有你在做的任务可用（进行中，或当时还没完成的）' }] } });
       const dates = body.dates || ['2025-03-03', '2025-03-18', '2025-03-19'];
-      return reply({ success: true, data: { planId: body.planId || 'p1', standard: 8, aiUsed: state.noAi ? false : true, aiAvailable: !state.noAi, days: dates.map(d => dayPlan(d, body.seed ? 1 : 0)), skipped: body.dates ? [] : [{ date: '2025-03-04', reason: '没有当天已存在的进行中任务（剩余工时 > 0）' }] } });
+      return reply({ success: true, data: { planId: body.planId || 'p1', standard: 8, aiUsed: state.noAi ? false : true, aiAvailable: !state.noAi, days: dates.map(d => dayPlan(d, body.seed ? 1 : 0, state.overtime || 0)), skipped: body.dates ? [] : [{ date: '2025-03-04', reason: '没有当天已存在的进行中任务（剩余工时 > 0）' }] } });
     }
     if (u === '/api/efforts/autofill/rewrite') { state.rewriteBody = body; return reply({ success: true, data: body.entries.map((e, i) => ({ work: `重写后的内容 ${i + 1}`, source: 'ai' })) }); }
     if (u === '/api/efforts/autofill/execute') { state.executed = body; state.polls = 0; return reply({ success: true, data: { jobId: 'b1', batchId: 'b1', total: body.days.reduce((n, d) => n + d.entries.length, 0) } }); }
@@ -199,6 +199,16 @@ const input = (win, el, v) => { el.value = v; el.dispatchEvent(new win.Event('in
   doc.querySelector('[data-fill-day="2025-03-19"]').click(); await tick(60);
   check('一天都补不了：直接显示「没有可补的日子」和原因（不折叠），没有确认按钮可点', /没有可补的日子/.test(dlg().textContent) && /这天没有你在做的任务可用/.test(dlg().textContent) && !dlg().querySelector('.af-skipped') && dlg().querySelector('[data-af="confirm"]').disabled);
   dlg().querySelector('[data-af="close"]').click();
+
+  // 加班：补的量 = 补到标准 + 加班，界面标明「含加班」
+  ({ win, doc, state } = setup({ debug: true, overtime: 1 }));
+  win.ReportPage.month = '2025-03'; win.ReportPage.show(); await tick(60);
+  doc.querySelector('[data-fill-day="2025-03-19"]').click(); await tick(60);
+  check('加班：头部写明「补 9h（含加班 1h）」，合计正好补满', /已填 0h → 补 9h（含加班 1h）/.test(dlg().textContent) && /正好补满/.test(dlg().querySelector('[data-af-tip]').textContent), dlg().querySelector('.af-day-head').textContent.replace(/\s+/g, ' '));
+  dlg().querySelector('[data-af="close"]').click();
+  win.ReportPage.efforts = { data: { ...EFFORTS, days: { ...EFFORTS.days, '2025-03-13': { hours: 7.8, items: [] }, '2025-03-12': { hours: 8, items: [] } } } };
+  const cf = (date) => win.ReportPage.canFill({ date, weekend: false, future: false, today: false });
+  check('只差一点点（7.8h）也能补（补完不少于 8h）；刚好 8h 不能补', cf('2025-03-13') === true && cf('2025-03-12') === false);
 
   // 没配 AI
   ({ win, doc, state } = setup({ debug: true, noAi: true }));

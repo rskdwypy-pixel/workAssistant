@@ -1358,7 +1358,7 @@ const AiModelPicker = {
     set('aiModel', ai.aiModel);
     if (ai.aiReportModel !== undefined) { const el = document.getElementById('aiReportModel'); if (el) el.value = ai.aiReportModel || ''; }
     if (d.schedule) { set('morningHour', d.schedule.morningHour); set('eveningHour', d.schedule.eveningHour); set('workHours', d.schedule.workHours); set('workHolidays', d.schedule.holidays); set('workMakeup', d.schedule.makeup); }
-    if (d.autofill) { set('afMaxTasks', d.autofill.maxTasksPerDay); set('afMinChunk', d.autofill.minChunk); set('afMaxChunk', d.autofill.maxChunk); set('afMaxDays', d.autofill.maxDaysPerTask); const afp = document.getElementById('afPrompt'); if (afp) afp.value = d.autofill.prompt || ''; }
+    if (d.autofill) { set('afMaxTasks', d.autofill.maxTasksPerDay); set('afMinChunk', d.autofill.minChunk); set('afMaxChunk', d.autofill.maxChunk); set('afMaxDays', d.autofill.maxDaysPerTask); set('afMaxOvertime', d.autofill.maxOvertime); const afp = document.getElementById('afPrompt'); if (afp) afp.value = d.autofill.prompt || ''; }
     if (d.webhook) {
       if (d.webhook.url !== undefined) { const el = document.getElementById('webhookUrl'); if (el) el.value = d.webhook.url || ''; }
       set('webhookType', d.webhook.type);
@@ -2040,6 +2040,7 @@ async function importAllConfig() {
             autofill: document.getElementById('afMaxTasks') ? {
               maxTasksPerDay: document.getElementById('afMaxTasks').value, minChunk: document.getElementById('afMinChunk').value,
               maxChunk: document.getElementById('afMaxChunk').value, maxDaysPerTask: document.getElementById('afMaxDays').value,
+              maxOvertime: document.getElementById('afMaxOvertime').value,
               prompt: document.getElementById('afPrompt').value
             } : undefined,
             webhookUrl: config.webhookUrl || '',
@@ -5682,6 +5683,7 @@ function loadSettings() {
   setVal('afMinChunk', afc.minChunk || 1);
   setVal('afMaxChunk', afc.maxChunk || 4);
   setVal('afMaxDays', afc.maxDaysPerTask || 8);
+  setVal('afMaxOvertime', afc.maxOvertime !== undefined ? afc.maxOvertime : 2);
   setVal('afPrompt', afc.prompt || '');
   setVal('webhookUrl', config.webhookUrl || '');
   setVal('webhookType', config.webhookType || 'generic');

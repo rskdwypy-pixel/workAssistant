@@ -752,13 +752,14 @@ router.post('/config', async (req, res) => {
     let af = null;
     if (autofill && typeof autofill === 'object') {
       const n = (v) => Number(v);
-      af = { maxTasksPerDay: n(autofill.maxTasksPerDay), minChunk: n(autofill.minChunk), maxChunk: n(autofill.maxChunk), maxDaysPerTask: n(autofill.maxDaysPerTask), prompt: String(autofill.prompt || '').trim() };
+      af = { maxTasksPerDay: n(autofill.maxTasksPerDay), minChunk: n(autofill.minChunk), maxChunk: n(autofill.maxChunk), maxDaysPerTask: n(autofill.maxDaysPerTask), maxOvertime: autofill.maxOvertime === undefined || autofill.maxOvertime === '' ? (await import('../config.js')).config.autofill.maxOvertime : n(autofill.maxOvertime), prompt: String(autofill.prompt || '').trim() };
       const half = (v) => Math.round(v * 2) === v * 2;
       const err = !(Number.isInteger(af.maxTasksPerDay) && af.maxTasksPerDay >= 1 && af.maxTasksPerDay <= 5) ? '每天最多任务数应是 1~5 的整数'
         : !(af.minChunk >= 0.5 && af.minChunk <= 4 && half(af.minChunk)) ? '单条工时的下限应在 0.5~4 小时之间（0.5 步长）'
         : !(af.maxChunk >= 1 && af.maxChunk <= 8 && half(af.maxChunk)) ? '单条工时的上限应在 1~8 小时之间（0.5 步长）'
         : af.minChunk > af.maxChunk ? '单条工时的下限不能大于上限'
         : !(Number.isInteger(af.maxDaysPerTask) && af.maxDaysPerTask >= 1 && af.maxDaysPerTask <= 31) ? '同一任务单月最多的天数应是 1~31 的整数'
+        : !(af.maxOvertime >= 0 && af.maxOvertime <= 4 && half(af.maxOvertime)) ? '加班上限应在 0~4 小时之间（0.5 步长，0 表示不加班）'
         : af.prompt.length > 500 ? '额外要求最多 500 字' : '';
       if (err) return res.status(400).json({ success: false, message: err });
     }
@@ -805,6 +806,7 @@ router.post('/config', async (req, res) => {
       envUpdates.AUTOFILL_MIN_CHUNK = af.minChunk;
       envUpdates.AUTOFILL_MAX_CHUNK = af.maxChunk;
       envUpdates.AUTOFILL_MAX_DAYS_PER_TASK = af.maxDaysPerTask;
+      envUpdates.AUTOFILL_MAX_OVERTIME = af.maxOvertime;
       envUpdates.AUTOFILL_PROMPT = af.prompt ? Buffer.from(af.prompt, 'utf-8').toString('base64') : '';
     }
     if (workHolidays !== undefined) envUpdates.WORK_HOLIDAYS = configModule.config.workCalendar.holidays;

@@ -98,6 +98,8 @@ const config = {
     minChunk: parseFloat(process.env.AUTOFILL_MIN_CHUNK || '1') || 1,
     maxChunk: parseFloat(process.env.AUTOFILL_MAX_CHUNK || '4') || 4,
     maxDaysPerTask: parseInt(process.env.AUTOFILL_MAX_DAYS_PER_TASK || '8', 10) || 8,
+    // 每天在「补到标准工时」之外最多再随机加几小时（小幅加班，让数据不是每天刚好 8 小时）；0 = 不加班
+    maxOvertime: process.env.AUTOFILL_MAX_OVERTIME !== undefined && !isNaN(parseFloat(process.env.AUTOFILL_MAX_OVERTIME)) ? parseFloat(process.env.AUTOFILL_MAX_OVERTIME) : 2,
     prompt: process.env.AUTOFILL_PROMPT ? Buffer.from(process.env.AUTOFILL_PROMPT, 'base64').toString('utf-8') : ''
   },
 

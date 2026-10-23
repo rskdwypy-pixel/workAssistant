@@ -86,14 +86,14 @@ try {
 
   // 工时补填参数（调试页）
   const ga0 = await get('/config');
-  check('快照：补填参数有默认值（3 个任务 / 1~4 小时 / 同一任务 8 天 / 无额外要求）', JSON.stringify(ga0.data.autofill) === JSON.stringify({ maxTasksPerDay: 3, minChunk: 1, maxChunk: 4, maxDaysPerTask: 8, prompt: '' }), JSON.stringify(ga0.data.autofill));
-  for (const [bad, re] of [[{ maxTasksPerDay: 9 }, /1~5/], [{ minChunk: 5 }, /下限/], [{ maxChunk: 0.5 }, /上限/], [{ minChunk: 3, maxChunk: 2 }, /不能大于/], [{ maxDaysPerTask: 0 }, /1~31/], [{ prompt: 'x'.repeat(501) }, /500/], [{ minChunk: 1.3 }, /下限/]]) {
-    const r = await post('/config', { aiModel: 'should-not-save-3', autofill: { maxTasksPerDay: 3, minChunk: 1, maxChunk: 4, maxDaysPerTask: 8, prompt: '', ...bad } });
+  check('快照：补填参数有默认值（3 个任务 / 1~4 小时 / 同一任务 8 天 / 最多加班 2h / 无额外要求）', JSON.stringify(ga0.data.autofill) === JSON.stringify({ maxTasksPerDay: 3, minChunk: 1, maxChunk: 4, maxDaysPerTask: 8, maxOvertime: 2, prompt: '' }), JSON.stringify(ga0.data.autofill));
+  for (const [bad, re] of [[{ maxTasksPerDay: 9 }, /1~5/], [{ minChunk: 5 }, /下限/], [{ maxChunk: 0.5 }, /上限/], [{ minChunk: 3, maxChunk: 2 }, /不能大于/], [{ maxDaysPerTask: 0 }, /1~31/], [{ maxOvertime: 5 }, /加班上限/], [{ maxOvertime: -1 }, /加班上限/], [{ maxOvertime: 1.3 }, /加班上限/], [{ prompt: 'x'.repeat(501) }, /500/], [{ minChunk: 1.3 }, /下限/]]) {
+    const r = await post('/config', { aiModel: 'should-not-save-3', autofill: { maxTasksPerDay: 3, minChunk: 1, maxChunk: 4, maxDaysPerTask: 8, maxOvertime: 2, prompt: '', ...bad } });
     check(`补填参数不合法被拒（${JSON.stringify(bad).slice(0, 40)}）：400，且同一请求里的其它设置也不写`, r.status === 400 && re.test(r.message) && (await get('/config')).data.ai.aiModel !== 'should-not-save-3', JSON.stringify(r).slice(0, 120));
   }
-  const okAf = await post('/config', { autofill: { maxTasksPerDay: 2, minChunk: 1.5, maxChunk: 3, maxDaysPerTask: 5, prompt: '每条不超过 40 字' } });
+  const okAf = await post('/config', { autofill: { maxTasksPerDay: 2, minChunk: 1.5, maxChunk: 3, maxDaysPerTask: 5, maxOvertime: 0, prompt: '每条不超过 40 字' } });
   const ga1 = await get('/config');
-  check('合法的补填参数保存成功，快照与 rev 更新', okAf.success && ga1.data.autofill.maxTasksPerDay === 2 && ga1.data.autofill.minChunk === 1.5 && ga1.data.autofill.prompt === '每条不超过 40 字' && ga1.rev !== ga0.rev);
+  check('合法的补填参数保存成功，快照与 rev 更新', okAf.success && ga1.data.autofill.maxTasksPerDay === 2 && ga1.data.autofill.minChunk === 1.5 && ga1.data.autofill.maxOvertime === 0 && ga1.data.autofill.prompt === '每条不超过 40 字' && ga1.rev !== ga0.rev);
   check('写进 .env（提示词用 base64，避免换行和特殊字符）', /AUTOFILL_MAX_TASKS=2/.test(readFileSync(envFile, 'utf8')) && readFileSync(envFile, 'utf8').includes(`AUTOFILL_PROMPT=${Buffer.from('每条不超过 40 字').toString('base64')}`));
 
   // 清洗

@@ -56,6 +56,7 @@ async function buildSnapshot() {
       minChunk: cfg.autofill.minChunk,
       maxChunk: cfg.autofill.maxChunk,
       maxDaysPerTask: cfg.autofill.maxDaysPerTask,
+      maxOvertime: cfg.autofill.maxOvertime,
       prompt: cfg.autofill.prompt || ''
     },
     zentao: {

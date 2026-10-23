@@ -29,6 +29,7 @@ const DEFAULTS = {
   minChunk: 1,          // 单条最少小时（缺口不足 1 小时时例外）
   maxChunk: 4,          // 单条最多小时
   maxDaysPerTask: 8,    // 同一任务一个月里最多被抽几天
+  maxOvertime: 2,       // 每天最多额外加班几小时（设置里可调，0 = 不加班）
   maxDays: 31,          // 一次最多几天
   maxEntries: 100,      // 一次最多几条
   writeGapMs: 300,      // 两次写入之间的间隔
@@ -180,8 +181,24 @@ function limits(c = {}) {
     maxTasks: pick(c.maxTasks, cfg.maxTasksPerDay, 3),
     minChunk: pick(c.minChunk, cfg.minChunk, DEFAULTS.minChunk),
     maxChunk: pick(c.maxChunk, cfg.maxChunk, DEFAULTS.maxChunk),
-    maxDaysPerTask: pick(c.maxDaysPerTask, cfg.maxDaysPerTask, DEFAULTS.maxDaysPerTask)
+    maxDaysPerTask: pick(c.maxDaysPerTask, cfg.maxDaysPerTask, DEFAULTS.maxDaysPerTask),
+    // 加班上限允许为 0（= 不加班），所以不能和上面一样「0 当作没设」
+    maxOvertime: c.maxOvertime !== undefined ? Number(c.maxOvertime) : (Number.isFinite(cfg.maxOvertime) ? cfg.maxOvertime : DEFAULTS.maxOvertime)
   };
+}
+
+/**
+ * 这一天在「补到标准工时」之外再加几小时（小幅加班，让数据不是每天刚好 8 小时）。
+ * 0.5 步长、0 ~ maxOvertime，越小越常见（maxOvertime=2 时大约：不加班 33%、0.5h 27%、1h 20%、1.5h 13%、2h 7%）。
+ * 只加不减：补的总量永远 ≥ 补到标准工时所需的量。
+ */
+function pickOvertime(rng, maxOvertime) {
+  const steps = Math.max(0, Math.round((Number(maxOvertime) || 0) * 2));
+  if (!steps) return 0;
+  const weights = Array.from({ length: steps + 1 }, (_, k) => steps + 1 - k);   // [steps+1, …, 1]
+  let r = rng() * weights.reduce((a, b) => a + b, 0);
+  for (let k = 0; k <= steps; k++) { r -= weights[k]; if (r <= 0) return k / 2; }
+  return 0;
 }
 
 function planDay(c) {
@@ -231,16 +248,20 @@ function planDates(ctx) {
     if (isWeekend(date)) { skipped.push({ date, reason: `${restReason(date)}不补` }); continue; }
     const entryDay = daysMap[date] || { hours: 0, items: [] };
     const existing = entryDay.hours || 0;
-    const gap = round05(standard - existing);
-    if (gap < 0.5) { skipped.push({ date, reason: '这天的工时已经满了' }); continue; }
+    // 要补的量：至少补到标准工时（向上取到 0.5，所以不会比标准工时少；已经 ≥ 标准工时的不动），再加上随机的小幅加班
+    const raw = standard - existing;
+    const need = raw > 1e-9 ? Math.ceil(raw * 2 - 1e-9) / 2 : 0;
+    if (need <= 0) { skipped.push({ date, reason: '这天的工时已经满了' }); continue; }
     const pool = poolFor(date, tasks);
     if (!pool.length) { skipped.push({ date, reason: '这天没有你在做的任务可用（进行中，或当时还没完成的）' }); continue; }
     const rng = mulberry32(seedFrom(`${date}|${ctx.account || ''}|${seed || 0}`));
+    const overtime = pickOvertime(rng, limits(ctx).maxOvertime);
+    const gap = need + overtime;
     const dayExecs = [...new Set((entryDay.items || []).map(i => i.execName).filter(Boolean))];
     const entries = planDay({ date, gap, pool, history: historyByTask, dayExecs, monthUse, rng, maxDaysPerTask: ctx.maxDaysPerTask });
     if (!entries.length) { skipped.push({ date, reason: '候选任务这个月已经用得太多了' }); continue; }
     for (const e of entries) monthUse.set(e.taskId, (monthUse.get(e.taskId) || 0) + 1);
-    days.push({ date, existing: round1(existing), gap, pool: pool.map(t => ({ id: t.id, name: t.name, execName: t.execName, left: t.left, status: t.status })), entries });
+    days.push({ date, existing: round1(existing), need, overtime, gap, pool: pool.map(t => ({ id: t.id, name: t.name, execName: t.execName, left: t.left, status: t.status })), entries });
   }
   return { days, skipped };
 }
@@ -570,7 +591,7 @@ async function runJob(job, plan, days, deps) {
     const latest = (monthLatest[m][d.date] || { hours: 0 }).hours;
     const planned = plan.existing[d.date] || 0;
     // 这天自从生成方案之后又被别处补过：按最新的算剩余容量，容量不够就跳过，防止重复补
-    let capacity = latest > planned + 1e-9 ? round05(std - latest) : Infinity;
+    let capacity = latest > planned + 1e-9 ? Math.max(0, Math.ceil((std - latest) * 2 - 1e-9) / 2) : Infinity;   // 向上取到 0.5，保证补完不少于标准工时
     for (const e of d.entries) {
       if (job.stop) break;
       const base = { date: d.date, taskId: e.taskId, hours: e.hours, work: e.work };
@@ -652,6 +673,6 @@ async function undoBatch(batchId) {
 
 export {
   buildPlan, rewriteWorks, startExecution, getJob, stopJob, undoBatch, getLog,
-  poolFor, planDay, planDates, allocateHours, chooseCount, chunkCap, seedFrom, mulberry32, slimPoolTask,
+  poolFor, planDay, planDates, allocateHours, chooseCount, chunkCap, pickOvertime, seedFrom, mulberry32, slimPoolTask,
   parseWorks, templateWork, styleSamples, usableWork, redact, validateExecution, pastWorkdaysOfMonth, DEFAULTS
 };

@@ -73,6 +73,7 @@ writeFileSync(process.env.WA_ENV_FILE, '');
 const { config } = await import('../src/config.js');
 Object.assign(config.zentao, { enabled: true, url: 'http://z.test', username: 'lijc', password: 'p' });
 config.schedule.workHours = 8;
+config.autofill.maxOvertime = 0;   // 其余测试要可预期的总量（刚好补到 8h）；加班另有专门的测试
 const af = await import('../src/services/autofillService.js');
 const es = await import('../src/services/effortService.js');
 
@@ -125,6 +126,37 @@ try {
   const onlySmall = af.planDay({ date: '2025-03-14', gap: 7, pool: [{ id: '1', name: '唯一的小任务', execName: '', left: 0.9, estimate: 0, consumed: 0, deadline: '', lastEdited: '' }], history: new Map(), rng: af.mulberry32(1) });
   check('封顶：候选只有一个小任务时放宽封顶，仍然补满缺口（不留空）', onlySmall.length === 1 && onlySmall[0].hours === 4 || onlySmall.reduce((n, x) => n + x.hours, 0) === 7, JSON.stringify(onlySmall));
 
+  // ============ 小幅加班：每天不是刚好 8h，但绝不少于 8h ============
+  const tally = {}; const rngO = af.mulberry32(42);
+  for (let i = 0; i < 6000; i++) { const v = af.pickOvertime(rngO, 2); tally[v] = (tally[v] || 0) + 1; }
+  const keys = Object.keys(tally).map(Number).sort((a, b) => a - b);
+  check('加班：maxOvertime=2 时只会出现 0 / 0.5 / 1 / 1.5 / 2', keys.join() === '0,0.5,1,1.5,2', keys.join());
+  check('加班：越小越常见（0 > 0.5 > 1 > 1.5 > 2），但不加班不是绝大多数（< 45%）', tally[0] > tally[0.5] && tally[0.5] > tally[1] && tally[1] > tally[1.5] && tally[1.5] > tally[2] && tally[0] / 6000 < 0.45, JSON.stringify(tally));
+  check('加班：平均约 0.8h（0.6~1.1 之间）', (keys.reduce((s, k) => s + k * tally[k], 0) / 6000) > 0.6 && (keys.reduce((s, k) => s + k * tally[k], 0) / 6000) < 1.1);
+  check('加班：上限为 0 时永远不加班；上限 0.5 时只有 0 / 0.5', Array.from({ length: 300 }, (_, i) => af.pickOvertime(af.mulberry32(i + 1), 0)).every(v => v === 0) && new Set(Array.from({ length: 500 }, (_, i) => af.pickOvertime(af.mulberry32(i + 1), 0.5))).size === 2);
+  const otDays = []; for (let d = 1; d <= 28; d++) { const s = `2025-02-${String(d).padStart(2, '0')}`; if (![0, 6].includes(new Date(2025, 1, d).getDay())) otDays.push(s); }
+  const otPlan = (seed, extra = {}) => af.planDates({ dates: otDays, tasks: slim, daysMap: {}, standard: 8, today: '2025-03-20', seed, account: 'lijc', history: new Map(), maxOvertime: 2, ...extra });
+  const totals = new Set(); let neverLess = true, withinCap = true, sumsOk = true;
+  for (let seed = 1; seed <= 20; seed++) for (const dday of otPlan(seed).days) {
+    const tot = dday.existing + dday.entries.reduce((n, e) => n + e.hours, 0);
+    totals.add(tot); if (tot < 8 - 1e-9) neverLess = false; if (tot > 10 + 1e-9) withinCap = false;
+    if (Math.abs(dday.entries.reduce((n, e) => n + e.hours, 0) - dday.gap) > 1e-9 || dday.gap !== dday.need + dday.overtime) sumsOk = false;
+  }
+  check('加班：每天补完的总工时都不少于 8h（20 个种子 × 20 天）', neverLess);
+  check('加班：最多比标准多 2h（≤ 10h）', withinCap);
+  check('加班：总工时有变化，不是每天刚好 8h（至少出现 3 种不同的总量）', totals.size >= 3, [...totals].sort().join());
+  check('加班：每天条目的小时之和 = 要补的量（补到标准 + 加班）', sumsOk);
+  const noOt = otPlan(3, { maxOvertime: 0 });
+  check('加班上限设成 0：每天刚好补到 8h', noOt.days.every(dd => dd.overtime === 0 && dd.existing + dd.entries.reduce((n, e) => n + e.hours, 0) === 8));
+  const partial = af.planDates({ dates: ['2025-03-17'], tasks: slim, daysMap: { '2025-03-17': { hours: 6.5, items: [] } }, standard: 8, today: '2025-03-20', seed: 5, account: 'lijc', history: new Map(), maxOvertime: 2 });
+  check('已填 6.5h：至少补 1.5h（补到 8h），再加班，总量 ≥ 8h', partial.days[0].need === 1.5 && partial.days[0].existing + partial.days[0].gap >= 8);
+  const full = af.planDates({ dates: ['2025-03-17', '2025-03-18'], tasks: slim, daysMap: { '2025-03-17': { hours: 8, items: [] }, '2025-03-18': { hours: 9.5, items: [] } }, standard: 8, today: '2025-03-20', seed: 5, account: 'lijc', history: new Map(), maxOvertime: 2 });
+  check('已经 ≥ 8h 的日子（8h、9.5h）不动：不补、不减', full.days.length === 0 && full.skipped.every(s => /满了/.test(s.reason)));
+  config.autofill.maxOvertime = 1;
+  const viaCfg = af.planDates({ dates: otDays, tasks: slim, daysMap: {}, standard: 8, today: '2025-03-20', seed: 9, account: 'lijc', history: new Map() });
+  check('加班上限取自设置（没显式传时）：设成 1 → 每天最多 9h', viaCfg.days.every(dd => dd.overtime <= 1) && viaCfg.days.some(dd => dd.overtime > 0));
+  config.autofill.maxOvertime = 0;
+
   // ============ 调试页参数 ============
   const poolLim = [10, 11, 15].map(i => slim.find(t => t.id === String(i)));
   config.autofill.maxTasksPerDay = 1;
@@ -170,7 +202,8 @@ try {
   const p = af.planDates(ctx);
   const why2 = Object.fromEntries(p.skipped.map(s => [s.date, s.reason]));
   check('跳过：周末 / 今天 / 将来 / 已满 / 日期格式不对，都说明原因', /周末/.test(why2['2025-03-15']) && /今天/.test(why2['2025-03-20']) && /将来/.test(why2['2025-03-24']) && /满了/.test(why2['2025-03-18']) && /格式/.test(why2['20250301']), JSON.stringify(why2));
-  check('缺口不足 0.5h（已填 7.8h）视为已满，不补', /满了/.test(why2['2025-03-14']));
+  const d14 = p.days.find(d => d.date === '2025-03-14');
+  check('已填 7.8h（差 0.2h）：向上取到补 0.5h，补完 8.3h，不会少于标准工时', d14 && d14.need === 0.5 && d14.gap === 0.5 && d14.entries.reduce((n, e) => n + e.hours, 0) === 0.5, JSON.stringify(d14 && [d14.need, d14.gap]));
   const d17 = p.days.find(d => d.date === '2025-03-17');
   check('逐日：补的小时 = 缺口（17 日已填 2h → 补 6h），候选来自当天池', d17 && d17.gap === 6 && d17.entries.reduce((n, e) => n + e.hours, 0) === 6 && d17.entries.every(e => d17.pool.some(t => t.id === e.taskId)));
   check('逐日：已有工时的执行（迭代A）出现在权重里不报错，方案有 1~3 条', d17.entries.length >= 1 && d17.entries.length <= 3);
