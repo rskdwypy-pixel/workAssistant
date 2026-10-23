@@ -8,6 +8,7 @@
  *
  * 任务 / Bug 来自本地库，需求 / 文档来自禅道（本地缓存）；某个来源失败只提示，不影响其它卡片。
  * 标签上的角标 = 待办总数（有逾期 / 今天到期的变红），没有就不显示。
+ * 页面顶部有「工时待补」提醒（最近几个工作日不满标准工时），点一下去工作日历补填。
  * 没有刷新按钮：刷新浏览器页面即可；每次切到这个标签页都会重新汇总。
  */
 
@@ -100,7 +101,7 @@ const TodoPage = {
     if (!root) return;
     if (!root.firstChild) {
       root.innerHTML = `<div class="task-board-header"><div class="task-board-left"><h2>📌 我的待办</h2><div class="task-board-stats"><div class="stat-item"><span class="stat-label">待处理</span><span class="stat-value" id="todoStatTotal">-</span></div><div class="stat-item"><span class="stat-label">逾期/今天</span><span class="stat-value" id="todoStatUrgent">-</span></div></div></div></div>
-        <section class="todo-page"><div class="todo-grid" id="todoBody"></div></section>`;
+        <section class="todo-page"><div class="todo-gap" id="todoGap" hidden></div><div class="todo-grid" id="todoBody"></div></section>`;
     }
     this.load();
   },
@@ -149,7 +150,33 @@ const TodoPage = {
       html += `<div class="todo-errors">部分来源没取到：${d.errors.map(tdEsc).join('；')}</div>`;
     }
     body.innerHTML = html;
+    this.renderGap(d);
     body.querySelectorAll('.todo-item').forEach(b => b.addEventListener('click', () => this.go(b.dataset.kind, b.dataset.id)));
+  },
+
+  /** 工时缺填提醒：最近几个工作日里不满标准工时的；点一下跳到工作日历并打开最近那天的抽屉 */
+  renderGap(d) {
+    const el = document.getElementById('todoGap');
+    if (!el) return;
+    const gaps = (d && d.effortGaps) || [];
+    if (!gaps.length) { el.hidden = true; el.innerHTML = ''; return; }
+    const today = d.today || '';
+    const label = (date) => {
+      const diff = today ? Math.round((new Date(today + 'T00:00:00') - new Date(date + 'T00:00:00')) / 86400000) : 0;
+      return diff === 1 ? '昨天' : diff === 2 ? '前天' : `${Number(date.slice(5, 7))}月${Number(date.slice(8))}日`;
+    };
+    const fmt = (n) => `${Math.round(n * 10) / 10}`;
+    const parts = gaps.map(g => `${label(g.date)} ${fmt(g.hours)}/${fmt(g.standard)}h`);
+    el.hidden = false;
+    el.innerHTML = `<button type="button" class="todo-gap-btn" data-date="${tdEsc(gaps[0].date)}">⏱ 工时待补：${parts.map(tdEsc).join('、')} <span>去补填 ›</span></button>`;
+    el.querySelector('.todo-gap-btn').addEventListener('click', (e) => this.goEffort(e.currentTarget.dataset.date));
+  },
+
+  /** 跳到工作日历并打开某天的工时抽屉 */
+  goEffort(date) {
+    if (typeof ReportPage !== 'undefined') ReportPage.month = date.slice(0, 7);
+    if (typeof TabSwitcher !== 'undefined') TabSwitcher.switchMode('report');
+    if (typeof EffortDrawer !== 'undefined') EffortDrawer.open(date);
   },
 
   /** 跳到对应标签页，并让目标那一条高亮闪烁 */

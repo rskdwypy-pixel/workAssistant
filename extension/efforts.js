@@ -18,6 +18,8 @@ const EffortApi = {
   },
   /** 返回整个响应：{data:{month,standard,me,days}, syncedAt, fromCache}；cacheOnly 时没有缓存 days 为 null */
   month(month, { cacheOnly = false } = {}) { return this.request(`/api/efforts?month=${encodeURIComponent(month)}${cacheOnly ? '&cache=only' : ''}`); },
+  /** 全员这个月的工时：{data:{month,standard,members:[{account,name,hours,byDay}],days:{date:{total,byMember}}}}；第一次比较慢 */
+  team(month, { cacheOnly = false } = {}) { return this.request(`/api/efforts/team?month=${encodeURIComponent(month)}${cacheOnly ? '&cache=only' : ''}`); },
   tasks() { return this.request('/api/efforts/tasks'); },
   add(body) { return this.request('/api/efforts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
 };
@@ -85,6 +87,7 @@ const EffortDrawer = {
     const [y, m, d] = date.split('-').map(Number);
     el.querySelector('#effortDrawerTitle').textContent = `${m}月${d}日 ${EF_WEEKDAY[new Date(y, m - 1, d).getDay()]}`;
     this.render();
+    if (typeof ReportPage !== 'undefined' && ReportPage.lens === 'team') return;
     if (!this.tasks) {
       try { this.tasks = (await EffortApi.tasks()).data || []; } catch (err) { this.tasks = []; this.tasksError = err.message; }
       if (this.date === date && el.classList.contains('active')) this.render(true);
@@ -101,8 +104,35 @@ const EffortDrawer = {
     return !!(el && el.classList.contains('active'));
   },
 
+  /** 全员视角：这一天每个人填了多少（只读，不提供代填） */
+  renderTeam() {
+    const el = this.ensureDom();
+    const t = typeof ReportPage !== 'undefined' ? ReportPage.team : null;
+    const td = t && t.data && t.data.days ? t.data : null;
+    const std = (td && td.standard) || 8;
+    const day = (td && td.days[this.date]) || { total: 0, byMember: {} };
+    const members = td ? td.members : [];
+    const filled = members.filter(m => (day.byMember[m.account] || 0) > 0).length;
+    el.querySelector('[data-eff-meta]').textContent = td
+      ? `团队共 ${efHours(day.total)} · ${filled}/${members.length} 人已填${members.length - filled > 0 ? ` · ${members.length - filled} 人未填` : ''}`
+      : '全员工时读取中…（第一次会慢一点）';
+    const rows = members.map(m => {
+      const h = day.byMember[m.account] || 0;
+      const pct = Math.min(100, Math.round((h / std) * 100));
+      return `<div class="effort-member${h === 0 ? ' is-empty' : ''}">
+        <span class="effort-member-name">${efEsc(m.name)}</span>
+        <span class="effort-member-bar"><span class="${h >= std ? 'is-full' : h > 0 ? 'is-partial' : ''}" style="width:${pct}%"></span></span>
+        <span class="effort-member-hours">${h > 0 ? efHours(h) : '未填'}</span>
+      </div>`;
+    }).join('');
+    el.querySelector('[data-eff-body]').innerHTML = `<div class="effort-section-title">全员工时 <span class="story-count">${members.length}</span></div>
+      <div class="effort-members">${rows || '<div class="effort-empty">读取中…</div>'}</div>
+      <div class="effort-note">全员视角只读。要填自己的工时，切回「我的」再点这一天。</div>`;
+  },
+
   /** @param {boolean} [keepForm] 只刷新任务下拉时保留已填的表单内容 */
   render(keepForm = false) {
+    if (typeof ReportPage !== 'undefined' && ReportPage.lens === 'team') return this.renderTeam();
     const el = this.ensureDom();
     const { entry, standard, loaded } = this.dayData();
     // 「今天」以日历（后端）为准，与格子的未来 / 今天判断一致

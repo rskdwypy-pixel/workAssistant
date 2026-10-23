@@ -76,17 +76,27 @@ const ReportPage = {
               <button type="button" class="report-nav-btn" data-report-nav="1" title="下个月">›</button>
               <button type="button" class="report-today-btn" data-report-nav="0">本月</button>
             </div>
+            <div class="report-lens" role="tablist" aria-label="工时范围">
+              <button type="button" class="active" data-report-lens="mine" role="tab">我的</button>
+              <button type="button" data-report-lens="team" role="tab">全员</button>
+            </div>
             <button type="button" class="btn-secondary report-monthly-btn" data-report-open="monthly"></button>
           </div>
           <p class="report-hint"></p>
           <div class="report-calendar" role="grid"></div>
+          <details class="report-panel" open>
+            <summary>📈 本月统计</summary>
+            <div class="report-panel-body" id="reportPanelBody"></div>
+          </details>
         </section>`;
       root.addEventListener('click', (e) => this.onClick(e));
     }
     this.load(this.month || reportYmd(new Date()).slice(0, 7));
   },
 
-  efforts: null,       // 当前月份的工时（EffortApi.month 的整个响应）
+  efforts: null,       // 当前月份我的工时（EffortApi.month 的整个响应）
+  team: null,          // 当前月份全员工时（EffortApi.team 的整个响应）
+  lens: 'mine',        // 'mine' | 'team'
   loadToken: 0,
 
   setHint(text) {
@@ -101,6 +111,7 @@ const ReportPage = {
     const grid = root && root.querySelector('.report-calendar');
     if (!grid) return;
     if (!this.efforts || this.efforts.data.month !== month) this.efforts = null;
+    if (!this.team || this.team.data.month !== month) this.team = null;
     if (!this.data || this.data.month !== month) grid.innerHTML = '<div class="report-loading">加载中…</div>';
     try {
       const { data } = await ReportApi.calendar(month);
@@ -119,11 +130,39 @@ const ReportPage = {
         this.efforts = c;
         this.render();
         this.setHint(`缓存 ${reportClock(c.syncedAt)} · 正在更新…`);
+        if (typeof EffortDrawer !== 'undefined' && EffortDrawer.isOpen()) EffortDrawer.render(true);
       } else {
         this.setHint('正在从禅道读取工时…（第一次会慢一点）');
       }
     } catch { /* 没缓存就等最新的 */ }
     await this.reloadEfforts(token);
+    if (this.lens === 'team') await this.loadTeam(token);
+  },
+
+  /** 全员工时：先画缓存、再向禅道要最新的（第一次要读所有执行的任务，比较慢） */
+  async loadTeam(token = this.loadToken) {
+    try {
+      const c = await EffortApi.team(this.month, { cacheOnly: true });
+      if (token !== this.loadToken) return;
+      if (c.data.days) {
+        this.team = c;
+        this.render();
+        this.setHint(`全员缓存 ${reportClock(c.syncedAt)} · 正在更新…`);
+      } else {
+        this.setHint('第一次读取全员工时会比较慢（十几秒）…');
+      }
+    } catch { /* 没缓存就等最新的 */ }
+    try {
+      const t = await EffortApi.team(this.month);
+      if (token !== this.loadToken) return;
+      this.team = t;
+      this.render();
+      this.setHint(`全员已同步 ${reportClock(t.syncedAt)}`);
+      if (typeof EffortDrawer !== 'undefined' && EffortDrawer.isOpen()) EffortDrawer.render(true);
+    } catch (err) {
+      if (token !== this.loadToken) return;
+      this.setHint(this.team ? '全员更新失败，当前显示的是缓存' : `全员工时读取失败：${err.message}`);
+    }
   },
 
   /** 向禅道要最新工时并重画（填报之后也调用） */
@@ -134,6 +173,7 @@ const ReportPage = {
       this.efforts = e;
       this.render();
       this.setHint(`已同步 ${reportClock(e.syncedAt)}`);
+      if (typeof EffortDrawer !== 'undefined' && EffortDrawer.isOpen()) EffortDrawer.render(true);
     } catch (err) {
       if (token !== this.loadToken) return;
       this.setHint(this.efforts ? '更新失败，当前显示的是缓存' : `工时读取失败：${err.message}`);
@@ -167,7 +207,9 @@ const ReportPage = {
       return cells.join('');
     }).join('');
     root.querySelector('.report-calendar').innerHTML = head + rows;
+    root.querySelectorAll('[data-report-lens]').forEach(b => b.classList.toggle('active', b.dataset.reportLens === this.lens));
     this.renderStats();
+    this.renderPanel();
   },
 
   /** 某天的工时：{hours, items}；工时还没读到时 loaded=false */
@@ -182,6 +224,16 @@ const ReportPage = {
   renderStats() {
     const el = document.getElementById('reportStats');
     if (!el) return;
+    if (this.lens === 'team') {
+      const t = this.team && this.team.data;
+      if (!t || !t.days) { el.innerHTML = ''; return; }
+      const total = t.members.reduce((n, m) => n + m.hours, 0);
+      const active = t.members.filter(m => m.hours > 0).length;
+      el.innerHTML = `
+        <div class="stat-item"><span class="stat-label">团队累计</span><span class="stat-value">${fmtHours(total)}</span></div>
+        <div class="stat-item"><span class="stat-label">已填报</span><span class="stat-value">${active}/${t.members.length} 人</span></div>`;
+      return;
+    }
     const days = this.efforts && this.efforts.data && this.efforts.data.days;
     if (!days || !this.data) { el.innerHTML = ''; return; }
     const std = this.standard();
@@ -194,7 +246,99 @@ const ReportPage = {
       <div class="stat-item"><span class="stat-label">缺填</span><span class="stat-value${missing.length ? ' is-warn' : ''}"${missing.length ? ' data-effort-day="' + missing[0].date + '" style="cursor:pointer" title="点击跳到第一个缺填的日子"' : ''}>${missing.length} 天</span></div>`;
   },
 
+  /** 全员视角的日格子：团队当天总工时 + 几个人填了；过去的工作日没人填标红，所有人都填满标绿 */
+  teamDayCell(day) {
+    const n = Number(day.date.slice(8));
+    const t = this.team && this.team.data && this.team.data.days ? this.team.data : null;
+    const std = (t && t.standard) || 8;
+    const entry = (t && t.days[day.date]) || { total: 0, byMember: {} };
+    const people = Object.keys(entry.byMember).length;
+    const cls = ['report-day'];
+    if (day.weekend) cls.push('is-weekend');
+    if (day.today) cls.push('is-today');
+    if (day.future) cls.push('is-future');
+    let body = '';
+    if (t && !day.future) {
+      const everyone = t.members.length > 0 && t.members.every(m => (entry.byMember[m.account] || 0) >= std);
+      if (everyone) cls.push('is-full');
+      else if (entry.total > 0) cls.push('is-partial');
+      else if (!day.weekend && !day.today) cls.push('is-missing');
+      if (entry.total > 0) body = `<div class="report-day-mine">团队 ${fmtHours(entry.total)}</div><div class="report-day-team">${people}/${t.members.length} 人填报</div>`;
+      else if (!day.weekend && !day.today) body = '<div class="report-day-mine">没人填工时</div>';
+    }
+    const attrs = day.future ? 'aria-disabled="true"' : `data-effort-day="${day.date}" tabindex="0" role="button"`;
+    return `<div class="${cls.join(' ')}" ${attrs} title="${reportEsc(day.date)} ${WEEKDAY[day.weekday]}">
+      <div class="report-day-num">${n}${day.report ? '<span class="report-dot" title="已有日报"></span>' : ''}</div>${body}</div>`;
+  },
+
+  teamWeekCell(w) {
+    const r = w.report;
+    const attrs = w.future ? 'aria-disabled="true"' : `data-report-open="weekly" data-report-key="${w.key}" tabindex="0" role="button"`;
+    let sum = null;
+    if (this.team && this.team.data && this.team.data.days) {
+      sum = 0;
+      for (let i = 0; i < 7; i++) {
+        const dt = new Date(...w.begin.split('-').map((v, j) => (j === 1 ? Number(v) - 1 : Number(v))));
+        dt.setDate(dt.getDate() + i);
+        const e = this.team.data.days[reportYmd(dt)];
+        if (e) sum += e.total;
+      }
+    }
+    return `<div class="report-week ${r ? 'has-report' : ''} ${w.future ? 'is-future' : ''}" ${attrs} title="${reportEsc(w.label)}">
+      <div class="report-week-label">${shortDate(w.begin)}–${shortDate(w.end)}</div>
+      ${sum !== null ? `<div class="report-day-mine">团队 ${fmtHours(sum)}</div>` : ''}${r ? '' : (w.future ? '' : '<div class="report-day-pending">周报</div>')}
+    </div>`;
+  },
+
+  /** 统计面板：我的 = 按执行 / 任务 Top5；全员 = 成员 × 日期热力图 */
+  renderPanel() {
+    const el = document.getElementById('reportPanelBody');
+    if (!el) return;
+    if (this.lens === 'team') return this.renderHeatmap(el);
+    const days = this.efforts && this.efforts.data && this.efforts.data.days;
+    if (!days) { el.innerHTML = '<div class="report-muted">工时读取中…</div>'; return; }
+    const byExec = new Map(), byTask = new Map();
+    let total = 0;
+    for (const d of Object.values(days)) {
+      for (const i of d.items) {
+        total += i.consumed;
+        const ek = i.execName || '未归属执行';
+        byExec.set(ek, (byExec.get(ek) || 0) + i.consumed);
+        const t = byTask.get(i.taskId) || { name: i.taskName, exec: i.execName, hours: 0 };
+        t.hours += i.consumed;
+        byTask.set(i.taskId, t);
+      }
+    }
+    if (!total) { el.innerHTML = '<div class="report-muted">这个月还没有工时记录</div>'; return; }
+    const execs = [...byExec.entries()].sort((a, b) => b[1] - a[1]);
+    const tasks = [...byTask.values()].sort((a, b) => b.hours - a.hours).slice(0, 5);
+    const bar = (label, h, max, sub) => `<div class="report-bar-row"><span class="report-bar-label" title="${reportEsc(label)}">${reportEsc(label)}${sub ? `<em>${reportEsc(sub)}</em>` : ''}</span><span class="report-bar-track"><span style="width:${Math.max(3, Math.round((h / max) * 100))}%"></span></span><span class="report-bar-val">${fmtHours(h)}</span></div>`;
+    el.innerHTML = `<div class="report-panel-cols">
+      <div><div class="report-panel-title">按执行（${execs.length}）</div>${execs.slice(0, 8).map(([n, h]) => bar(n, h, execs[0][1])).join('')}${execs.length > 8 ? `<div class="report-muted">另有 ${execs.length - 8} 个执行…</div>` : ''}</div>
+      <div><div class="report-panel-title">工时最多的任务 Top ${tasks.length}</div>${tasks.map(t => bar(t.name, t.hours, tasks[0].hours, t.exec)).join('')}</div>
+    </div>`;
+  },
+
+  /** 成员 × 日期热力图：颜色按「当天工时 / 标准工时」分档，过去工作日没填的标红 */
+  renderHeatmap(el) {
+    const t = this.team && this.team.data && this.team.data.days ? this.team.data : null;
+    if (!t || !this.data) { el.innerHTML = '<div class="report-muted">全员工时读取中…（第一次会慢一点）</div>'; return; }
+    if (!t.members.length) { el.innerHTML = '<div class="report-muted">没有可统计的成员</div>'; return; }
+    const std = t.standard || 8;
+    const cols = this.data.days;
+    const level = (h) => (h <= 0 ? 0 : h < std * 0.5 ? 1 : h < std ? 2 : h <= std * 1.25 ? 3 : 4);
+    const head = `<th class="hm-name">成员</th><th class="hm-sum">合计</th>` + cols.map(d => `<th class="${d.weekend ? 'hm-weekend' : ''}${d.today ? ' hm-today' : ''}">${Number(d.date.slice(8))}</th>`).join('');
+    const rows = t.members.map(m => `<tr><td class="hm-name" title="${reportEsc(m.account)}">${reportEsc(m.name)}</td><td class="hm-sum">${fmtHours(m.hours)}</td>` + cols.map(d => {
+      const h = m.byDay[d.date] || 0;
+      const miss = h === 0 && !d.weekend && !d.future && !d.today;
+      return `<td class="hm-cell lv${level(h)}${miss ? ' hm-miss' : ''}${d.weekend ? ' hm-weekend' : ''}" title="${reportEsc(m.name)} ${shortDate(d.date)}：${h > 0 ? fmtHours(h) : (miss ? '未填' : '—')}"></td>`;
+    }).join('') + '</tr>').join('');
+    el.innerHTML = `<div class="report-heatmap-wrap"><table class="report-heatmap"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="report-heat-legend"><span>少</span><i class="lv1"></i><i class="lv2"></i><i class="lv3"></i><i class="lv4"></i><span>多（标准 ${std}h/天）</span><i class="hm-miss-sample"></i><span>未填</span></div>`;
+  },
+
   dayCell(day, cal) {
+    if (this.lens === 'team') return this.teamDayCell(day);
     const n = Number(day.date.slice(8));
     const r = day.report;
     const std = this.standard();
@@ -230,6 +374,7 @@ const ReportPage = {
   },
 
   weekCell(w) {
+    if (this.lens === 'team') return this.teamWeekCell(w);
     const r = w.report;
     const attrs = w.future ? 'aria-disabled="true"' : `data-report-open="weekly" data-report-key="${w.key}" tabindex="0" role="button"`;
     // 本周累计工时：日历里这一周的每一天（跨月的那几天不在本月数据里，只统计本月内的）
@@ -258,6 +403,14 @@ const ReportPage = {
       const [y, m] = this.month.split('-').map(Number);
       const d = new Date(y, m - 1 + step, 1);
       return this.load(`${d.getFullYear()}-${reportPad(d.getMonth() + 1)}`);
+    }
+    const lens = e.target.closest('[data-report-lens]');
+    if (lens) {
+      if (lens.dataset.reportLens === this.lens) return;
+      this.lens = lens.dataset.reportLens;
+      this.render();
+      if (this.lens === 'team' && !this.team) this.loadTeam();
+      return;
     }
     const day = e.target.closest('[data-effort-day]');
     if (day) return EffortDrawer.open(day.dataset.effortDay);

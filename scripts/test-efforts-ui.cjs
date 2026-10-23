@@ -6,6 +6,8 @@
  *   - 日抽屉：当天明细、还差多少；填报表单校验、提交内容（日期=所点的这天，可补填过去）；
  *     自动算剩余工时；未来日期不能填；提交成功后日历刷新
  *   - 标签页叫「工作日历」，页头标题同步
+ *   - 统计面板：按执行 / 任务 Top5；「我的 / 全员」切换：团队格子、成员 × 日期热力图、全员抽屉（只读）；
+ *     全员先画缓存再刷新、第一次慢的提示
  */
 const fs = require('fs');
 const path = require('path');
@@ -48,6 +50,18 @@ const EFFORTS = {
     '2025-03-20': { hours: 1, items: [{ effortId: '4', taskId: '11', taskName: '写文档', execName: '项目甲', consumed: 1, left: 1, work: '继续写' }] }
   }
 };
+const TEAM = {
+  month: '2025-03', standard: 8,
+  members: [
+    { account: 'wuf', name: '吴凡', role: 'dev', hours: 16, byDay: { '2025-03-17': 8, '2025-03-18': 8 } },
+    { account: 'lijc', name: '李佳成', role: 'qa', hours: 11.5, byDay: { '2025-03-17': 8, '2025-03-18': 3.5 } },
+    { account: 'zhouh', name: '周航', role: 'dev', hours: 0, byDay: {} }
+  ],
+  days: {
+    '2025-03-17': { total: 16, byMember: { wuf: 8, lijc: 8 } },
+    '2025-03-18': { total: 11.5, byMember: { wuf: 8, lijc: 3.5 } }
+  }
+};
 const TASKS = [
   { id: '10', name: '接口联调', execName: '项目甲', status: 'doing', estimate: 16, consumed: 10, left: 6 },
   { id: '12', name: '新需求评估', execName: '项目乙', status: 'wait', estimate: 4, consumed: 0, left: 4 }
@@ -68,6 +82,12 @@ function setup(state = {}) {
       if (state.freshDelay) await new Promise(r => setTimeout(r, state.freshDelay));
       if (state.freshFail) return reply({ success: false, message: '禅道连不上' }, 500);
       return reply({ success: true, data: { ...EFFORTS, days: state.days || EFFORTS.days }, syncedAt: Date.now(), fromCache: false });
+    }
+    if (u === '/api/efforts/team?month=2025-03&cache=only') return reply({ success: true, data: { ...TEAM, days: state.teamCache === undefined ? null : TEAM.days, members: state.teamCache === undefined ? null : TEAM.members }, syncedAt: 1741000000000, fromCache: true });
+    if (u === '/api/efforts/team?month=2025-03') {
+      if (state.teamDelay) await new Promise(r => setTimeout(r, state.teamDelay));
+      if (state.teamFail) return reply({ success: false, message: '禅道连不上' }, 500);
+      return reply({ success: true, data: TEAM, syncedAt: Date.now(), fromCache: false });
     }
     if (u === '/api/efforts/tasks') return reply({ success: true, data: TASKS });
     if (u === '/api/efforts' && method === 'POST') {
@@ -164,6 +184,57 @@ function setup(state = {}) {
   win.EffortDrawer.open('2025-03-25'); await tick(20);
   check('未来日期：只有提示，没有填报表单', /不能填工时/.test(doc.getElementById('effortDrawer').textContent) && !doc.querySelector('#effortDrawer .effort-form'));
   doc.querySelector('#effortDrawer [data-eff="close"]').click();
+
+  // ── 统计面板（我的）──
+  ({ win, doc, state } = setup({}));
+  win.ReportPage.month = '2025-03'; win.ReportPage.show(); await tick(60);
+  const panel = () => doc.getElementById('reportPanelBody');
+  check('统计面板：按执行（项目甲 = 8 + 3.5 + 1 = 12.5h）', /按执行/.test(panel().textContent) && /项目甲/.test(panel().textContent) && /12\.5h/.test(panel().textContent));
+  check('统计面板：任务 Top：接口联调 10h 排第一，写文档 2.5h 第二', (() => { const rows = [...panel().querySelectorAll('.report-bar-row')].map(r => r.textContent); const top = rows.filter(r => /接口联调|写文档/.test(r)); return /接口联调/.test(top[0]) && /10h/.test(top[0]) && /写文档/.test(top[top.length - 1]) && /2\.5h/.test(top[top.length - 1]); })(), [...panel().querySelectorAll('.report-bar-row')].map(r => r.textContent).join(' | '));
+
+  // ── 全员视角 ──
+  check('有「我的 / 全员」切换，默认「我的」', doc.querySelector('[data-report-lens="mine"]').classList.contains('active') && !doc.querySelector('[data-report-lens="team"]').classList.contains('active'));
+  doc.querySelector('[data-report-lens="team"]').click(); await tick(80);
+  const tcell = (d) => doc.querySelector(`[data-effort-day="2025-03-${pad(d)}"]`);
+  check('切到全员：请求了全员工时', state.reqs.some(r => r.u === '/api/efforts/team?month=2025-03'));
+  check('全员格子：团队总工时 + 几个人填报', /团队 16h/.test(tcell(17).textContent) && /2\/3 人填报/.test(tcell(17).textContent), tcell(17).textContent);
+  check('全员格子：所有人都填满才标绿；有人没填满标琥珀；没人填的过去工作日标红', tcell(18).classList.contains('is-partial') && !tcell(17).classList.contains('is-full') && tcell(19).classList.contains('is-missing') && /没人填工时/.test(tcell(19).textContent));
+  check('全员页头：团队累计 27.5h、已填报 2/3 人', /27\.5h/.test(doc.getElementById('reportStats').textContent) && /2\/3 人/.test(doc.getElementById('reportStats').textContent), doc.getElementById('reportStats').textContent);
+  check('全员周累计', /团队 27\.5h/.test(doc.querySelector('[data-report-key="2025-03-17"].report-week').textContent));
+  const hm = doc.querySelector('.report-heatmap');
+  check('热力图：每个成员一行（3 行），表头是当月每一天', hm && hm.querySelectorAll('tbody tr').length === 3 && hm.querySelectorAll('thead th').length === 2 + 31);
+  check('热力图：吴凡 3/17 = 8h 满格（lv3）', hm.querySelectorAll('tbody tr')[0].querySelectorAll('.hm-cell')[16].classList.contains('lv3'));
+  check('热力图：李佳成 3/18 = 3.5h（不足一半 lv1）', hm.querySelectorAll('tbody tr')[1].querySelectorAll('.hm-cell')[17].classList.contains('lv1'));
+  check('热力图：周航过去的工作日没填标红，周末不标红', hm.querySelectorAll('tbody tr')[2].querySelectorAll('.hm-cell')[2].classList.contains('hm-miss') && !hm.querySelectorAll('tbody tr')[2].querySelectorAll('.hm-cell')[0].classList.contains('hm-miss'));
+  check('热力图：成员合计列', /16h/.test(hm.querySelectorAll('tbody tr')[0].textContent) && /0h/.test(hm.querySelectorAll('tbody tr')[2].textContent));
+  tcell(18).click(); await tick(20);
+  const td = doc.getElementById('effortDrawer');
+  check('全员抽屉：团队共 11.5h · 2/3 人已填 · 1 人未填', /团队共 11\.5h/.test(td.querySelector('[data-eff-meta]').textContent) && /2\/3 人已填/.test(td.querySelector('[data-eff-meta]').textContent) && /1 人未填/.test(td.querySelector('[data-eff-meta]').textContent), td.querySelector('[data-eff-meta]').textContent);
+  check('全员抽屉：每人一行、没填的标「未填」，只读（没有填报表单）', td.querySelectorAll('.effort-member').length === 3 && /未填/.test(td.textContent) && !td.querySelector('.effort-form'));
+  td.querySelector('[data-eff="close"]').click();
+  doc.querySelector('[data-report-lens="mine"]').click(); await tick(20);
+  check('切回我的：格子恢复为个人工时', /8h/.test(tcell(17).textContent) && !/团队/.test(tcell(17).textContent) && !!doc.getElementById('reportPanelBody').querySelector('.report-bar-row'));
+
+  // 全员先画缓存再刷新 / 第一次慢的提示 / 失败
+  ({ win, doc, state } = setup({ teamCache: true, teamDelay: 80 }));
+  win.ReportPage.month = '2025-03'; win.ReportPage.lens = 'team'; win.ReportPage.show(); await tick(60);
+  check('全员：缓存先画出来，提示「全员缓存 · 正在更新」', !!doc.querySelector('.report-heatmap') && /全员缓存/.test(doc.getElementById('reportSyncHint').textContent) && /更新/.test(doc.getElementById('reportSyncHint').textContent), doc.getElementById('reportSyncHint').textContent);
+  await tick(120);
+  check('全员：最新数据回来后提示「全员已同步」', /全员已同步/.test(doc.getElementById('reportSyncHint').textContent));
+  ({ win, doc, state } = setup({ teamDelay: 80 }));
+  win.ReportPage.month = '2025-03'; win.ReportPage.lens = 'team'; win.ReportPage.show(); await tick(60);
+  check('全员没有缓存：提示第一次会比较慢', /第一次读取全员工时会比较慢/.test(doc.getElementById('reportSyncHint').textContent) && /读取中/.test(doc.getElementById('reportPanelBody').textContent), doc.getElementById('reportSyncHint').textContent);
+  await tick(120);
+  ({ win, doc, state } = setup({ teamFail: true }));
+  win.ReportPage.month = '2025-03'; win.ReportPage.lens = 'team'; win.ReportPage.show(); await tick(60);
+  check('全员读取失败：提示原因，页面不崩', /全员工时读取失败/.test(doc.getElementById('reportSyncHint').textContent));
+
+  // 从待办跳过来：工时还没读到时先开抽屉，读到后自动补上内容
+  ({ win, doc, state } = setup({ freshDelay: 80 }));
+  win.ReportPage.month = '2025-03'; win.ReportPage.show(); win.EffortDrawer.open('2025-03-18'); await tick(30);
+  check('工时还没读到：抽屉先显示「读取中」', /读取中/.test(doc.querySelector('#effortDrawer [data-eff-meta]').textContent));
+  await tick(150);
+  check('读到后抽屉自动更新', /已填 3\.5h/.test(doc.querySelector('#effortDrawer [data-eff-meta]').textContent), doc.querySelector('#effortDrawer [data-eff-meta]').textContent);
 
   // ── 先画缓存再刷新 ──
   ({ win, doc, state } = setup({ cache: EFFORTS.days, freshDelay: 80 }));

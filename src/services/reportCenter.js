@@ -120,6 +120,8 @@ function slimTask(t, exec) {
     openedBy: t.openedBy || '',
     openedDate: dayOf(t.openedDate),
     lastEditedDate: dayOf(t.lastEditedDate),
+    // 缓存键（精确到秒 + 累计消耗）：与工时日历共用任务工时缓存，没改过的任务不重复请求
+    sig: `${t.lastEditedDate || ''}|${t.consumed ?? ''}`,
     deadline: dayOf(t.deadline),
     executionId: String(exec.id),
     executionName: decodeZentaoText(exec.name || ''),
@@ -159,9 +161,13 @@ async function collectRaw(period, { onProgress } = {}) {
   // 记工时会更新任务的最后编辑时间：周期开始后没改过的任务不可能有周期内的工时
   const candidates = tasks.filter(t => t.lastEditedDate && t.lastEditedDate >= period.begin);
   progress(`读取 ${candidates.length} 个任务的工时记录…`);
+  const ec = await import('./effortService.js');
+  const fetched = {};
   const effortLists = await mapLimit(candidates, 6, async (t) => {
     try {
-      return (await z.getTaskEfforts(t.id, CH))
+      let all = ec.cachedTaskEfforts(t.id, t.sig);
+      if (!all) { all = await z.getTaskEfforts(t.id, CH); fetched[t.id] = { sig: t.sig, efforts: all }; }
+      return all
         .filter(e => e.date >= period.begin && e.date <= period.end && e.consumed > 0)
         .map(e => ({ ...e, taskId: t.id }));
     } catch (err) {
@@ -169,6 +175,7 @@ async function collectRaw(period, { onProgress } = {}) {
       return [];
     }
   });
+  ec.storeTaskEfforts(fetched);
 
   const myBugs = { opened: [], resolved: [] };
   try {

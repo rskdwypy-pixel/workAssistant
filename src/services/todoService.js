@@ -12,6 +12,7 @@ import { getAllTasks } from './taskManager.js';
 import { getBugs } from './bugManager.js';
 import { listStories } from './storyService.js';
 import { listDocs, listLibs } from './docService.js';
+import { getEffortGaps } from './effortService.js';
 import { config } from '../config.js';
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -117,8 +118,12 @@ async function getTodos(now = new Date()) {
     groups.push({ key: 'doc', label: '文档', items });
   } catch (e) { errors.push(`文档：${e.message}`); }
 
+  // 工时缺填提醒：最近几个工作日里不满标准工时的（取不到就不提醒，不算错误）
+  let effortGaps = [];
+  try { effortGaps = await getEffortGaps({ now }); } catch { /* 没连禅道等：不提醒 */ }
+
   const total = groups.reduce((n, g) => n + g.items.length, 0);
-  return { today, total, groups, errors };
+  return { today, total, groups, errors, effortGaps };
 }
 
 export { getTodos, dueState, bySeverity, pickStories };

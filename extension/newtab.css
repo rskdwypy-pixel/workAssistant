@@ -3363,3 +3363,60 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
 .effort-fill { align-self: flex-start; border: 1px dashed var(--border); background: transparent; color: var(--primary); border-radius: var(--radius-sm); padding: 5px 10px; font-size: 12px; cursor: pointer; }
 .effort-fill:hover { border-color: var(--primary); }
 .effort-actions { display: flex; justify-content: flex-end; }
+
+/* 待办页：工时缺填提醒 */
+.todo-gap { margin-bottom: 14px; }
+.todo-gap-btn { display: block; width: 100%; text-align: left; border: 1px solid rgba(245, 158, 11, .45); background: rgba(245, 158, 11, .09); color: #92400e; border-radius: var(--radius); padding: 10px 14px; font-size: 13px; cursor: pointer; }
+.todo-gap-btn:hover { background: rgba(245, 158, 11, .16); }
+.todo-gap-btn span { float: right; font-weight: 600; }
+.todo-grid { height: calc(100vh - 290px); }
+.todo-gap[hidden] + .todo-grid { height: calc(100vh - 230px); }
+
+/* 工作日历：我的 / 全员 切换、统计面板、热力图、全员抽屉 */
+.report-lens { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.report-lens button { border: 0; background: var(--bg-surface); color: var(--text-secondary); padding: 6px 14px; font-size: 13px; cursor: pointer; }
+.report-lens button + button { border-left: 1px solid var(--border); }
+.report-lens button.active { background: var(--primary); color: #fff; }
+.report-panel { margin-top: 18px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-surface); }
+.report-panel > summary { cursor: pointer; padding: 12px 16px; font-weight: 600; font-size: 14px; list-style: none; }
+.report-panel > summary::-webkit-details-marker { display: none; }
+.report-panel-body { padding: 0 16px 16px; }
+.report-panel-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+@media (max-width: 900px) { .report-panel-cols { grid-template-columns: 1fr; } }
+.report-panel-title { font-size: 12px; color: var(--text-secondary); font-weight: 600; margin-bottom: 8px; }
+.report-bar-row { display: grid; grid-template-columns: minmax(80px, 38%) 1fr 48px; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+.report-bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.report-bar-label em { font-style: normal; color: var(--text-muted); margin-left: 6px; }
+.report-bar-track { height: 8px; background: var(--bg-base); border-radius: 4px; overflow: hidden; }
+.report-bar-track span { display: block; height: 100%; background: var(--primary); border-radius: 4px; }
+.report-bar-val { text-align: right; color: var(--text-secondary); }
+.report-muted { color: var(--text-muted); font-size: 13px; padding: 8px 0; }
+.report-heatmap-wrap { overflow-x: auto; }
+.report-heatmap { border-collapse: separate; border-spacing: 2px; font-size: 11px; }
+.report-heatmap th { font-weight: 500; color: var(--text-muted); padding: 0 2px; min-width: 16px; }
+.report-heatmap th.hm-weekend { opacity: .5; }
+.report-heatmap th.hm-today { color: var(--primary); font-weight: 700; }
+.report-heatmap td.hm-name, .report-heatmap th.hm-name { text-align: left; padding-right: 10px; white-space: nowrap; position: sticky; left: 0; background: var(--bg-surface); }
+.report-heatmap td.hm-sum, .report-heatmap th.hm-sum { text-align: right; padding-right: 10px; color: var(--text-secondary); white-space: nowrap; }
+.hm-cell { width: 16px; height: 16px; border-radius: 3px; background: var(--bg-base); }
+.hm-cell.hm-weekend { opacity: .55; }
+.hm-cell.lv1 { background: rgba(99, 102, 241, .25); }
+.hm-cell.lv2 { background: rgba(99, 102, 241, .5); }
+.hm-cell.lv3 { background: var(--primary); }
+.hm-cell.lv4 { background: var(--primary-dark); }
+.hm-cell.hm-miss { background: rgba(239, 68, 68, .22); }
+.report-heat-legend { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 11px; color: var(--text-muted); }
+.report-heat-legend i { width: 14px; height: 14px; border-radius: 3px; display: inline-block; background: var(--bg-base); }
+.report-heat-legend i.lv1 { background: rgba(99, 102, 241, .25); }
+.report-heat-legend i.lv2 { background: rgba(99, 102, 241, .5); }
+.report-heat-legend i.lv3 { background: var(--primary); }
+.report-heat-legend i.lv4 { background: var(--primary-dark); }
+.report-heat-legend i.hm-miss-sample { background: rgba(239, 68, 68, .22); margin-left: 12px; }
+.effort-members { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.effort-member { display: grid; grid-template-columns: 90px 1fr 56px; align-items: center; gap: 10px; font-size: 13px; }
+.effort-member.is-empty .effort-member-name { color: var(--text-muted); }
+.effort-member-bar { height: 8px; background: var(--bg-base); border-radius: 4px; overflow: hidden; }
+.effort-member-bar span { display: block; height: 100%; background: var(--primary); border-radius: 4px; }
+.effort-member-bar span.is-partial { background: var(--warning); }
+.effort-member-bar span.is-full { background: var(--success); }
+.effort-member-hours { text-align: right; color: var(--text-secondary); }
