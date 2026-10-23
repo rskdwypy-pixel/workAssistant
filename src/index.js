@@ -8,6 +8,7 @@ import attachmentsRouter from './routes/attachments.js';
 import reportsRouter from './routes/reports.js';
 import docsRouter from './routes/docs.js';
 import storiesRouter from './routes/stories.js';
+import todosRouter from './routes/todos.js';
 import accountRouter from './routes/account.js';
 import { startAttachmentRetry } from './services/attachmentSync.js';
 import { startReminder } from './services/reminder.js';
@@ -48,6 +49,7 @@ app.use('/api', attachmentsRouter);
 app.use('/api', reportsRouter);
 app.use('/api', docsRouter);
 app.use('/api', storiesRouter);
+app.use('/api', todosRouter);
 app.use('/api', accountRouter);
 app.use('/api', updateRouter);
 

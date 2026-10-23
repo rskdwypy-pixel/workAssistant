@@ -7369,6 +7369,11 @@ const TabSwitcher = {
     // 恢复上次选择的标签页
     const lastMode = localStorage.getItem('lastTabMode') || 'task';
     this.switchMode(lastMode);
+    // 待办角标：启动时取一次，之后每 5 分钟刷新
+    if (typeof TodoPage !== 'undefined') {
+      TodoPage.refreshBadge();
+      setInterval(() => TodoPage.refreshBadge(), 5 * 60 * 1000);
+    }
   },
 
   switchMode(mode) {
@@ -7433,6 +7438,8 @@ const TabSwitcher = {
       if (typeof DocPage !== 'undefined') DocPage.show();
     } else if (mode === 'story') {
       if (typeof StoryPage !== 'undefined') StoryPage.show();
+    } else if (mode === 'todo') {
+      if (typeof TodoPage !== 'undefined') TodoPage.show();
     } else if (mode === 'bug') {
       if (typeof BugManager !== 'undefined' && BugManager.loadBugs) {
         BugManager.loadBugs();

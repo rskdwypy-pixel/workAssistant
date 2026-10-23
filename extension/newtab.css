@@ -3301,3 +3301,20 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
   .story-page { grid-template-columns: 1fr; }
   .story-side { position: static; flex-direction: row; flex-wrap: wrap; max-height: none; }
 }
+
+/* 我的待办 */
+.tab-btn .tab-badge { margin-left: 6px; min-width: 16px; padding: 0 5px; border-radius: 8px; background: #e5484d; color: #fff; font-size: 11px; line-height: 16px; display: inline-block; text-align: center; }
+.todo-page { max-width: 860px; margin: 0 auto; padding: 4px 2px 24px; }
+.todo-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.todo-head h2 { margin: 0; font-size: 18px; }
+.todo-sub { flex: 1; color: var(--text-secondary); font-size: 13px; }
+.todo-group { margin-bottom: 16px; }
+.todo-group-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
+.todo-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); border-radius: var(--radius-sm); padding: 9px 12px; margin-bottom: 6px; cursor: pointer; font-size: 13px; }
+.todo-item:hover { border-color: var(--primary); }
+.todo-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.todo-meta { color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
+.todo-due { font-size: 11px; padding: 1px 7px; border-radius: 9px; background: rgba(127,127,127,.15); white-space: nowrap; }
+.todo-due.due-overdue { background: #e5484d; color: #fff; }
+.todo-due.due-today { background: #f5a524; color: #fff; }
+.todo-errors { color: var(--text-secondary); font-size: 12px; margin-top: 8px; }
