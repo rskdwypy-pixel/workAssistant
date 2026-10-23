@@ -3501,3 +3501,5 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
 .report-rest-tag, .report-work-tag { font-size: 10px; font-weight: 700; line-height: 1; padding: 2px 4px; border-radius: 4px; }
 .report-rest-tag { background: rgba(16, 185, 129, .15); color: #047857; }
 .report-work-tag { background: rgba(239, 68, 68, .14); color: var(--danger); }
+.af-note-info { background: rgba(99, 102, 241, .08); border-color: rgba(99, 102, 241, .3); color: var(--text-secondary); }
+.af-why { padding: 4px 0; font-size: 13px; color: var(--text-secondary); text-align: center; }

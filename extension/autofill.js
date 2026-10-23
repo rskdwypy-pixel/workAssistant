@@ -143,9 +143,14 @@ const AutofillDialog = {
     let html = '';
     if (!p.aiAvailable) html += `<div class="af-note">没有配置 AI：工作内容用了你以前写过的内容或任务名，可以逐条修改；到「设置 → AI」配置后能写得更贴合。</div>`;
     else if (days.length && !p.aiUsed) html += `<div class="af-note">AI 这次没有返回可用的内容，已改用模板，可以逐条修改或点「重写内容」重试。</div>`;
-    if (!days.length) html += `<div class="af-center"><p>没有可补的日子</p></div>`;
+    const doneUsed = days.some(d => d.entries.some(e => e.taskStatus === 'done'));
+    if (doneUsed) html += `<div class="af-note af-note-info">部分条目补在「已完成」的任务上：这些任务当时正在做，禅道允许补记工时，任务状态和完成日期不会变。</div>`;
+    if (!days.length) {
+      // 一天都补不了：原因直接摆出来（以前折叠在底下，只看到一句「没有可补的日子」）
+      html += `<div class="af-center"><p>没有可补的日子</p></div>` + (p.skipped || []).map(s => `<div class="af-why"><b>${afEsc(s.date)}</b> ${afEsc(s.reason)}</div>`).join('');
+    }
     html += days.map(d => this.dayHtml(d)).join('');
-    if (p.skipped && p.skipped.length) {
+    if (days.length && p.skipped && p.skipped.length) {
       html += `<details class="af-skipped"><summary>跳过的 ${p.skipped.length} 天（点开看原因）</summary>${p.skipped.map(s => `<div><b>${afEsc(s.date)}</b> ${afEsc(s.reason)}</div>`).join('')}</details>`;
     }
     body.innerHTML = html;
@@ -182,7 +187,7 @@ const AutofillDialog = {
 
   entryHtml(d, e, i) {
     return `<div class="af-entry" data-i="${i}">
-      <select data-af-field="taskId" aria-label="任务">${d.pool.map(t => `<option value="${afEsc(t.id)}"${t.id === e.taskId ? ' selected' : ''}>${afEsc(t.name)}${t.execName ? ` · ${afEsc(t.execName)}` : ''}</option>`).join('')}</select>
+      <select data-af-field="taskId" aria-label="任务">${d.pool.map(t => `<option value="${afEsc(t.id)}"${t.id === e.taskId ? ' selected' : ''}>${afEsc(t.name)}${t.execName ? ` · ${afEsc(t.execName)}` : ''}${t.status === 'done' ? ' · 已完成' : ''}</option>`).join('')}</select>
       <input type="number" data-af-field="hours" min="0.5" max="24" step="0.5" value="${afEsc(e.hours)}" aria-label="小时" />
       <button type="button" class="af-del" data-af="del" title="删掉这一条" aria-label="删除">✕</button>
       <textarea data-af-field="work" rows="2" aria-label="工作内容">${afEsc(e.work)}</textarea>
@@ -261,7 +266,7 @@ const AutofillDialog = {
         return;
       }
       const tk = d.pool.find(x => x.id === t.value);
-      entry.taskId = t.value; entry.taskName = tk ? tk.name : ''; entry.execName = tk ? tk.execName : '';
+      entry.taskId = t.value; entry.taskName = tk ? tk.name : ''; entry.execName = tk ? tk.execName : ''; entry.taskStatus = tk ? tk.status : '';
     }
     this.refreshTotals(d, t.closest('.af-day'));
   },

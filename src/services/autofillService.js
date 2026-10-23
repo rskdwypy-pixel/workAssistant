@@ -8,8 +8,12 @@
  *   undoBatch(batchId)               撤销一批：逐条删除这批写入的、仍然存在且没被改过的工时
  *   getLog()                         补填记录
  *
- * 选任务的硬条件（全满足才进候选池）：指派给我、状态「进行中」、在那一天已经存在（创建 / 预计开始 /
- * 实际开始都不晚于当天）、剩余工时 > 0。写入时剩余一律沿用任务当前值——不改任务的剩余、不触发「完成」。
+ * 选任务的硬条件：只用「那一天正在做」的任务——
+ *   · 现在「进行中」：当天已存在（创建 / 预计开始 / 实际开始都不晚于当天）且剩余工时 > 0；
+ *   · 现在「已完成」但当天还没完成（当天已存在且 当天 ≤ 完成日）：补历史最需要的就是这类任务。
+ *     已用真实禅道验证：在已完成的任务上补记工时，状态 / 完成日期都不变，剩余仍为 0。
+ * 「未开始 / 暂停」不用：在未开始的任务上记工时会让禅道自动开始它，并把实际开始设成「现在」，删掉工时也回不去。
+ * 进行中任务写入时剩余沿用当前值（不改剩余、不触发「完成」）；已完成任务传 0 并确认完成（它本来就完成了）。
  * 随机是可复现的（种子 = 日期 + 账号 + 点击次数）；写入的每一条都记在 data/autofill-log.json，可撤销。
  */
 import { randomBytes } from 'crypto';
@@ -96,21 +100,25 @@ function slimPoolTask(t) {
     estStarted: day10(t.estStarted),
     realStarted: day10(t.realStarted),
     deadline: day10(t.deadline),
-    lastEdited: day10(t.lastEditedDate)
+    lastEdited: day10(t.lastEditedDate),
+    finishedBy: String(t.finishedBy || ''),
+    finished: day10(t.finishedDate)
   };
 }
 
 /**
- * 某一天的候选池（硬条件，全满足才进池）：
- *   进行中 + 剩余 > 0 + 那天已经存在（创建 / 预计开始 / 实际开始都不晚于当天）
- * 「未开始 / 暂停」不进池：在上面记工时可能改变任务状态；「已结束」的禅道本来就不让记。
+ * 某一天的候选池：只用「那一天正在做」的任务（先要求当天已存在：创建 / 预计开始 / 实际开始都不晚于当天）——
+ *   · 进行中：剩余工时 > 0
+ *   · 已完成：当天还没完成（当天 ≤ 完成日）。已验证禅道允许在已完成的任务上补记工时且不改变其状态
+ * 其它状态不进池：未开始 / 暂停（记工时会让禅道自动开始它）、已关闭 / 已取消（没验证过）。
  */
 function poolFor(date, tasks) {
-  return tasks.filter(t =>
-    t.status === 'doing' && t.left > 0 &&
-    (!t.opened || t.opened <= date) &&
-    (!t.estStarted || t.estStarted <= date) &&
-    (!t.realStarted || t.realStarted <= date));
+  return tasks.filter(t => {
+    if ((t.opened && t.opened > date) || (t.estStarted && t.estStarted > date) || (t.realStarted && t.realStarted > date)) return false;
+    if (t.status === 'doing') return t.left > 0;
+    if (t.status === 'done') return !t.finished || date <= t.finished;
+    return false;
+  });
 }
 
 /* ───────────────────────── 选任务 + 分配小时 ───────────────────────── */
@@ -124,6 +132,7 @@ function chooseCount(gap, available, rng, { maxTasks = 3, minChunk = DEFAULTS.mi
 
 /** 一条最多分多少小时：不超过 maxChunk，也不超过该任务剩余工时的 1.5 倍（剩 0.9h 的任务不该一天记 3.5h），至少 1h */
 function chunkCap(task, maxChunk = DEFAULTS.maxChunk) {
+  if (task.status === 'done') return maxChunk;   // 已完成的任务没有「剩余」可参照
   return Math.max(1, Math.min(maxChunk, round05((Number(task.left) || 0) * 1.5)));
 }
 
@@ -188,6 +197,7 @@ function planDay(c) {
     if (t.execName && dayExecs.includes(t.execName)) w += 1.5;             // 与当天已有工时同一个执行
     if (t.deadline && daysBetween(date, t.deadline) >= 0 && daysBetween(date, t.deadline) <= 7) w += 1;   // 临近截止
     if (t.lastEdited && Math.abs(daysBetween(t.lastEdited, date)) <= 3) w += 1;                          // 最近编辑过
+    if (t.status === 'done' && t.finished && daysBetween(date, t.finished) <= 7) w += 1.5;                 // 当时在做、不久后完成的任务
     const used = monthUse.get(t.id) || 0;
     if (used > 0) w *= Math.max(0.25, 1 - used * 0.12);                    // 本月已经被抽过的降权
     if (t.estimate > 0 && t.consumed >= t.estimate) w *= 0.4;              // 预计工时已用完
@@ -203,7 +213,7 @@ function planDay(c) {
     picked.push(...weightedSample(rest, rest.map(t => weights[pool.indexOf(t)]), 1, rng));
   }
   const hours = allocateHours(gap, picked.length, rng, { minChunk: lim.minChunk, maxChunk, caps: picked.map(t => chunkCap(t, maxChunk)) });
-  return picked.map((t, i) => ({ taskId: t.id, taskName: t.name, execName: t.execName, hours: hours[i] }));
+  return picked.map((t, i) => ({ taskId: t.id, taskName: t.name, execName: t.execName, taskStatus: t.status, hours: hours[i] }));
 }
 
 /**
@@ -224,13 +234,13 @@ function planDates(ctx) {
     const gap = round05(standard - existing);
     if (gap < 0.5) { skipped.push({ date, reason: '这天的工时已经满了' }); continue; }
     const pool = poolFor(date, tasks);
-    if (!pool.length) { skipped.push({ date, reason: '没有当天已存在的进行中任务（剩余工时 > 0）' }); continue; }
+    if (!pool.length) { skipped.push({ date, reason: '这天没有你在做的任务可用（进行中，或当时还没完成的）' }); continue; }
     const rng = mulberry32(seedFrom(`${date}|${ctx.account || ''}|${seed || 0}`));
     const dayExecs = [...new Set((entryDay.items || []).map(i => i.execName).filter(Boolean))];
     const entries = planDay({ date, gap, pool, history: historyByTask, dayExecs, monthUse, rng, maxDaysPerTask: ctx.maxDaysPerTask });
     if (!entries.length) { skipped.push({ date, reason: '候选任务这个月已经用得太多了' }); continue; }
     for (const e of entries) monthUse.set(e.taskId, (monthUse.get(e.taskId) || 0) + 1);
-    days.push({ date, existing: round1(existing), gap, pool: pool.map(t => ({ id: t.id, name: t.name, execName: t.execName, left: t.left })), entries });
+    days.push({ date, existing: round1(existing), gap, pool: pool.map(t => ({ id: t.id, name: t.name, execName: t.execName, left: t.left, status: t.status })), entries });
   }
   return { days, skipped };
 }
@@ -239,17 +249,32 @@ function planDates(ctx) {
 
 const AUTO_WORK = /更新进度至|^工作内容进度更新$|^进度更新/;
 const FORBIDDEN_WORK = /已完成|已上线|验收通过|#\d+|\d+\s*%|v\d+\.\d+/i;
+// 含账号 / 密码 / 链接 / 长数字串的内容：既不能原样抄进新的工时记录，也不能当「写作样例」发给 AI 服务商
+const SENSITIVE_WORK = /账号|账户|密码|口令|password|passwd|pwd|token|secret|api[_-]?key|https?:\/\/|[A-Za-z]+\d{5,}|\d{6,}/i;
 
-/** 用户自己写过的内容（去掉系统自动生成的），用来学口吻 */
+/** 这条历史内容能不能拿来当样例 / 模板：长度合适、不是系统自动生成的、不含敏感信息 */
+function usableWork(w) {
+  return typeof w === 'string' && w.length >= 4 && w.length <= 80 && !AUTO_WORK.test(w) && !SENSITIVE_WORK.test(w);
+}
+
+/** 去掉任务描述里的链接和「账号 / 密码：xxx」，再发给 AI */
+function redact(text) {
+  return String(text || '')
+    .replace(/https?:\/\/\S+/gi, '')
+    .replace(/(账号|账户|密码|口令|password|passwd|token)\s*[:：=]?\s*\S+/gi, '')
+    .replace(/\s+/g, ' ').trim();
+}
+
+/** 用户自己写过的内容（去掉系统自动生成的、含敏感信息的），用来学口吻 */
 function styleSamples(history, limit = 8) {
   const all = [];
-  for (const list of history.values()) for (const h of list) if (h.work && !AUTO_WORK.test(h.work) && h.work.length >= 4) all.push(h);
+  for (const list of history.values()) for (const h of list) if (usableWork(h.work)) all.push(h);
   return all.sort((a, b) => b.date.localeCompare(a.date)).slice(0, limit).map(h => h.work);
 }
 
 /** AI 不可用时的内容：该任务自己以前写过的 → 没有就用任务名 */
 function templateWork(task, history, rng) {
-  const own = (history.get(task.taskId) || []).map(h => h.work).filter(w => w && !AUTO_WORK.test(w) && w.length >= 4);
+  const own = (history.get(task.taskId) || []).map(h => h.work).filter(usableWork);
   if (own.length) return own[Math.floor(rng() * own.length)];
   return `推进「${task.taskName}」相关工作`;
 }
@@ -261,7 +286,7 @@ async function describeTask(taskId, CH) {
   let text = '';
   try {
     const d = await getZentaoJson(`task-view-${taskId}.json?onlybody=yes`, CH);
-    text = decodeZentaoText(String((d && d.task && d.task.desc) || '')).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+    text = redact(decodeZentaoText(String((d && d.task && d.task.desc) || '')).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ')).slice(0, 200);
   } catch { /* 取不到描述就只用任务名 */ }
   taskDescCache.set(taskId, { at: Date.now(), text });
   return text;
@@ -289,7 +314,11 @@ function parseWorks(text, n) {
   const m = String(text || '').match(/\[[\s\S]*\]/);
   if (!m) return null;
   let arr;
-  try { arr = JSON.parse(m[0]); } catch { return null; }
+  try { arr = JSON.parse(m[0]); } catch {
+    // AI 偶尔在 JSON 里多打 / 少打一个引号，整段就解析不了：退一步，逐条把 {"i":N, "work":"…"} 抠出来
+    arr = [...m[0].matchAll(/"i"\s*:\s*"?(\d+)"?\s*,\s*"work"\s*:\s*"((?:[^"\\]|\\.)*)"/g)].map(x => ({ i: Number(x[1]), work: x[2].replace(/\\(.)/g, '$1') }));
+    if (!arr.length) return null;
+  }
   if (!Array.isArray(arr)) return null;
   const out = new Array(n).fill(null);
   for (const x of arr) {
@@ -309,12 +338,17 @@ async function writeWorks({ date, entries, history, CH, ai, rng }) {
   const samples = styleSamples(history);
   const items = [];
   for (const e of entries) {
-    items.push({ ...e, desc: ai ? await describeTask(e.taskId, CH) : '', recent: (history.get(e.taskId) || []).map(h => h.work).filter(w => w && !AUTO_WORK.test(w)).slice(-3) });
+    items.push({ ...e, desc: ai ? await describeTask(e.taskId, CH) : '', recent: (history.get(e.taskId) || []).map(h => h.work).filter(usableWork).slice(-3) });
   }
   let works = null;
   if (ai) {
-    try { works = parseWorks(await ai(buildWorkPrompt({ date, items, samples, extra: (config.autofill && config.autofill.prompt) || '' }), 700), entries.length); }
-    catch (err) { console.warn('[Autofill] AI 写内容失败，改用模板:', err.message); }
+    const prompt = buildWorkPrompt({ date, items, samples, extra: (config.autofill && config.autofill.prompt) || '' });
+    // 一次没写好（调用失败 / 解析不出 / 超过一半条目不合格）再试一次，还不行才退回模板
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try { works = parseWorks(await ai(prompt, 700), entries.length); }
+      catch (err) { console.warn('[Autofill] AI 写内容失败:', err.message); works = null; }
+      if (works && works.filter(Boolean).length * 2 >= entries.length) break;
+    }
   }
   const used = new Set();
   return entries.map((e, i) => {
@@ -346,9 +380,16 @@ function pastWorkdaysOfMonth(month, today) {
   return out;
 }
 
+/** 候选来源：指派给我的任务（进行中 / 已完成等），加上我完成的（已完成）。按任务 id 去重 */
 async function fetchPoolTasks(CH) {
-  const { items } = await fetchMyList('task', 'assignedTo', CH);
-  return items.filter(t => t && t.id && String(t.deleted) !== '1').map(slimPoolTask);
+  const [assigned, finished] = await Promise.all([
+    fetchMyList('task', 'assignedTo', CH),
+    fetchMyList('task', 'finishedBy', CH).catch(() => ({ items: [] }))
+  ]);
+  const byId = new Map();
+  for (const t of assigned.items) if (t && t.id && String(t.deleted) !== '1') byId.set(String(t.id), slimPoolTask(t));
+  for (const t of finished.items) if (t && t.id && String(t.deleted) !== '1' && t.status === 'done' && !byId.has(String(t.id))) byId.set(String(t.id), slimPoolTask(t));
+  return [...byId.values()];
 }
 
 /**
@@ -536,11 +577,13 @@ async function runJob(job, plan, days, deps) {
       const t = tasksNow.get(e.taskId);
       if (latest >= std && latest > planned + 1e-9) { addResult({ ...base, status: 'skipped', error: '这天的工时已被补满，跳过' }); continue; }
       if (e.hours > capacity + 1e-9) { addResult({ ...base, status: 'skipped', error: '这天已有新增工时，剩余容量不够，跳过' }); continue; }
-      if (!t || t.status !== 'doing' || !(t.left > 0)) { addResult({ ...base, status: 'skipped', error: '任务已不是「进行中」或剩余工时为 0，跳过' }); continue; }
+      if (!t || !poolFor(d.date, [t]).length) { addResult({ ...base, status: 'skipped', error: '任务的状态变了，这天已经不适合补在它上面，跳过' }); continue; }
       try {
         const ids = await knownFor(e.taskId);
-        // 剩余沿用任务当前值：不改变任务剩余，也不会触发「完成」
-        const r = await addEffort({ taskId: e.taskId, date: d.date, consumed: e.hours, left: t.left, work: e.work, finish: false });
+        // 进行中的任务：剩余沿用当前值（不改剩余、不触发「完成」）；已完成的任务：传 0 并确认完成（它本来就完成了，
+        // 已验证禅道会忽略剩余、任务状态和完成日期都不变）
+        const isDone = t.status === 'done';
+        const r = await addEffort({ taskId: e.taskId, date: d.date, consumed: e.hours, left: isDone ? 0 : t.left, work: e.work, finish: isDone });
         if (!r || !r.success) throw new Error((r && r.message) || '禅道没有接受');
         const list = await getTaskEfforts(e.taskId, CH);
         const rec = list.find(x => !ids.has(x.id) && x.date === d.date && x.work === e.work);
@@ -610,5 +653,5 @@ async function undoBatch(batchId) {
 export {
   buildPlan, rewriteWorks, startExecution, getJob, stopJob, undoBatch, getLog,
   poolFor, planDay, planDates, allocateHours, chooseCount, chunkCap, seedFrom, mulberry32, slimPoolTask,
-  parseWorks, templateWork, styleSamples, validateExecution, pastWorkdaysOfMonth, DEFAULTS
+  parseWorks, templateWork, styleSamples, usableWork, redact, validateExecution, pastWorkdaysOfMonth, DEFAULTS
 };

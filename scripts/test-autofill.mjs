@@ -20,9 +20,11 @@ const TASKS = [
   T({ id: '10', name: '接口联调', left: '6', estimate: '20', desc: '<p>和后端联调订单接口</p>' }),
   T({ id: '11', name: '写文档', left: '4', openedDate: '2025-03-05 09:00:00', desc: '补接口文档' }),
   T({ id: '12', name: '未开始的任务', status: 'wait', left: '8' }),
-  T({ id: '13', name: '已完成的任务', status: 'done', left: '0' }),
+  T({ id: '13', name: '3/10 完成的任务', status: 'done', left: '0', estimate: '6', consumed: '6', finishedBy: 'lijc', finishedDate: '2025-03-10 17:00:00' }),
   T({ id: '14', name: '剩余为 0 的任务', left: '0' }),
-  T({ id: '15', name: '实际开始较晚的任务', left: '5', realStarted: '2025-03-12 09:00:00' })
+  T({ id: '15', name: '实际开始较晚的任务', left: '5', realStarted: '2025-03-12 09:00:00' }),
+  T({ id: '16', name: '2 月就完成的任务', status: 'done', left: '0', finishedBy: 'lijc', finishedDate: '2025-02-01 17:00:00' }),
+  T({ id: '17', name: '已关闭的任务', status: 'closed', left: '0', finishedBy: 'lijc', finishedDate: '2025-03-01 17:00:00' })
 ];
 const reset = () => {
   zt.adds = []; zt.deletes = []; zt.nextId = 5000; zt.failTask = '';
@@ -42,7 +44,8 @@ globalThis.fetch = async (input, init = {}) => {
   if (url.includes('user-login')) return new Response(JSON.stringify({ result: 'success' }), { headers: { 'Content-Type': 'application/json' } });
   let m;
   if ((m = url.match(/my-task-(\w+)-0-/))) {
-    const list = m[1] === 'assignedTo' ? TASKS.map(t => ({ ...t, consumed: String(consumedOf(t.id)), lastEditedDate: zt.efforts[t.id] && zt.efforts[t.id].length ? `2025-03-19 10:00:${String(consumedOf(t.id) % 60).padStart(2, '0')}` : t.lastEditedDate })) : [];
+    const base = m[1] === 'assignedTo' ? TASKS : m[1] === 'finishedBy' ? TASKS.filter(x => x.status === 'done' && x.finishedBy === 'lijc') : [];
+    const list = m[1] === 'assignedTo' || m[1] === 'finishedBy' ? base.map(t => ({ ...t, consumed: String(consumedOf(t.id)), lastEditedDate: zt.efforts[t.id] && zt.efforts[t.id].length ? `2025-03-19 10:00:${String(consumedOf(t.id) % 60).padStart(2, '0')}` : t.lastEditedDate })) : [];
     return json({ tasks: Object.fromEntries(list.map(t => [t.id, t])), pager: { pageTotal: 1 } });
   }
   if ((m = url.match(/task-view-(\d+)\.json/))) return json({ task: TASKS.find(t => t.id === m[1]) || {} });
@@ -80,8 +83,11 @@ try {
   // ============ 候选池 ============
   const slim = TASKS.map(af.slimPoolTask);
   const pool0303 = af.poolFor('2025-03-03', slim).map(t => t.id);
-  check('候选池：只有「进行中 + 剩余 > 0 + 那天已存在」的任务', pool0303.join() === '10', pool0303.join());
-  check('候选池：不含未开始 / 已完成 / 剩余为 0 的任务', !['12', '13', '14'].some(id => af.poolFor('2025-03-18', slim).some(t => t.id === id)));
+  check('候选池：进行中（剩余 > 0）+ 当时还没完成的已完成任务（3/10 才完成的 13 号）', pool0303.join() === '10,13', pool0303.join());
+  check('候选池：不含未开始（12）、剩余为 0 的进行中（14）、早已完成的（16）、已关闭的（17）', !['12', '14', '16', '17'].some(id => af.poolFor('2025-03-05', slim).some(t => t.id === id)));
+  check('候选池：已完成的任务只在完成日及之前可用（13 号 3/10 完成：3/10 可用，3/11 起不可用）', af.poolFor('2025-03-10', slim).some(t => t.id === '13') && !af.poolFor('2025-03-11', slim).some(t => t.id === '13'));
+  check('候选池：已完成的任务也要求当天已创建（把 13 号改成 3/8 才创建，3/7 就不可用）', !af.poolFor('2025-03-07', [{ ...slim.find(t => t.id === '13'), opened: '2025-03-08' }]).length);
+  check('封顶：已完成的任务没有「剩余」可参照，按单条上限 4h', af.chunkCap({ status: 'done', left: 0 }) === 4);
   check('候选池：任务创建在当天之后不进池（11 号任务 3/5 才创建）', !af.poolFor('2025-03-04', slim).some(t => t.id === '11') && af.poolFor('2025-03-05', slim).some(t => t.id === '11'));
   check('候选池：实际开始在当天之后不进池（15 号任务 3/12 才开始）', !af.poolFor('2025-03-11', slim).some(t => t.id === '15') && af.poolFor('2025-03-12', slim).some(t => t.id === '15'));
 
@@ -134,7 +140,7 @@ try {
   config.autofill.prompt = '每条不超过 40 字，多用「配合」';
   const promptsSeen = [];
   await af.buildPlan({ dates: ['2025-03-17'], seed: 1 }, { ai: async (p) => { promptsSeen.push(p); return '[]'; }, now: NOW });
-  check('参数：额外要求会附在 AI 提示词里，并声明不得违反上面的约束', promptsSeen.length === 1 && /用户的额外要求/.test(promptsSeen[0]) && /每条不超过 40 字，多用「配合」/.test(promptsSeen[0]) && /不得违反上面的约束/.test(promptsSeen[0]));
+  check('参数：额外要求会附在 AI 提示词里（每次尝试都带），并声明不得违反上面的约束', promptsSeen.length >= 1 && promptsSeen.every(p => /用户的额外要求/.test(p) && /每条不超过 40 字，多用「配合」/.test(p) && /不得违反上面的约束/.test(p)));
   config.autofill.prompt = '';
   const promptsNone = [];
   await af.buildPlan({ dates: ['2025-03-17'], seed: 1 }, { ai: async (p) => { promptsNone.push(p); return '[]'; }, now: NOW });
@@ -169,13 +175,23 @@ try {
   check('逐日：补的小时 = 缺口（17 日已填 2h → 补 6h），候选来自当天池', d17 && d17.gap === 6 && d17.entries.reduce((n, e) => n + e.hours, 0) === 6 && d17.entries.every(e => d17.pool.some(t => t.id === e.taskId)));
   check('逐日：已有工时的执行（迭代A）出现在权重里不报错，方案有 1~3 条', d17.entries.length >= 1 && d17.entries.length <= 3);
   const none = af.planDates({ ...ctx, dates: ['2025-03-19'], tasks: slim.filter(t => t.id !== '10' && t.id !== '11' && t.id !== '15') });
-  check('当天没有候选任务：跳过并说明，不硬凑', none.days.length === 0 && /没有当天已存在的进行中任务/.test(none.skipped[0].reason));
+  check('当天没有候选任务：跳过并说明，不硬凑', none.days.length === 0 && /没有你在做的任务可用/.test(none.skipped[0].reason), JSON.stringify(none.skipped));
 
   // ============ AI 输出解析 / 降级 ============
   check('解析：合法数组按 i 对位', JSON.stringify(af.parseWorks('说明[{"i":1,"work":"整理接口文档并补充示例"},{"i":0,"work":"和后端联调订单接口"}]', 2)) === JSON.stringify(['和后端联调订单接口', '整理接口文档并补充示例']));
   const bad = af.parseWorks('[{"i":0,"work":"接口联调已完成并上线"},{"i":1,"work":"修复了 #1234 号缺陷"},{"i":2,"work":"进度推进到 80%"},{"i":3,"work":"太短"},{"i":4,"work":"正常的工作内容描述"}]', 5);
   check('解析：含「已完成 / 已上线」「#编号」「百分比」、过短的内容被丢弃（退回模板）', bad.slice(0, 4).every(w => w === null) && bad[4] === '正常的工作内容描述');
   check('解析：不是 JSON 返回 null', af.parseWorks('抱歉我不能', 2) === null && af.parseWorks('[坏的', 2) === null);
+  // AI 把 {"i":2,"work":..} 打成了 {"i":2","work":..}（真实出现过）：整段 JSON 解析不了，退一步逐条抠出来
+  const typo = af.parseWorks('[\n  {"i":0,"work":"平安期货App全流程兼容性测试，覆盖登录及交易"},\n  {"i":1,"work":"排查并处理coach北京设备噪点问题"},\n  {"i":2","work":"整理民生卡中心9月份项目交付相关报告数据"}\n]', 3);
+  check('解析容错：JSON 里有笔误时逐条抠出来，三条都拿到', typo && typo.every(Boolean) && typo[2] === '整理民生卡中心9月份项目交付相关报告数据', JSON.stringify(typo));
+  check('解析容错：抠出来的内容照样过「已完成 / 编号 / 百分比」检查', af.parseWorks('[{"i":0","work":"接口联调已完成"},{"i":1,"work":"正常的内容描述"}]', 2)[0] === null);
+  // 敏感内容：含账号 / 密码 / 链接 / 长数字的历史内容不能当样例 / 模板
+  const credential = '账号：生产测试账号：40001 pa123456，地址：https://testflight.apple.com/join/XhhnuyUq，流程：App安装、启动、登录';
+  check('敏感：含账号密码 / 链接 / 长数字串的内容不可用', !af.usableWork(credential) && !af.usableWork('地址 https://a.b/c 看一下') && !af.usableWork('密码是 abc') && !af.usableWork('编号 1234567 处理') && !af.usableWork('x'.repeat(81)) && af.usableWork('联调订单接口并核对字段'));
+  check('敏感：模板不会抄含账号密码的历史内容，退回任务名', af.templateWork({ taskId: '9', taskName: '兼容性测试' }, new Map([['9', [{ date: '2025-03-01', work: credential }]]]), af.mulberry32(1)) === '推进「兼容性测试」相关工作');
+  check('敏感：写作样例里也不含', af.styleSamples(new Map([['9', [{ date: '2025-03-01', work: credential }, { date: '2025-03-02', work: '核对订单接口返回值' }]]])).join() === '核对订单接口返回值');
+  check('脱敏：任务描述里的链接和「账号：xxx」会被去掉', !/https?:|pa123456/.test(af.redact('测试账号：pa123456 地址 https://x.y/z?k=1 其余说明')) && /其余说明/.test(af.redact('测试账号：pa123456 地址 https://x.y/z?k=1 其余说明')));
   const hmap = new Map([['10', [{ date: '2025-03-17', work: '设计接口' }, { date: '2025-03-14', work: '更新进度至 30%' }]]]);
   check('模板：用该任务自己以前的内容，自动生成的「更新进度至…」不用', af.templateWork({ taskId: '10', taskName: '接口联调' }, hmap, af.mulberry32(1)) === '设计接口');
   check('模板：没有历史就用任务名', af.templateWork({ taskId: '99', taskName: '新任务' }, new Map(), af.mulberry32(1)) === '推进「新任务」相关工作');
@@ -192,8 +208,10 @@ try {
   const plan = await af.buildPlan({ month: '2025-03', seed: 3 }, { ai: fakeAi, now: NOW });
   const planDates = plan.days.map(d => d.date);
   check('方案：本月过去的工作日里缺工时的天（不含 18 日已满、不含今天及以后）', !planDates.includes('2025-03-18') && !planDates.includes('2025-03-20') && planDates.includes('2025-03-17') && planDates.includes('2025-03-03') && planDates.every(d => d < '2025-03-20' && ![0, 6].includes(new Date(`${d}T00:00:00`).getDay())), planDates.join());
-  check('方案：每天补的小时 = 缺口；任务都在当天候选池里；不含未开始 / 已完成 / 剩余 0', plan.days.every(d => d.entries.reduce((n, e) => n + e.hours, 0) === d.gap && d.entries.every(e => d.pool.some(t => t.id === e.taskId) && !['12', '13', '14'].includes(e.taskId))));
-  check('方案：3/3、3/4 只有接口联调可选（写文档 3/5 才创建）', plan.days.filter(d => ['2025-03-03', '2025-03-04'].includes(d.date)).every(d => d.entries.every(e => e.taskId === '10')));
+  check('方案：每天补的小时 = 缺口；任务都在当天候选池里；不含未开始 / 剩余 0 / 早已完成 / 已关闭', plan.days.every(d => d.entries.reduce((n, e) => n + e.hours, 0) === d.gap && d.entries.every(e => d.pool.some(t => t.id === e.taskId) && !['12', '14', '16', '17'].includes(e.taskId))));
+  check('方案：3/3、3/4 只有接口联调和 3/10 才完成的 13 号可选（写文档 3/5 才创建）', plan.days.filter(d => ['2025-03-03', '2025-03-04'].includes(d.date)).every(d => d.entries.every(e => ['10', '13'].includes(e.taskId))));
+  check('方案：3/11 起不会再出现 13 号（它 3/10 就完成了）', plan.days.filter(d => d.date >= '2025-03-11').every(d => d.entries.every(e => e.taskId !== '13')));
+  check('方案：条目和候选池里带着任务状态（界面据此标「已完成」）', plan.days.every(d => d.entries.every(e => ['doing', 'done'].includes(e.taskStatus)) && d.pool.every(t => ['doing', 'done'].includes(t.status))));
   check('方案：内容来自 AI，带 source=ai，并按天各调一次（共 ' + aiCalls.length + ' 次）', plan.aiUsed && plan.days.every(d => d.entries.every(e => e.source === 'ai' && e.work.length > 4)) && aiCalls.length === plan.days.length);
   check('方案：提示词里带了任务名、任务描述和用户自己以前的写法，并有不得编造的约束', aiCalls.some(p => /接口联调/.test(p) && /订单接口/.test(p) && /设计接口/.test(p)) && aiCalls.every(p => /不要编造/.test(p) && /不要写“已完成/.test(p)));
   check('方案：生成方案阶段没有任何写入', zt.adds.length === 0 && zt.deletes.length === 0);
@@ -201,6 +219,18 @@ try {
   check('同样的种子：任务和小时可复现', JSON.stringify(again.days.map(d => d.entries.map(e => [e.taskId, e.hours]))) === JSON.stringify(plan.days.map(d => d.entries.map(e => [e.taskId, e.hours]))));
   const reroll = await af.buildPlan({ month: '2025-03', seed: 4 }, { ai: fakeAi, now: NOW });
   check('换种子（换一批）：方案会变', JSON.stringify(reroll.days.map(d => d.entries.map(e => [e.taskId, e.hours]))) !== JSON.stringify(plan.days.map(d => d.entries.map(e => [e.taskId, e.hours]))));
+
+  // AI 第一次返回坏掉的 JSON，重试一次就好了：整天仍然用 AI 的内容
+  let tries = 0;
+  const flaky = await af.buildPlan({ dates: ['2025-03-12'], seed: 2 }, { ai: async (p) => { tries++; const n = Number((p.match(/需要写 (\d+) 条/) || [])[1]); return tries === 1 ? '[{"i":0,"work":' : JSON.stringify(Array.from({ length: n }, (_, i) => ({ i, work: `重试后写好的第${i + 1}条工作内容` }))); }, now: NOW });
+  check('AI 第一次返回坏掉的内容：自动重试一次，成功就用 AI 的', tries === 2 && flaky.aiUsed && flaky.days[0].entries.every(e => e.source === 'ai' && /重试后/.test(e.work)), `tries=${tries}`);
+  // 历史里有账号密码的内容：不会出现在发给 AI 的提示词里
+  zt.efforts[10].push({ id: '9100', account: 'lijc', date: '2025-03-11', consumed: '1', left: '6', work: '账号：生产测试账号：40001 pa123456，地址：https://testflight.apple.com/join/XhhnuyUq', deleted: '0' });
+  es._caches.mine.write({ syncedAt: 0, tasks: {} });
+  const leakPrompts = [];
+  await af.buildPlan({ dates: ['2025-03-12'], seed: 3 }, { ai: async (p) => { leakPrompts.push(p); return '[]'; }, now: NOW });
+  check('敏感：历史里的账号密码 / 链接不会出现在发给 AI 的提示词里', leakPrompts.length > 0 && leakPrompts.every(p => !/pa123456|testflight/.test(p)));
+  zt.efforts[10] = zt.efforts[10].filter(e => e.id !== '9100'); es._caches.mine.write({ syncedAt: 0, tasks: {} });
 
   const noAi = await af.buildPlan({ dates: ['2025-03-17'], seed: 1 }, { ai: null, now: NOW });
   check('没配 AI：仍生成方案，内容用模板并标注 source=template', !noAi.aiUsed && noAi.days[0].entries.every(e => e.source === 'template' && e.work));
@@ -235,6 +265,21 @@ try {
   const log = await af.getLog();
   const batch = log.batches.find(b => b.id === started.batchId);
   check('补填记录：记下了每条写入（工时记录编号、任务、日期、小时、内容）', batch && batch.state === 'done' && batch.entries.length === good.entries.length && batch.entries.every(e => e.effortId && e.status === 'written' && e.taskName), JSON.stringify(batch).slice(0, 200));
+
+  // ---- 在「已完成」的任务上补（补历史的主要情形）----
+  const planDone = await af.buildPlan({ dates: ['2025-03-05'], seed: 7 }, { ai: null, now: NOW });
+  check('已完成任务：3/5 的候选池里有 13 号（当时在做、3/10 才完成）', planDone.days[0].pool.some(t => t.id === '13' && t.status === 'done'));
+  zt.adds.length = 0;
+  const sd = await af.startExecution({ planId: planDone.planId, days: [{ date: '2025-03-05', entries: [{ taskId: '13', hours: 3, work: '补在已完成任务上的内容' }, { taskId: '10', hours: 5, work: '补在进行中任务上的内容' }] }] }, { writeGapMs: 0 });
+  for (let i = 0; i < 100 && af.getJob(sd.jobId).state === 'running'; i++) await new Promise(r => setTimeout(r, 30));
+  const jd = af.getJob(sd.jobId);
+  const addDone = zt.adds.find(a => a.task === '13'), addDoing = zt.adds.find(a => a.task === '10');
+  check('已完成任务：写入成功；传的剩余是 0（已完成任务本来就完成了），进行中的任务沿用当前剩余 6', jd.state === 'done' && jd.written === 2 && addDone && addDone.left === '0' && addDone.date === '2025-03-05' && addDoing.left === '6', JSON.stringify(jd.results.map(r => [r.taskId, r.status, r.error])));
+  const logD = (await af.getLog()).batches.find(b => b.id === sd.batchId);
+  check('已完成任务：补填记录里照样记下（可撤销）', logD.entries.length === 2 && logD.entries.every(e => e.effortId));
+  const undoD = await af.undoBatch(sd.batchId);
+  check('已完成任务：可以撤销', undoD.undone === 2);
+  zt.adds.length = 0; zt.deletes.length = 0;
 
   // ---- 防重复：生成方案后，这天又被别处补满了 ----
   const plan2 = await af.buildPlan({ dates: ['2025-03-12'], seed: 5 }, { ai: null, now: NOW });
