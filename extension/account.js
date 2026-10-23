@@ -36,7 +36,7 @@ const ACCOUNT_LOG_PATH = typeof WA_LOG_PATH !== 'undefined' ? WA_LOG_PATH : '~/L
 const ACCOUNT_TERMINAL = typeof WA_TERMINAL !== 'undefined' ? WA_TERMINAL : '终端';
 const ACCOUNT_AI_HINT_KEY = 'waAiHintPending';
 // 重置时清掉的浏览器数据（调试模式开关保留，方便连续测试）
-const ACCOUNT_RESET_STORAGE = ['workAssistantConfig', 'taskDraft', 'bug_draft', 'lastTabMode', 'zentao_users', ACCOUNT_SKIP_KEY, ACCOUNT_AI_HINT_KEY];
+const ACCOUNT_RESET_STORAGE = ['waSettingsCache', 'taskDraft', 'bug_draft', 'lastTabMode', ACCOUNT_SKIP_KEY, ACCOUNT_AI_HINT_KEY];
 
 const accountEsc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const storageGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -389,13 +389,8 @@ const Account = {
     this.state = state;
     storageDel(ACCOUNT_SKIP_KEY);
     if (state && !state.aiConfigured) storageSet(ACCOUNT_AI_HINT_KEY, '1');
-    // 设置页的禅道字段以后端为准，浏览器里的旧值顺手更新
-    try {
-      const saved = JSON.parse(storageGet('workAssistantConfig') || '{}');
-      Object.assign(saved, { zentaoEnabled: true, zentaoUrl: state.zentaoUrl, zentaoUsername: state.username });
-      delete saved.zentaoPassword;
-      storageSet('workAssistantConfig', JSON.stringify(saved));
-    } catch { /* 忽略 */ }
+    // 设置页的禅道字段以后端为准：登录刚改了后端，缓存向后端要最新的
+    if (typeof ConfigStore !== 'undefined') ConfigStore.sync({ force: true });
     overlay.querySelector('[data-view="form"]').hidden = true;
     const view = overlay.querySelector('[data-view="progress"]');
     view.hidden = false;

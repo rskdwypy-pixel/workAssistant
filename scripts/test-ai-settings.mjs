@@ -167,8 +167,7 @@ ${top('AI_PROVIDERS')}
 ${top('applyAiProviderPreset')}
 ${top('postAiSettings')}
 ${top('AiModelPicker')}
-${top('resolveBackendUrl')}
-window.AiModelPicker = AiModelPicker; window.resolveBackendUrl = resolveBackendUrl;
+window.AiModelPicker = AiModelPicker;
 ${stmts.map(n => SRC.slice(n.start, n.end)).join('\n')}`);
   const $ = (id) => doc.getElementById(id);
   // 当前是「自定义」，已保存过 Key
@@ -250,10 +249,13 @@ ${stmts.map(n => SRC.slice(n.start, n.end)).join('\n')}`);
   check('设置回填：智谱的地址认出是智谱', $('aiProvider').value === 'zhipu');
 
   // ============ 后端地址 ============
-  const rb = win.resolveBackendUrl;
-  check('后端地址：用保存的本机后端地址（localhost 换成 127.0.0.1）', rb({ backendUrl: 'http://localhost:3721' }, 'X') === 'http://127.0.0.1:3721');
-  check('后端地址：AI 接口地址不会被当成后端地址', rb({ apiBaseUrl: 'https://dyschop.online:8444/v1' }, 'http://127.0.0.1:3721') === 'http://127.0.0.1:3721');
-  check('后端地址：很早的配置（本机地址存在 apiBaseUrl）仍兼容', rb({ apiBaseUrl: 'http://127.0.0.1:3721/' }, 'X') === 'http://127.0.0.1:3721');
+  // 后端地址由 ConfigStore 管：老版本存在 workAssistantConfig 里的，只在是本机地址时才沿用
+  win.eval(readFileSync(new URL('../extension/config-store.js', import.meta.url), 'utf8'));
+  const rb = (cfg) => { win.localStorage.clear(); if (cfg) win.localStorage.setItem('workAssistantConfig', JSON.stringify(cfg)); win.ConfigStore.init(); return win.ConfigStore.backendUrl(); };
+  check('后端地址：用保存的本机后端地址（localhost 换成 127.0.0.1）', rb({ backendUrl: 'http://localhost:3721' }) === 'http://127.0.0.1:3721');
+  check('后端地址：AI 接口地址不会被当成后端地址', rb({ apiBaseUrl: 'https://dyschop.online:8444/v1' }) === 'http://127.0.0.1:3721');
+  check('后端地址：不是本机的 backendUrl 被拒绝（任务数据不会发到别的服务器）', rb({ backendUrl: 'https://evil.example.com' }) === 'http://127.0.0.1:3721');
+  check('后端地址：很早的配置（本机地址存在 apiBaseUrl）仍兼容', rb({ apiBaseUrl: 'http://127.0.0.1:3721/' }) === 'http://127.0.0.1:3721');
 } catch (err) {
   check(`异常：${err.stack}`, false);
 } finally {

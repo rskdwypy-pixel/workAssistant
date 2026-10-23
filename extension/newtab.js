@@ -1,6 +1,6 @@
 // API配置
 // 后端只监听 IPv4，且扩展只申请了 127.0.0.1 的主机权限，统一用 127.0.0.1
-let API_BASE_URL = 'http://127.0.0.1:3721';
+let API_BASE_URL = (typeof ConfigStore !== 'undefined') ? ConfigStore.backendUrl() : 'http://127.0.0.1:3721';
 
 // 当前状态
 let currentYear, currentMonth;
@@ -1141,11 +1141,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // 加载保存的配置
-  const savedConfig = localStorage.getItem('workAssistantConfig');
-  if (savedConfig) {
-    API_BASE_URL = resolveBackendUrl(JSON.parse(savedConfig), API_BASE_URL);
-  }
+  // 设置以后端为准，浏览器里只留缓存：先迁移老版本的本地设置，再启动静默校对
+  // （启动时、回到页面时、每 10 分钟；后端的设置变了，设置页正开着且没改过内容就自动刷新）
+  ConfigStore.migrateLegacy().catch(() => { });
+  ConfigStore.onChange(() => {
+    const modal = document.getElementById('settingsModal');
+    const open = modal && modal.classList.contains('active');
+    if (open && window.settingsUI && window.settingsUI.isDirty()) return;   // 你正在改，不覆盖
+    if (open) loadSettings();
+  });
+  ConfigStore.start();
 
   // 初始化日历
   const now = new Date();
@@ -1680,15 +1685,10 @@ async function exportAllConfig() {
   if (pass.value.length < 8) { show('✗ 口令至少 8 位', 'error'); pass.focus(); return; }
   if (pass.value !== pass2.value) { show('✗ 两次输入的口令不一致', 'error'); pass2.focus(); return; }
   try {
-    let client = {};
-    try {
-      const saved = JSON.parse(localStorage.getItem('workAssistantConfig') || '{}');
-      client = { aiProvider: saved.aiProvider || '', aiProfiles: saved.aiProfiles || {} };
-    } catch { /* 浏览器里没有设置也能导出 */ }
     const response = await fetch(`${API_BASE_URL}/api/config/export`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ passphrase: pass.value, client })
+      body: JSON.stringify({ passphrase: pass.value })
     });
     const json = await response.json();
     if (!json.success) throw new Error(json.message || '导出失败');
@@ -1756,13 +1756,8 @@ async function importAllConfig() {
     });
     const json = await response.json();
     if (!json.success) throw new Error(json.message || '导入失败');
-    // 浏览器里的设置：保留本机已有的，导入的覆盖（不含密码与 Key）
-    let saved = {};
-    try { saved = JSON.parse(localStorage.getItem('workAssistantConfig') || '{}'); } catch { /* 忽略损坏的缓存 */ }
-    const merged = { ...saved, ...json.data.client };
-    delete merged.apiKey;
-    delete merged.zentaoPassword;
-    localStorage.setItem('workAssistantConfig', JSON.stringify(merged));
+    // 设置都已写进后端；浏览器里的缓存向后端要最新的（页面随后会刷新）
+    await ConfigStore.sync({ force: true });
     pass.value = '';
     pendingImportFile = null;
     show(`✅ 已导入：${json.data.applied.join('、')}。正在刷新…`, 'success');
@@ -2012,9 +2007,7 @@ async function importAllConfig() {
       zentaoEnabled: document.getElementById('zentaoEnabled')?.checked || false,
       zentaoUrl: document.getElementById('zentaoUrl')?.value.trim() || '',
       zentaoUsername: document.getElementById('zentaoUsername')?.value.trim() || '',
-      zentaoCreateTaskUrl: document.getElementById('zentaoCreateTaskUrl')?.value.trim() || '',
-      // 后端服务URL（与AI API URL分开）
-      backendUrl: 'http://127.0.0.1:3721'
+      zentaoCreateTaskUrl: document.getElementById('zentaoCreateTaskUrl')?.value.trim() || ''
     };
 
     let savedOk = false;
@@ -2023,9 +2016,6 @@ async function importAllConfig() {
     const typedZentaoPassword = document.getElementById('zentaoPassword')?.value.trim() || '';
 
     try {
-      // 保存到localStorage
-      localStorage.setItem('workAssistantConfig', JSON.stringify(config));
-
       // 同步所有配置到后端（会持久化到 .env 文件）
       try {
         const response = await fetch(`${API_BASE_URL}/api/config`, {
@@ -2042,11 +2032,23 @@ async function importAllConfig() {
             // 每日标准工时只存后端，不放进 config（config 会被存成浏览器里的副本）
             workHours: document.getElementById('workHours')?.value || '8',
             webhookUrl: config.webhookUrl || '',
-            webhookType: config.webhookType || 'generic'
+            webhookType: config.webhookType || 'generic',
+            // 各服务商记住的地址与模型：真身在后端
+            client: { aiProvider: config.aiProvider || '', aiProfiles: config.aiProfiles || {} },
+            // 冲突检测：带上本地缓存的 rev，后端已被别处改过就拒绝
+            baseRev: ConfigStore.rev || undefined
           })
         });
 
         const result = await response.json();
+        if (response.status === 409 || result.code === 'CONFIG_CONFLICT') {
+          // 别处改过：用后端最新的刷新缓存和表单，请用户确认后再保存（这次什么都没写）
+          await ConfigStore.sync({ force: true });
+          ConfigStore.hold(false);
+          loadSettings();
+          Toast.warning(result.message || '配置已在别处被修改，已刷新为最新，请确认后再保存');
+          return;
+        }
         if (result.success) {
           console.log('[前端] 配置已保存到后端 .env 文件');
         } else {
@@ -2097,8 +2099,9 @@ async function importAllConfig() {
         Toast.error('提示词保存失败：' + promptErr.message);
       }
 
-      // 更新后端服务地址
-      API_BASE_URL = config.backendUrl || 'http://127.0.0.1:3721';
+      // 保存完成：缓存向后端要最新的（新的 rev），之后恢复静默校对的界面刷新
+      ConfigStore.hold(false);
+      await ConfigStore.sync({ force: true });
 
       // 与旧版不同：保存后不再自动关闭面板，用户可继续改其它分组。
       // 底部状态条会变为「所有更改已保存」，需要关闭时点右上角 ×。
@@ -2196,27 +2199,7 @@ async function testScheduledTask(taskType, taskName) {
   btn.disabled = true;
 
   try {
-    // 首先同步 webhook 配置到后端（确保后端有最新的 webhook 配置）
-    const savedConfig = localStorage.getItem('workAssistantConfig');
-    if (savedConfig) {
-      const config = JSON.parse(savedConfig);
-      console.log(`[前端] 读取配置:`, { webhookUrl: config.webhookUrl ? '***' : '未配置', webhookType: config.webhookType });
-      if (config.webhookUrl) {
-        console.log(`[前端] 同步webhook配置到后端...`);
-        await fetch(`${API_BASE_URL}/api/webhook/config`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: config.webhookUrl,
-            type: config.webhookType || 'generic'
-          })
-        });
-        // 验证 webhook 配置是否正确设置
-        const checkRes = await fetch(`${API_BASE_URL}/api/webhook/config`);
-        const checkResult = await checkRes.json();
-        console.log(`[前端] Webhook配置验证:`, checkResult.data);
-      }
-    }
+    // 推送地址以后端保存的为准（设置页保存时已写入），这里直接触发
 
     let response;
     if (taskType === 'morning') {
@@ -5447,14 +5430,9 @@ function escapeHtml(text) {
 
 // 获取禅道任务URL
 function getZentaoTaskUrl(taskId) {
-  // 从本地存储获取禅道配置
-  const config = localStorage.getItem('workAssistantConfig');
-  if (config) {
-    const parsed = JSON.parse(config);
-    const baseUrl = parsed.zentaoUrl?.replace(/\/$/, '') || '';
-    return `${baseUrl}/zentao/task-view-${taskId}.html`;
-  }
-  return `#`;
+  // 禅道地址取自设置缓存（以后端为准，静默校对）
+  const baseUrl = (ConfigStore.flat().zentaoUrl || '').replace(/\/$/, '');
+  return baseUrl ? `${baseUrl}/zentao/task-view-${taskId}.html` : `#`;
 }
 
 function debounce(func, wait) {
@@ -5585,21 +5563,6 @@ const CONFIG_PRESETS = {
   }
 };
 
-/**
- * 设置里保存的后端地址（不要与 AI 接口地址混淆）
- *
- * 很早的配置把后端地址存在 apiBaseUrl 里，这里只在它是本机地址时才沿用。
- * 以前只排除了智谱地址：填了其他 AI 服务商 / 中转地址、又没有 backendUrl 时，
- * 整个插件会把请求（含任务数据）发到 AI 服务商那里。
- */
-function resolveBackendUrl(config, fallback) {
-  const local = /^http:\/\/(127\.0\.0\.1|localhost):\d+\/?$/;
-  const pick = (u) => String(u).replace('//localhost:', '//127.0.0.1:').replace(/\/$/, '');
-  if (config && config.backendUrl && local.test(config.backendUrl)) return pick(config.backendUrl);
-  if (config && !config.backendUrl && local.test(config.apiBaseUrl || '')) return pick(config.apiBaseUrl);
-  return fallback;
-}
-
 // 加载设置
 // ============================================================================
 // 提示词（添加任务分析 / 日报 / 周报 / 月报）
@@ -5671,7 +5634,9 @@ async function savePrompts() {
  * 右上角头像菜单、登录卡片「导入配置」、AI 未配置提示等都从这里进
  */
 function openSettingsModal(group) {
+  ConfigStore.hold(false);   // 上次点过「恢复默认」又没保存就关了：这次重新以后端为准
   loadSettings();
+  ConfigStore.sync();   // 静默校对；变了且你还没改内容，会自动刷新表单
   document.getElementById('settingsModal').classList.add('active');
   checkServiceStatus();
   setTimeout(() => ExecutionFavorites.loadFavorites(), 100);
@@ -5679,8 +5644,9 @@ function openSettingsModal(group) {
 }
 
 function loadSettings() {
-  const saved = localStorage.getItem('workAssistantConfig');
-  const config = saved ? JSON.parse(saved) : { ...CONFIG_PRESETS.zhipu };
+  // 先用缓存（打开即有值），后端的设置变了会静默校对后自动刷新；缓存还是空的（第一次）用预设
+  const cached = ConfigStore.flat();
+  const config = Object.keys(cached).length ? cached : { ...CONFIG_PRESETS.zhipu };
 
   // 安全获取元素并设置值
   const setVal = (id, val) => {
@@ -5689,14 +5655,15 @@ function loadSettings() {
   };
 
   setVal('aiProvider', config.aiProvider || 'zhipu');
-  // Key 保存在后端（按接口地址分别保存）；旧版本存在浏览器里的照旧回填，保存一次后就不再存浏览器
-  setVal('apiKey', config.apiKey || '');
+  // Key 只保存在后端（按接口地址分别保存），不回显
+  setVal('apiKey', '');
   setVal('apiBaseUrl', config.apiBaseUrl || CONFIG_PRESETS.zhipu.apiBaseUrl);
   setVal('aiModel', config.aiModel || CONFIG_PRESETS.zhipu.aiModel);
   setVal('aiReportModel', config.aiReportModel || '');
   AiModelPicker.init(config);
   setVal('morningHour', config.morningHour || 9);
   setVal('eveningHour', config.eveningHour || 21);
+  setVal('workHours', config.workHours || 8);
   setVal('webhookUrl', config.webhookUrl || '');
   setVal('webhookType', config.webhookType || 'generic');
 

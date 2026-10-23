@@ -193,7 +193,7 @@ function setup(s) {
   s = { state: stateOf('ok') };
   ({ win, doc, $ } = setup(s));
   await win.Account.init();
-  ['workAssistantConfig', 'taskDraft', 'lastTabMode', 'waLoginSkipped'].forEach(k => win.localStorage.setItem(k, 'x'));
+  ['waSettingsCache', 'taskDraft', 'lastTabMode', 'waLoginSkipped'].forEach(k => win.localStorage.setItem(k, 'x'));
   win.localStorage.setItem('debugMode', 'true');
   check('重置入口只在调试模式显示', $('resetZone').classList.contains('debug-only'));
   $('resetAllBtn').click();
@@ -209,7 +209,7 @@ function setup(s) {
   await tick(20);
   const reset = s.requests.find(r => r.url === '/api/account/reset');
   check('重置：带上「同时清空本地数据」并刷新', reset && reset.body.includeData === true && s.reloads === 1);
-  check('重置：清掉浏览器里的设置与草稿，保留调试模式', ['workAssistantConfig', 'taskDraft', 'lastTabMode', 'waLoginSkipped'].every(k => win.localStorage.getItem(k) === null) && win.localStorage.getItem('debugMode') === 'true');
+  check('重置：清掉浏览器里的设置与草稿，保留调试模式', ['waSettingsCache', 'taskDraft', 'lastTabMode', 'waLoginSkipped'].every(k => win.localStorage.getItem(k) === null) && win.localStorage.getItem('debugMode') === 'true');
 
   // ============ 首次安装：后台还在启动 ============
   s = { state: stateOf('unconfigured'), down: 3 };

@@ -41,6 +41,8 @@ const SUITES = [
   'test-ai-settings.mjs',
   'test-zentao-truth.mjs',
   'test-config-transfer.mjs',
+  'test-settings-sync.mjs',
+  'test-config-store-ui',
   'test-account.mjs',
   'test-account-ui',
   'test-bug-board-ui',

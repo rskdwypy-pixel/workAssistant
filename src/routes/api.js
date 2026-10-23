@@ -719,8 +719,19 @@ router.post('/config', async (req, res) => {
       eveningHour,
       workHours,
       webhookUrl,
-      webhookType
+      webhookType,
+      client,
+      baseRev
     } = req.body;
+
+    // 冲突检测：前端带着它缓存的 rev 来保存，后端已被别处改过就拒绝，免得旧缓存把新配置覆盖掉
+    if (baseRev) {
+      const { buildSnapshot } = await import('../services/settingsSnapshot.js');
+      const cur = await buildSnapshot();
+      if (String(baseRev) !== cur.rev) {
+        return res.status(409).json({ success: false, code: 'CONFIG_CONFLICT', message: '配置已在别处被修改，已刷新为最新，请确认后再保存', rev: cur.rev });
+      }
+    }
 
     // 更新运行时配置
     const configModule = await import('../config.js');
@@ -760,10 +771,16 @@ router.post('/config', async (req, res) => {
     if (webhookType !== undefined) envUpdates.WEBHOOK_TYPE = webhookType;
 
     configModule.updateEnvFile(envUpdates);
+    // 各服务商记住的地址与模型（真身在后端）
+    if (client && typeof client === 'object') {
+      const { saveClientSettings } = await import('../services/clientSettings.js');
+      await saveClientSettings(client);
+    }
 
     console.log(`[API] 配置已保存到 .env 文件`);
 
-    res.json({ success: true, message: '配置已保存' });
+    const { buildSnapshot: snap } = await import('../services/settingsSnapshot.js');
+    res.json({ success: true, message: '配置已保存', rev: (await snap()).rev });
   } catch (err) {
     console.error(`[API] 保存配置失败:`, err.message);
     res.status(500).json({ error: err.message });
@@ -778,6 +795,7 @@ router.post('/config/export', async (req, res) => {
   try {
     const { collectSettings, encryptSettings } = await import('../services/configTransfer.js');
     const b = req.body || {};
+    // 服务商设置的真身在后端；body 里带了 client（老调用方）就以它为准
     const settings = await collectSettings(b.client || {});
     res.json({ success: true, data: encryptSettings(settings, b.passphrase) });
   } catch (err) {
@@ -807,44 +825,11 @@ router.post('/config/import', async (req, res) => {
  */
 router.get('/config', async (req, res) => {
   try {
-    const configModule = await import('../config.js');
-    const cfg = configModule.config;
-    res.json({
-      success: true,
-      data: {
-        ai: {
-          apiKey: cfg.ai.apiKey ? '***已设置***' : '',
-          apiBaseUrl: cfg.ai.baseURL,
-          aiModel: cfg.ai.model,
-          aiReportModel: cfg.ai.reportModel || '',
-          // 哪些接口地址（主机）保存过 Key：设置页据此提示「已保存，留空即可」，不回传 Key 本身
-          savedKeyHosts: [...new Set([...Object.keys(cfg.ai.keys || {}), ...(cfg.ai.apiKey ? [configModule.aiKeyHost(cfg.ai.baseURL)] : [])])].filter(Boolean),
-          // 前端据此提示用户：AI 未配置时功能会降级，避免误以为「AI 不聪明」
-          available: !!(cfg.ai.apiKey && cfg.ai.apiKey.trim()),
-          unavailableReason: (!cfg.ai.apiKey || !cfg.ai.apiKey.trim())
-            ? 'OPENAI_API_KEY 未配置，AI 解析与执行匹配已降级为本地规则'
-            : ''
-        },
-        schedule: {
-          morningHour: cfg.schedule.morningHour,
-          eveningHour: cfg.schedule.eveningHour,
-          workHours: cfg.schedule.workHours
-        },
-        webhook: {
-          hasUrl: !!cfg.webhook.url,
-          type: cfg.webhook.type || 'generic',
-          // 完整地址：设置页以后端为准回填（只有本插件能访问本接口，见 requestGuard）
-          url: cfg.webhook.url || '',
-          urlPrefix: cfg.webhook.url ? cfg.webhook.url.substring(0, 30) + '...' : '(空)'
-        },
-        zentao: {
-          enabled: cfg.zentao.enabled,
-          url: cfg.zentao.url,
-          username: cfg.zentao.username,
-          hasPassword: !!cfg.zentao.password
-        }
-      }
-    });
+    const { buildSnapshot } = await import('../services/settingsSnapshot.js');
+    const { data, rev } = await buildSnapshot();
+    // 前端缓存带着自己的 rev 来问「变了没」：没变只回一个很小的响应
+    if (req.query.rev && String(req.query.rev) === rev) return res.json({ success: true, unchanged: true, rev });
+    res.json({ success: true, rev, data });
   } catch (err) {
     console.error(`[API] 获取配置失败:`, err.message);
     res.status(500).json({ error: err.message });

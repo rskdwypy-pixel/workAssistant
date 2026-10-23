@@ -37,10 +37,15 @@ const CONTENT_LABELS = {
 
 /**
  * 当前「用户自己配置的部分」
- * @param {Object} [client] - 前端（浏览器）里的设置：aiProvider、aiProfiles
+ * @param {Object} [client] - 服务商设置 aiProvider、aiProfiles；不传就用后端存的
  */
 async function collectSettings(client = {}) {
   const { getFavoriteExecutionIds } = await import('./executionManager.js');
+  const { readClientSettings } = await import('./clientSettings.js');
+  // 服务商设置的真身在后端；调用方显式传了就以传的为准（兼容老调用）
+  const stored = await readClientSettings();
+  const has = client && (typeof client.aiProvider === 'string' || (client.aiProfiles && typeof client.aiProfiles === 'object'));
+  if (!has) client = stored;
   const z = config.zentao;
   return {
     zentao: {
@@ -254,6 +259,13 @@ async function applySettings(s) {
     const { setFavoriteExecutions } = await import('./executionManager.js');
     await setFavoriteExecutions(s.favorites.map(String).filter(id => /^\d{1,10}$/.test(id)));
     applied.push('favorites');
+  }
+
+  // 服务商设置写回后端（真身在后端，浏览器会随后校对拿到）
+  if (s.client && (typeof s.client.aiProvider === 'string' || (s.client.aiProfiles && typeof s.client.aiProfiles === 'object'))) {
+    const { saveClientSettings } = await import('./clientSettings.js');
+    await saveClientSettings(s.client);
+    applied.push('client');
   }
 
   return {

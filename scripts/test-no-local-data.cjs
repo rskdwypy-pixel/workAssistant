@@ -20,9 +20,9 @@ const ALLOWED = {
   bug_draft: '未提交的表单草稿（Bug）',
   waLoginSkipped: '界面偏好：点过「稍后再说」',
   waAiHintPending: '界面偏好：登录后提示配置 AI 一次',
-  // 待迁移：含后端地址（前端要先知道后端在哪，属引导信息）和设置页表单的副本。
-  // 副本部分要改成只读后端；迁完后这里改成只保留后端地址。见 docs/STATS-PRD.md §6
-  workAssistantConfig: '【待迁移】后端地址（引导必需）+ 设置页配置副本'
+  // 设置：真身在后端，浏览器里只留缓存 + 后端地址（见 extension/config-store.js）
+  waSettingsCache: '设置的缓存（以后端为准，静默校对）',
+  waBackendUrl: '后端地址（前端要先知道后端在哪才能去问它，属引导信息）'
 };
 const CONST_KEYS = { ACCOUNT_SKIP_KEY: 'waLoginSkipped', ACCOUNT_AI_HINT_KEY: 'waAiHintPending' };
 
@@ -38,6 +38,7 @@ for (const f of files) {
   const lines = src.split('\n');
   lines.forEach((line, i) => {
     if (/^\s*(\/\/|\*)/.test(line)) return;   // 注释行
+    if (/legacy-cleanup/.test(line)) return;   // 清理 / 迁移老版本数据的那几行（带标记），不算新增存储
     const re = /\b(?:localStorage|sessionStorage)\s*\.\s*(?:getItem|setItem|removeItem)\s*\(\s*([^,)]+?)\s*[,)]|\b(?:storageGet|storageSet|storageDel)\s*\(\s*([^,)]+?)\s*[,)]/g;
     let m;
     while ((m = re.exec(line))) {
@@ -47,8 +48,8 @@ for (const f of files) {
       if (!key) {
         // account.js 里的封装函数自己的形参（storageGet = (k) => localStorage.getItem(k)）
         if (f === 'account.js' && /^k$/.test(arg)) continue;
-        // 清理老数据：允许变量键，但这一行必须带 legacy-cleanup 标记
-        if (/legacy-cleanup/.test(line)) continue;
+        // config-store.js 里 _read / _write 封装函数自己的形参
+        if (f === 'config-store.js' && /^(key|this\.(CACHE_KEY|BACKEND_KEY))$/.test(arg)) continue;   // 常量本身在下面单独核对白名单
         bad.push(`${f}:${i + 1} 用了无法确认的键 ${arg}`);
         continue;
       }
@@ -59,7 +60,16 @@ for (const f of files) {
   });
 }
 
+// config-store.js 通过常量引用键（_read(this.CACHE_KEY)），把常量里的字符串也算进「用到的键」
+const cs = fs.readFileSync(path.join(EXT, 'config-store.js'), 'utf8');
+for (const m of cs.matchAll(/\b(CACHE_KEY|BACKEND_KEY):\s*'([^']+)'/g)) {
+  if (!ALLOWED[m[2]]) bad.push(`config-store.js 的 ${m[1]}「${m[2]}」不在白名单里`);
+  if (!seen.has(m[2])) seen.set(m[2], new Set());
+  seen.get(m[2]).add('config-store.js');
+}
+
 check('前端只使用白名单里的本地存储键', bad.length === 0, bad.join('；'));
+check('老的 workAssistantConfig 只出现在迁移 / 清理的那几行（带 legacy-cleanup 标记）', ![...seen.keys()].includes('workAssistantConfig'));
 check('今日工时的本地键（workTime_ / taskWorkTime_）不再被写入', !files.some(f => /(workTime_|taskWorkTime_)\$\{|['"`](workTime|taskWorkTime)_/.test(fs.readFileSync(path.join(EXT, f), 'utf8').split('\n').filter(l => !/legacy-cleanup|^\s*\/\/|^\s*\*/.test(l)).join('\n'))));
 check('用户列表缓存键 zentao_users 不再被读写', !seen.has('zentao_users'));
 const used = [...seen.keys()];

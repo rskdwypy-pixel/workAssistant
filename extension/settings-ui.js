@@ -195,7 +195,9 @@
     disarmReset();
     var ok = false;
     try {
-      localStorage.removeItem('workAssistantConfig');
+      // 恢复默认：清掉缓存、表单回到预设；保存之前不改后端，所以先暂停静默校对的界面刷新
+      ConfigStore.clear();
+      ConfigStore.hold(true);
       ok = true;
     } catch (err) {
       console.warn('[设置] 重置本地配置失败:', err);
@@ -226,7 +228,13 @@
   var serviceResult = $('serviceActionResult');
   if (serviceResult) serviceResult.classList.add('test-result');
 
+  /** 表单里有没有还没保存的修改（静默校对到后端新配置时，据此决定能不能刷新表单） */
+  function isDirty() {
+    return fields().some(function (el, i) { return valueOf(el) !== baseline[i]; });
+  }
+
   window.settingsUI = {
+    isDirty: isDirty,
     onOpen: onOpen,
     refreshBaseline: refreshBaseline,
     showGroup: showGroup
