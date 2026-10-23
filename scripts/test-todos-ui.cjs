@@ -4,7 +4,7 @@
  *   - 逾期 / 今天标记；空卡片提示；页头统计与标签角标（总数，有紧急的变红）
  *   - 点击：切到对应标签页，并让目标那一条滚动 + 闪烁；需求 / 文档会先清掉过滤
  *   - 菜单顺序：待办 任务 Bug 需求 文档 报告；各页没有刷新按钮
- *   - 工时缺填提醒：没缺时不显示；缺了显示「昨天 3.5/8h、…」，点击跳到工作日历并打开最近缺填那天的抽屉
+ *   - 工时缺填提醒：没缺时不显示；缺了显示「昨天、10月20日 一小时工时都没填」，点击跳到工作日历并打开最近缺填那天的抽屉
  */
 const fs = require('fs');
 const path = require('path');
@@ -111,10 +111,10 @@ const addTarget = (doc, parentSel, html) => { const p = doc.querySelector(parent
   check('闪烁约 2 秒后自动结束', !doc.querySelector('#docList [data-id="9"]').classList.contains('wa-flash'));
 
   // ── 工时缺填提醒 ──
-  ({ win, doc, st } = setup({ ...DATA, today: '2026-10-23', effortGaps: [{ date: '2026-10-22', hours: 3.5, standard: 8 }, { date: '2026-10-20', hours: 0, standard: 8 }] }));
+  ({ win, doc, st } = setup({ ...DATA, today: '2026-10-23', effortGaps: [{ date: '2026-10-22', hours: 0, standard: 8 }, { date: '2026-10-20', hours: 0, standard: 8 }] }));
   win.TodoPage.show(); await tick(20);
   const gap = doc.getElementById('todoGap');
-  check('有缺填：显示提醒，昨天 / 具体日期 + 小时', !gap.hidden && /工时待补/.test(gap.textContent) && /昨天 3\.5\/8h/.test(gap.textContent) && /10月20日 0\/8h/.test(gap.textContent), gap.textContent);
+  check('有缺填：显示提醒，列出昨天 / 具体日期，说明是一小时都没填', !gap.hidden && /一小时工时都没填/.test(gap.textContent) && /昨天、10月20日/.test(gap.textContent), gap.textContent);
   gap.querySelector('.todo-gap-btn').click();
   check('点提醒：切到工作日历，月份定位到该日，打开最近缺填那天的抽屉', st.modes.pop() === 'report' && win.ReportPage.month === '2026-10' && st.drawer === '2026-10-22');
   ({ win, doc, st } = setup({ ...DATA, effortGaps: [] }));

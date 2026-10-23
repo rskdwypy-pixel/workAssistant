@@ -47,4 +47,4 @@ TEST_REPORT.md
 dist/
 
 # 抓包资料（含内网会话 cookie，切勿提交到公开仓库）
-docs/zentao-capture-*/
+docs/zentao-*capture*/

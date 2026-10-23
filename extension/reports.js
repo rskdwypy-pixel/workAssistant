@@ -220,7 +220,7 @@ const ReportPage = {
 
   standard() { return (this.efforts && this.efforts.data && this.efforts.data.standard) || 8; },
 
-  /** 页头统计：本月累计、缺填天数（过去的工作日里不满标准工时的）。点「缺填」跳到第一个缺填日 */
+  /** 页头统计：本月累计、缺填天数（过去的工作日里一小时都没填的；填了但不满标准工时的不算缺填，只是格子显示琥珀色）。点「缺填」跳到第一个缺填日 */
   renderStats() {
     const el = document.getElementById('reportStats');
     if (!el) return;
@@ -239,7 +239,7 @@ const ReportPage = {
     const std = this.standard();
     let total = 0;
     for (const v of Object.values(days)) total += v.hours;
-    const missing = this.data.days.filter(d => !d.weekend && !d.future && !d.today && (days[d.date] ? days[d.date].hours : 0) < std);
+    const missing = this.data.days.filter(d => !d.weekend && !d.future && !d.today && (days[d.date] ? days[d.date].hours : 0) <= 0);
     this.firstMissing = missing.length ? missing[0].date : null;
     el.innerHTML = `
       <div class="stat-item"><span class="stat-label">本月累计</span><span class="stat-value">${fmtHours(total)}</span></div>

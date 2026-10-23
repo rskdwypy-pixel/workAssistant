@@ -3420,3 +3420,13 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
 .effort-member-bar span.is-partial { background: var(--warning); }
 .effort-member-bar span.is-full { background: var(--success); }
 .effort-member-hours { text-align: right; color: var(--text-secondary); }
+
+/* 工时抽屉：每条工时的修改 / 删除 */
+.effort-ops { display: flex; gap: 2px; opacity: 0; transition: opacity .12s; align-self: flex-start; }
+.effort-item:hover .effort-ops, .effort-item:focus-within .effort-ops { opacity: 1; }
+.effort-ops button { border: 0; background: transparent; cursor: pointer; font-size: 14px; padding: 2px 6px; border-radius: var(--radius-sm); color: var(--text-secondary); }
+.effort-ops button:hover { background: var(--bg-base); color: var(--primary); }
+.effort-ops button[data-eff="del"]:hover { color: var(--danger); }
+.effort-edit-form { flex-direction: column; border-color: var(--primary); }
+.effort-edit-form .effort-main { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+.effort-edit-form .effort-actions { gap: 8px; }

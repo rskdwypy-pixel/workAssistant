@@ -5,6 +5,8 @@
  *   - 先画缓存再刷新，页头提示同步状态；读取失败的提示
  *   - 日抽屉：当天明细、还差多少；填报表单校验、提交内容（日期=所点的这天，可补填过去）；
  *     自动算剩余工时；未来日期不能填；提交成功后日历刷新
+ *   - 每条工时可修改 / 删除：内联编辑表单、校验、PUT / DELETE 请求内容；剩余填 0 先确认「任务将标记为已完成」，
+ *     取消则不发请求；删除先确认；全员视角不提供修改 / 删除
  *   - 标签页叫「工作日历」，页头标题同步
  *   - 统计面板：按执行 / 任务 Top5；「我的 / 全员」切换：团队格子、成员 × 日期热力图、全员抽屉（只读）；
  *     全员先画缓存再刷新、第一次慢的提示
@@ -90,6 +92,22 @@ function setup(state = {}) {
       return reply({ success: true, data: TEAM, syncedAt: Date.now(), fromCache: false });
     }
     if (u === '/api/efforts/tasks') return reply({ success: true, data: TASKS });
+    if (u === '/api/efforts' && method === 'POST' && body.left === 0 && !body.finish) return reply({ success: false, code: 'CONFIRM_FINISH', message: '剩余工时为 0：禅道会把这个任务标记为「已完成」。确认要完成吗？' }, 400);
+    if (/^\/api\/efforts\/\d+$/.test(u) && method === 'PUT') {
+      if (body.left === 0 && !body.finish) return reply({ success: false, code: 'CONFIRM_FINISH', message: '剩余工时为 0：禅道会把这个任务标记为「已完成」。确认要完成吗？' }, 400);
+      if (state.putFail) return reply({ success: false, message: '日期不能晚于今天' }, 400);
+      state.put = { id: u.split('/').pop(), body };
+      state.days = JSON.parse(JSON.stringify(state.days || EFFORTS.days));
+      for (const d of Object.values(state.days)) { const it = d.items.find(x => x.effortId === state.put.id); if (it) { d.hours = Math.round((d.hours - it.consumed + body.consumed) * 10) / 10; Object.assign(it, { consumed: body.consumed, left: body.left, work: body.work }); } }
+      return reply({ success: true, data: { success: true } });
+    }
+    if (/^\/api\/efforts\/\d+\?taskId=/.test(u) && method === 'DELETE') {
+      state.deleted = u;
+      state.days = JSON.parse(JSON.stringify(state.days || EFFORTS.days));
+      const id = u.split('?')[0].split('/').pop();
+      for (const d of Object.values(state.days)) { const i = d.items.findIndex(x => x.effortId === id); if (i >= 0) { d.hours = Math.round((d.hours - d.items[i].consumed) * 10) / 10; d.items.splice(i, 1); } }
+      return reply({ success: true, data: { success: true } });
+    }
     if (u === '/api/efforts' && method === 'POST') {
       if (state.postFail) return reply({ success: false, message: '禅道没有接受这条工时' }, 502);
       state.posted = body;
@@ -103,6 +121,8 @@ function setup(state = {}) {
     return reply({ success: false, message: 'not mocked' }, 404);
   };
   win.Toast = { success: (m) => state.toasts.push(['success', m]), error: (m) => state.toasts.push(['error', m]), info() {}, warning() {} };
+  state.confirms = [];
+  win.Confirm = { show: async (title, msg) => { state.confirms.push([title, msg]); return state.confirmAnswer !== false; } };
   win.eval(`const API_BASE_URL='http://127.0.0.1:3721';\n${REP}\n${EFF}\nwindow.ReportApi = ReportApi;`);
   return { win, doc: win.document, state };
 }
@@ -113,7 +133,7 @@ function setup(state = {}) {
   win.ReportPage.month = '2025-03';
   win.ReportPage.show(); await tick(40);
   const root = doc.getElementById('reportMode');
-  const cell = (d) => root.querySelector(`[data-effort-day="2025-03-${pad(d)}"]`);
+  const cell = (d) => doc.querySelector(`[data-effort-day="2025-03-${pad(d)}"]`);   // 用当前的 doc（后面会重建页面）
   check('页头标题是「工作日历」', /工作日历/.test(root.querySelector('.task-board-header h2').textContent));
 
   // ── 日格子 ──
@@ -128,8 +148,9 @@ function setup(state = {}) {
   // ── 页头统计 ──
   const stats = doc.getElementById('reportStats');
   check('页头：本月累计 12.5h', /本月累计/.test(stats.textContent) && /12\.5h/.test(stats.textContent));
-  // 3 月 3~19 的工作日里不满 8 小时的：3~7(5) + 10~14(5) + 17 满 + 18 不足 + 19 = 12 天
-  check('页头：缺填天数 = 过去工作日里不满标准工时的', /12 天/.test(stats.textContent), stats.textContent.replace(/\s+/g, ' '));
+  // 3 月 3~19 的工作日：3~7(5) + 10~14(5) + 19 = 11 天一小时都没填；17 满、18 填了 3.5h（不足但不算缺填）
+  check('页头：缺填天数 = 过去工作日里一小时都没填的（填了但不足的不算）', /11 天/.test(stats.textContent), stats.textContent.replace(/\s+/g, ' '));
+  check('填了 3.5h 的 3/18 不算缺填：格子是琥珀色，不是红色', cell(18).classList.contains('is-partial') && !cell(18).classList.contains('is-missing'));
   stats.querySelector('[data-effort-day]').click(); await tick(20);
   check('点缺填 → 打开第一个缺填日（3/3）的抽屉', doc.getElementById('effortDrawer').classList.contains('active') && /3月3日/.test(doc.getElementById('effortDrawerTitle').textContent));
   doc.querySelector('#effortDrawer [data-eff="close"]').click();
@@ -166,10 +187,86 @@ function setup(state = {}) {
   check('成功后提示并重新向禅道要工时', state.toasts.some(t => t[0] === 'success') && state.reqs.filter(r => r.u === '/api/efforts?month=2025-03').length >= 2);
   check('成功后抽屉更新为 8h（已填满）', /已填 8h \/ 8h/.test(meta()) && /已填满/.test(meta()), meta());
   check('成功后日历格子变绿', cell(18).classList.contains('is-full'));
-  check('成功后页头缺填天数少了一天', /11 天/.test(doc.getElementById('reportStats').textContent));
+  check('补填的是本来就有工时的一天：缺填天数不变（11 天）', /11 天/.test(doc.getElementById('reportStats').textContent));
+  doc.querySelector('#effortDrawer [data-eff="close"]').click();
+
+  // ── 修改 / 删除 ──
+  ({ win, doc, state } = setup({}));
+  win.ReportPage.month = '2025-03'; win.ReportPage.show(); await tick(60);
+  cell(17).click(); await tick(40);
+  let dr = doc.getElementById('effortDrawer');
+  if (!dr) throw new Error('抽屉没打开：cell(17) 不存在？' + doc.querySelectorAll('[data-effort-day]').length);
+  check('每条工时有「修改」「删除」按钮', dr.querySelectorAll('.effort-item').length === 1 && !!dr.querySelector('[data-eff="edit"][data-id="1"]') && !!dr.querySelector('[data-eff="del"][data-id="1"]'));
+  dr.querySelector('[data-eff="edit"]').click();
+  const ef = dr.querySelector('.effort-edit-form');
+  check('点修改：这条变成内联表单，带出日期 / 消耗 / 剩余 / 内容', !!ef && ef.querySelector('[name="consumed"]').value === '8' && ef.querySelector('[name="left"]').value === '0' && ef.querySelector('[name="work"]').value === '联调完成' && ef.querySelector('[name="date"]').value === '2025-03-17');
+  dr.querySelector('[data-eff="edit-cancel"]').click();
+  check('取消：回到原样，没发任何修改请求', !dr.querySelector('.effort-edit-form') && !state.reqs.some(r => r.method === 'PUT'));
+  dr.querySelector('[data-eff="edit"]').click();
+  const sub = (form) => form.dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
+  let f3 = dr.querySelector('.effort-edit-form');
+  f3.querySelector('[name="consumed"]').value = '';
+  sub(f3); await tick(5);
+  check('修改：消耗为空被拦截', /消耗工时/.test(f3.querySelector('[data-eff-edit-err]').textContent) && !state.reqs.some(r => r.method === 'PUT'));
+  f3.querySelector('[name="consumed"]').value = '6'; f3.querySelector('[name="left"]').value = ''; sub(f3); await tick(5);
+  check('修改：剩余为空被拦截（0 = 做完，必须明确填）', /剩余工时/.test(f3.querySelector('[data-eff-edit-err]').textContent));
+  f3.querySelector('[name="left"]').value = '2'; f3.querySelector('[name="work"]').value = '改后的内容'; sub(f3); await tick(60);
+  check('修改：PUT /api/efforts/1，带任务 id、日期、消耗、剩余、内容', state.put && state.put.id === '1' && state.put.body.taskId === '10' && state.put.body.date === '2025-03-17' && state.put.body.consumed === 6 && state.put.body.left === 2 && state.put.body.work === '改后的内容', JSON.stringify(state.put));
+  check('修改成功：提示、抽屉与日历格子更新（8h → 6h，变成不足）', state.toasts.some(t => t[1] === '工时已修改') && /已填 6h/.test(dr.querySelector('[data-eff-meta]').textContent) && cell(17).classList.contains('is-partial'), dr.querySelector('[data-eff-meta]').textContent);
+
+  // 剩余填 0：先确认
+  dr.querySelector('[data-eff="edit"]').click();
+  f3 = dr.querySelector('.effort-edit-form');
+  f3.querySelector('[name="left"]').value = '0'; state.confirmAnswer = false; state.put = null; sub(f3); await tick(40);
+  check('剩余填 0：弹「任务将标记为已完成」确认；点取消 → 不修改，表单还在', state.confirms.some(c => /已完成/.test(c[0])) && !state.put && !!dr.querySelector('.effort-edit-form'));
+  state.confirmAnswer = true; sub(f3); await tick(60);
+  check('确认完成后带 finish:true 重发，修改成功', state.put && state.put.body.left === 0 && state.put.body.finish === true);
+
+  // 禅道拒绝
+  state.putFail = true;
+  dr.querySelector('[data-eff="edit"]').click();
+  f3 = dr.querySelector('.effort-edit-form'); sub(f3); await tick(40);
+  check('修改被禅道拒绝：显示原因，表单保留可重试', /日期不能晚于今天/.test(f3.querySelector('[data-eff-edit-err]').textContent) && !f3.querySelector('button[type="submit"]').disabled);
+  state.putFail = false;
+  dr.querySelector('[data-eff="edit-cancel"]').click();
+
+  // 删除
+  state.confirmAnswer = false;
+  dr.querySelector('[data-eff="del"]').click(); await tick(20);
+  check('删除：先确认；点取消 → 不发 DELETE', state.confirms.some(c => /删除工时/.test(c[0])) && !state.deleted);
+  state.confirmAnswer = true;
+  dr.querySelector('[data-eff="del"]').click(); await tick(60);
+  check('删除：DELETE /api/efforts/1?taskId=10', state.deleted === '/api/efforts/1?taskId=10', state.deleted);
+  check('删除成功：提示、这天回到 0h、格子变回「未填」', state.toasts.some(t => t[1] === '工时已删除') && /已填 0h/.test(dr.querySelector('[data-eff-meta]').textContent) && cell(17).classList.contains('is-missing'), dr.querySelector('[data-eff-meta]').textContent);
+  dr.querySelector('[data-eff="close"]').click();
+
+  // 新增：剩余必填、0 要确认
+  ({ win, doc, state } = setup({}));
+  win.ReportPage.month = '2025-03'; win.ReportPage.show(); await tick(60);
+  cell(19).click(); await tick(40);
+  dr = doc.getElementById('effortDrawer');
+  const nf = dr.querySelector('.effort-form');
+  const setn = (name, v) => { const el = nf.querySelector(`[name="${name}"]`); el.value = v; el.dispatchEvent(new win.Event('input', { bubbles: true })); el.dispatchEvent(new win.Event('change', { bubbles: true })); };
+  setn('taskId', '10'); setn('consumed', '2'); setn('work', '新增'); nf.querySelector('[name="left"]').value = '';
+  sub(nf); await tick(5);
+  check('新增：剩余不填被拦截（不再默默当成 0）', /请填写剩余工时/.test(dr.querySelector('[data-eff-err]').textContent) && !state.reqs.some(r => r.method === 'POST'));
+  nf.querySelector('[name="left"]').value = '0'; state.confirmAnswer = false; sub(nf); await tick(40);
+  check('新增：剩余 0 → 弹确认，取消则不记', state.confirms.some(c => /已完成/.test(c[0])) && !state.posted);
+  state.confirmAnswer = true; sub(nf); await tick(60);
+  check('新增：确认后带 finish:true 重发并成功', state.posted && state.posted.left === 0 && state.posted.finish === true);
+  dr.querySelector('[data-eff="close"]').click();
+
+  // 全员视角没有修改 / 删除
+  ({ win, doc, state } = setup({}));
+  win.ReportPage.month = '2025-03'; win.ReportPage.show(); await tick(60);
+  doc.querySelector('[data-report-lens="team"]').click(); await tick(80);
+  doc.querySelector('[data-effort-day="2025-03-17"]').click(); await tick(20);
+  check('全员视角：抽屉里没有修改 / 删除按钮', !doc.querySelector('#effortDrawer [data-eff="edit"]') && !doc.querySelector('#effortDrawer [data-eff="del"]'));
   doc.querySelector('#effortDrawer [data-eff="close"]').click();
 
   // ── 禅道拒绝：显示原因，按钮恢复 ──
+  ({ win, doc, state } = setup({}));
+  win.ReportPage.month = '2025-03'; win.ReportPage.show(); await tick(60);
   state.postFail = true;
   cell(19).click(); await tick(40);
   const f2 = doc.querySelector('#effortDrawer .effort-form');

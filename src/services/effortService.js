@@ -13,7 +13,7 @@
  * 局限：只覆盖「我相关的任务」。别人的任务上我记过工时、而我既不是负责人也没创建 / 完成过它，不会出现——
  * 等确认禅道有「我的日志」汇总接口后可以补齐。
  */
-import { fetchMyList, getTaskEfforts, recordTaskEstimate, isConfigured, getZentaoCookies, cookiesToString, getTeamMembers, listExecutionTasks } from './zentaoService.js';
+import { fetchMyList, getTaskEfforts, recordTaskEstimate, editTaskEstimate, deleteTaskEstimate, isConfigured, getZentaoCookies, cookiesToString, getTeamMembers, listExecutionTasks } from './zentaoService.js';
 import { createCache, singleFlight } from './zentaoCache.js';
 import { decodeZentaoText } from '../utils/text.js';
 import { config } from '../config.js';
@@ -52,6 +52,10 @@ async function mapLimit(items, limit, fn) {
   return out;
 }
 
+/** 缓存条目最多信任多久：禅道网页上只改了某条工时的日期 / 内容时，任务签名不变，靠它兜底自愈 */
+const ENTRY_TTL_MS = 6 * 60 * 60 * 1000;
+const entryFresh = (e) => !!(e && e.at && Date.now() - e.at < ENTRY_TTL_MS);
+
 /** 缓存键：任务改过 / 累计消耗变了，就重读它的工时 */
 const taskSig = (t) => `${t.lastEditedDate || ''}|${t.consumed ?? ''}`;
 
@@ -81,7 +85,7 @@ function sync(from) {
       const id = String(t.id);
       const sig = taskSig(t);
       // 周期开始后没改过的任务不可能有周期内的工时；已经缓存过的、签名没变的直接沿用
-      if (old[id] && old[id].sig === sig) { tasks[id] = old[id]; continue; }
+      if (old[id] && old[id].sig === sig && entryFresh(old[id])) { tasks[id] = old[id]; continue; }
       const edited = dayPart(t.lastEditedDate);
       if (edited && edited < from) { if (old[id]) tasks[id] = old[id]; continue; }
       todo.push({ id, sig, t });
@@ -91,6 +95,7 @@ function sync(from) {
         const efforts = await getTaskEfforts(id, CH);
         tasks[id] = {
           sig,
+          at: Date.now(),
           name: decodeZentaoText(t.name || `任务 #${id}`),
           exec: decodeZentaoText(t.executionName || ''),
           efforts
@@ -176,35 +181,97 @@ async function listFillableTasks() {
     .sort((a, b) => rank[a.status] - rank[b.status] || b.lastEditedDate.localeCompare(a.lastEditedDate));
 }
 
-/**
- * 记工时（写入禅道）。date 可以是过去的日期（补填），不能是将来。
- * 成功后让该任务的工时缓存失效，下次读取会重新向禅道要。
- */
-async function addEffort({ taskId, date, consumed, left, work } = {}) {
-  assertReady();
-  if (!/^\d+$/.test(String(taskId || ''))) throw new Error('请选择任务');
+/** 工时入参校验（新增和修改共用），返回规整后的值；不合格直接抛带原因的错 */
+function normalizeEffortInput({ date, consumed, left, work, finish } = {}) {
   const today = ymd(new Date());
   const day = date || today;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error('日期格式应为 YYYY-MM-DD');
   if (day > today) throw new Error('不能给将来的日期填工时');
   const hours = Number(consumed);
   if (!(hours > 0) || hours > 24) throw new Error('消耗工时应大于 0 且不超过 24 小时');
-  const remain = left === undefined || left === null || left === '' ? 0 : Number(left);
+  if (left === undefined || left === null || String(left).trim() === '') throw new Error('请填写剩余工时（填 0 表示这个任务做完了）');
+  const remain = Number(left);
   if (!(remain >= 0)) throw new Error('剩余工时不能为负数');
   if (!String(work || '').trim()) throw new Error('请填写工作内容（它会进入日报）');
+  // 剩余填 0：禅道网页上会弹确认「任务将标记为已完成」；直接调接口没有这个确认，会静默把任务标成已完成，
+  // 所以必须由调用方（界面）明确确认后带 finish:true 再来
+  if (remain === 0 && finish !== true) {
+    const err = new Error('剩余工时为 0：禅道会把这个任务标记为「已完成」。确认要完成吗？');
+    err.code = 'CONFIRM_FINISH';
+    throw err;
+  }
+  return { date: day, consumed: hours, left: remain, work: String(work).trim() };
+}
 
-  const r = await recordTaskEstimate(taskId, { work: String(work).trim(), consumed: hours, left: remain, date: day });
+/**
+ * 记工时（写入禅道）。date 可以是过去的日期（补填），不能是将来。
+ * 成功后让该任务的工时缓存失效，下次读取会重新向禅道要。
+ */
+async function addEffort({ taskId, date, consumed, left, work, finish } = {}) {
+  assertReady();
+  if (!/^\d+$/.test(String(taskId || ''))) throw new Error('请选择任务');
+  const v = normalizeEffortInput({ date, consumed, left, work, finish });
+  const r = await recordTaskEstimate(taskId, { work: v.work, consumed: v.consumed, left: v.left, date: v.date });
   if (r && r.success) invalidateTask(taskId);
   return r;
 }
 
-/** 让某任务的工时缓存失效（写操作之后调用） */
+/** 读出这条工时（必须是我自己的）。找不到 / 不是我的就抛错 */
+async function loadOwnEffort(taskId, effortId, CH) {
+  if (!/^\d+$/.test(String(taskId || ''))) throw new Error('请选择任务');
+  if (!/^\d+$/.test(String(effortId || ''))) throw new Error('非法的工时记录 ID');
+  const list = await getTaskEfforts(taskId, CH);
+  const e = list.find(x => x.id === String(effortId));
+  if (!e) throw new Error('这条工时已经不存在了（可能已在别处删除），请刷新后再试');
+  if (String(e.account).toLowerCase() !== String(config.zentao.username || '').toLowerCase()) throw new Error('只能修改自己的工时');
+  return e;
+}
+
+/**
+ * 修改一条工时（日期 / 消耗 / 剩余 / 工作内容）。禅道返回的是 HTML 脚本片段，没有可靠的成功标志，
+ * 所以改完会重新读一次工时记录核对，核对不上就报错，不让界面误以为成功。
+ */
+async function editEffort({ taskId, effortId, date, consumed, left, work, finish } = {}) {
+  assertReady();
+  const v = normalizeEffortInput({ date, consumed, left, work, finish });
+  const CH = cookiesToString(await getZentaoCookies());
+  await loadOwnEffort(taskId, effortId, CH);
+  const r = await editTaskEstimate(effortId, v);
+  invalidateTask(taskId);
+  if (!r.success) throw new Error(r.message || '禅道没有接受这次修改');
+  const after = (await getTaskEfforts(taskId, CH)).find(x => x.id === String(effortId));
+  if (!after || after.date !== v.date || Math.abs(after.consumed - v.consumed) > 1e-9) throw new Error('禅道没有接受这次修改（回读核对不一致），请刷新后重试');
+  return { success: true, message: '工时已修改' };
+}
+
+/** 删除一条工时（必须是我自己的）。删完回读核对记录确实没了 */
+async function deleteEffort({ taskId, effortId } = {}) {
+  assertReady();
+  const CH = cookiesToString(await getZentaoCookies());
+  await loadOwnEffort(taskId, effortId, CH);
+  const r = await deleteTaskEstimate(effortId);
+  invalidateTask(taskId);
+  if (!r.success) throw new Error(r.message || '禅道没有删除这条工时');
+  const still = (await getTaskEfforts(taskId, CH)).some(x => x.id === String(effortId));
+  if (still) throw new Error('删除没有生效（回读核对这条工时还在），请刷新后重试');
+  return { success: true, message: '工时已删除' };
+}
+
+/** 让某任务的工时缓存失效（写操作之后调用）：「我的」和「全员」两份都清 */
 function invalidateTask(taskId) {
+  const id = String(taskId);
   const c = cache.read();
-  if (!c || !c.tasks) return;
-  const tasks = { ...c.tasks };
-  delete tasks[String(taskId)];
-  cache.write({ tasks, syncedAt: 0 });
+  if (c && c.tasks) {
+    const tasks = { ...c.tasks };
+    delete tasks[id];
+    cache.write({ tasks, syncedAt: 0 });
+  }
+  const t = teamCache.read();
+  if (t && t.tasks && t.tasks[id]) {
+    const tasks = { ...t.tasks };
+    delete tasks[id];
+    teamCache.write({ tasks, syncedAt: 0 });
+  }
 }
 
 /* ───────────────────────── 全员 ───────────────────────── */
@@ -238,13 +305,13 @@ function syncTeam(from) {
       const id = String(t.id);
       const sig = taskSig(t);
       const meta = { name: decodeZentaoText(t.name || `任务 #${id}`), exec: decodeZentaoText(t.executionName || ''), project: decodeZentaoText(t.projectName || '') };
-      if (old[id] && old[id].sig === sig) { tasks[id] = { ...old[id], ...meta }; continue; }
+      if (old[id] && old[id].sig === sig && entryFresh(old[id])) { tasks[id] = { ...old[id], ...meta }; continue; }
       const edited = dayPart(t.lastEditedDate);
       if (edited && edited < from) { if (old[id]) tasks[id] = { ...old[id], ...meta }; continue; }
       todo.push({ id, sig, meta });
     }
     await mapLimit(todo, 6, async ({ id, sig, meta }) => {
-      try { tasks[id] = { sig, ...meta, efforts: await getTaskEfforts(id, CH) }; }
+      try { tasks[id] = { sig, at: Date.now(), ...meta, efforts: await getTaskEfforts(id, CH) }; }
       catch { if (old[id]) tasks[id] = old[id]; }
     });
     const syncedAt = Date.now();
@@ -313,7 +380,7 @@ async function getTeamMonthEfforts(month, { cacheOnly = false, maxAge = 0 } = {}
 function cachedTaskEfforts(taskId, sig) {
   const c = teamCache.read();
   const e = c && c.tasks && c.tasks[String(taskId)];
-  return e && e.sig === sig ? e.efforts : null;
+  return e && e.sig === sig && entryFresh(e) ? e.efforts : null;
 }
 
 /** 报告采集用：把刚读到的任务工时批量写进缓存（一次落盘） */
@@ -322,14 +389,14 @@ function storeTaskEfforts(entries) {
   if (!keys.length) return;
   const c = teamCache.read();
   const tasks = { ...((c && c.tasks) || {}) };
-  for (const id of keys) tasks[id] = { ...(tasks[id] || {}), ...entries[id] };
+  for (const id of keys) tasks[id] = { ...(tasks[id] || {}), at: Date.now(), ...entries[id] };
   teamCache.write({ tasks, syncedAt: (c && c.syncedAt) || 0 });
 }
 
 /* ───────────────────────── 缺填提醒 ───────────────────────── */
 
 /**
- * 最近几个工作日里工时不足的日子（待办页提醒用）。不含今天（今天还没过完），周末不算。
+ * 最近几个工作日里「一小时都没填」的日子（待办页提醒用）。有工时就不算缺填（哪怕不满标准工时）；不含今天，周末不算。
  * @returns {Promise<Array<{date:string, hours:number, standard:number}>>} 最近的在前
  */
 async function getEffortGaps({ now = new Date(), lookback = 7, limit = 3 } = {}) {
@@ -345,12 +412,12 @@ async function getEffortGaps({ now = new Date(), lookback = 7, limit = 3 } = {})
   const std = standardHours();
   return dates
     .map(date => ({ date, hours: (byMonth[date.slice(0, 7)].days[date] || { hours: 0 }).hours, standard: std }))
-    .filter(g => g.hours < std)
+    .filter(g => g.hours <= 0)
     .slice(0, limit);
 }
 
 export {
-  getMonthEfforts, getTeamMonthEfforts, getDayHours, listFillableTasks, addEffort, invalidateTask, getEffortGaps,
+  getMonthEfforts, getTeamMonthEfforts, getDayHours, listFillableTasks, addEffort, editEffort, deleteEffort, invalidateTask, getEffortGaps, normalizeEffortInput,
   cachedTaskEfforts, storeTaskEfforts, aggregate, aggregateTeam, monthRange, standardHours
 };
 

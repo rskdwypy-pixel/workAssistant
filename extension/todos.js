@@ -154,7 +154,7 @@ const TodoPage = {
     body.querySelectorAll('.todo-item').forEach(b => b.addEventListener('click', () => this.go(b.dataset.kind, b.dataset.id)));
   },
 
-  /** 工时缺填提醒：最近几个工作日里不满标准工时的；点一下跳到工作日历并打开最近那天的抽屉 */
+  /** 工时缺填提醒：最近几个工作日里一小时都没填的；点一下跳到工作日历并打开最近那天的抽屉 */
   renderGap(d) {
     const el = document.getElementById('todoGap');
     if (!el) return;
@@ -165,10 +165,9 @@ const TodoPage = {
       const diff = today ? Math.round((new Date(today + 'T00:00:00') - new Date(date + 'T00:00:00')) / 86400000) : 0;
       return diff === 1 ? '昨天' : diff === 2 ? '前天' : `${Number(date.slice(5, 7))}月${Number(date.slice(8))}日`;
     };
-    const fmt = (n) => `${Math.round(n * 10) / 10}`;
-    const parts = gaps.map(g => `${label(g.date)} ${fmt(g.hours)}/${fmt(g.standard)}h`);
+    const parts = gaps.map(g => label(g.date));
     el.hidden = false;
-    el.innerHTML = `<button type="button" class="todo-gap-btn" data-date="${tdEsc(gaps[0].date)}">⏱ 工时待补：${parts.map(tdEsc).join('、')} <span>去补填 ›</span></button>`;
+    el.innerHTML = `<button type="button" class="todo-gap-btn" data-date="${tdEsc(gaps[0].date)}">⏱ 这几天一小时工时都没填：${parts.map(tdEsc).join('、')} <span>去补填 ›</span></button>`;
     el.querySelector('.todo-gap-btn').addEventListener('click', (e) => this.goEffort(e.currentTarget.dataset.date));
   },
 

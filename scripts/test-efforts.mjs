@@ -7,7 +7,7 @@
  *   - standardHours：默认 8，配置可改，非法值回退 8
  *   - aggregateTeam：全员按人 / 按天汇总，admin 和成员名单之外的人不算
  *   - 全员只读缓存（不请求禅道）；报告采集共用的任务工时缓存（签名一致才命中）
- *   - getEffortGaps：最近几个工作日里不满标准工时的（跳过周末和今天，最近的在前，最多 3 个）
+ *   - getEffortGaps：最近几个工作日里一小时都没填的（跳过周末和今天，最近的在前，最多 3 个；填了但不足的不算）
  */
 import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -109,8 +109,8 @@ _caches.mine.write({ syncedAt: Date.now(), tasks: { 10: { sig: 'x', name: '联�
   mk('2025-03-18', 3.5), mk('2025-03-17', 8), mk('2025-03-14', 0.0001 > 1 ? 1 : 0), mk('2025-03-13', 8), mk('2025-03-12', 8), mk('2025-03-19', 1)] } } });
 // 今天 = 周三 3/19：往前 7 天里的工作日是 18、17、14、13、12（15、16 是周末）
 const gaps = await getEffortGaps({ now: new Date(2025, 2, 19, 10) });
-check('缺填：跳过今天和周末，不满标准工时的最近的在前（18 日 3.5h、14 日 0h）', gaps.map(g => `${g.date}:${g.hours}`).join() === '2025-03-18:3.5,2025-03-14:0', gaps.map(g => `${g.date}:${g.hours}`).join());
-check('缺填：满了的日子（17、13、12）不提醒', !gaps.some(g => ['2025-03-17', '2025-03-13', '2025-03-12'].includes(g.date)));
+check('缺填：只算一小时都没填的工作日（14 日 0h），跳过今天和周末', gaps.map(g => `${g.date}:${g.hours}`).join() === '2025-03-14:0', gaps.map(g => `${g.date}:${g.hours}`).join());
+check('缺填：填了但不足的（18 日 3.5h）和满了的（17、13、12）都不算', !gaps.some(g => ['2025-03-18', '2025-03-17', '2025-03-13', '2025-03-12'].includes(g.date)));
 _caches.mine.write({ syncedAt: Date.now(), tasks: { 10: { sig: 'x', name: 'a', exec: '', efforts: ['2025-03-18', '2025-03-17', '2025-03-14', '2025-03-13', '2025-03-12'].map(d => mk(d, 8)) } } });
 check('缺填：都填满时没有提醒', (await getEffortGaps({ now: new Date(2025, 2, 19, 10) })).length === 0);
 _caches.mine.write({ syncedAt: Date.now(), tasks: {} });

@@ -1279,6 +1279,61 @@ async function recordTaskEstimate(taskId, effortData) {
 }
 
 /**
+ * 修改一条工时记录（task-editEstimate-{工时记录ID}）。
+ * 真实抓包（ZenTao 18.3）：POST application/x-www-form-urlencoded，字段 date / consumed / left / work；
+ * 成功返回一段跳转脚本 parent.location='/zentao/task-recordEstimate-{任务ID}.html'，失败是 alert('原因')。
+ * 注意：「剩余 left」在部分任务状态下是只读的（服务端算），传了也会被忽略。
+ * @returns {Promise<{success:boolean, message:string}>}
+ */
+async function editTaskEstimate(effortId, { date, consumed, left, work } = {}) {
+  try {
+    if (!/^\d+$/.test(String(effortId))) return { success: false, message: '非法的工时记录 ID' };
+    const CH = cookiesToString(await getZentaoCookies());
+    const params = new URLSearchParams();
+    params.append('date', String(date));
+    params.append('consumed', String(consumed));
+    params.append('left', String(left));
+    params.append('work', String(work || ''));
+    const resp = await fetch(`${zentaoBase()}/zentao/task-editEstimate-${effortId}.html?onlybody=yes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest', 'Cookie': CH },
+      body: params.toString(),
+      redirect: 'manual'
+    });
+    const text = await resp.text();
+    const reason = extractZentaoError(text);
+    if (reason) return { success: false, message: reason };
+    if (/task-recordEstimate-\d+/.test(text) || isZentaoSubmitSuccess(text)) return { success: true, message: '工时已修改' };
+    return { success: false, message: '禅道没有接受这次修改' };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+/**
+ * 删除一条工时记录。真实抓包：删除是两步 GET（没有 POST）——
+ * task-deleteEstimate-{id} 只返回一段 confirm() 脚本，确认后才请求 task-deleteEstimate-{id}-yes。
+ * 浏览器里的 confirm 由插件界面负责，这里直接发第二步。
+ * @returns {Promise<{success:boolean, message:string}>}
+ */
+async function deleteTaskEstimate(effortId) {
+  try {
+    if (!/^\d+$/.test(String(effortId))) return { success: false, message: '非法的工时记录 ID' };
+    const CH = cookiesToString(await getZentaoCookies());
+    const resp = await fetch(`${zentaoBase()}/zentao/task-deleteEstimate-${effortId}-yes.html?onlybody=yes`, {
+      headers: { 'Accept': 'text/html', 'X-Requested-With': 'XMLHttpRequest', 'Cookie': CH },
+      redirect: 'manual'
+    });
+    const text = await resp.text();
+    const reason = extractZentaoError(text);
+    if (reason) return { success: false, message: reason };
+    return { success: resp.status < 400, message: resp.status < 400 ? '工时已删除' : `HTTP ${resp.status}` };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+/**
  * 获取所有执行列表（从HTML页面解析，获取准确的type字段）
  * @returns {Promise<Array>} 执行列表
  * @throws {Error} 禅道不可达或页面结构变化导致解析失败时抛出（不再静默返回空数组）
@@ -2713,6 +2768,8 @@ export {
   refreshZentaoUsers,
   updateTaskStatus,
   recordTaskEstimate,
+  editTaskEstimate,
+  deleteTaskEstimate,
   getExecutions,
   isConfigured,
   getKanbanParams,
