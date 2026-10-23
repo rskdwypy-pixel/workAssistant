@@ -84,9 +84,9 @@ try {
   // ============ 候选池 ============
   const slim = TASKS.map(af.slimPoolTask);
   const pool0303 = af.poolFor('2025-03-03', slim).map(t => t.id);
-  check('候选池：进行中（剩余 > 0）+ 当时还没完成的已完成任务（3/10 才完成的 13 号）', pool0303.join() === '10,13', pool0303.join());
-  check('候选池：不含未开始（12）、剩余为 0 的进行中（14）、早已完成的（16）、已关闭的（17）', !['12', '14', '16', '17'].some(id => af.poolFor('2025-03-05', slim).some(t => t.id === id)));
-  check('候选池：已完成的任务只在完成日及之前可用（13 号 3/10 完成：3/10 可用，3/11 起不可用）', af.poolFor('2025-03-10', slim).some(t => t.id === '13') && !af.poolFor('2025-03-11', slim).some(t => t.id === '13'));
+  check('候选池：进行中（剩余 > 0）+ 所有已完成的任务（3/10 才完成的 13 号、2 月就完成的 16 号都在）', pool0303.join() === '10,13,16', pool0303.join());
+  check('候选池：不含未开始（12）、剩余为 0 的进行中（14）、已关闭的（17）；早已完成的（16）可选', !['12', '14', '17'].some(id => af.poolFor('2025-03-05', slim).some(t => t.id === id)) && af.poolFor('2025-03-05', slim).some(t => t.id === '16'));
+  check('候选池：已完成的任务完成日之后也可选（13 号 3/10 完成：3/11 起仍在池里）', af.poolFor('2025-03-10', slim).some(t => t.id === '13') && af.poolFor('2025-03-11', slim).some(t => t.id === '13'));
   check('候选池：已完成的任务也要求当天已创建（把 13 号改成 3/8 才创建，3/7 就不可用）', !af.poolFor('2025-03-07', [{ ...slim.find(t => t.id === '13'), opened: '2025-03-08' }]).length);
   check('封顶：已完成的任务没有「剩余」可参照，按单条上限 4h', af.chunkCap({ status: 'done', left: 0 }) === 4);
   check('候选池：任务创建在当天之后不进池（11 号任务 3/5 才创建）', !af.poolFor('2025-03-04', slim).some(t => t.id === '11') && af.poolFor('2025-03-05', slim).some(t => t.id === '11'));
@@ -207,7 +207,7 @@ try {
   const d17 = p.days.find(d => d.date === '2025-03-17');
   check('逐日：补的小时 = 缺口（17 日已填 2h → 补 6h），候选来自当天池', d17 && d17.gap === 6 && d17.entries.reduce((n, e) => n + e.hours, 0) === 6 && d17.entries.every(e => d17.pool.some(t => t.id === e.taskId)));
   check('逐日：已有工时的执行（迭代A）出现在权重里不报错，方案有 1~3 条', d17.entries.length >= 1 && d17.entries.length <= 3);
-  const none = af.planDates({ ...ctx, dates: ['2025-03-19'], tasks: slim.filter(t => t.id !== '10' && t.id !== '11' && t.id !== '15') });
+  const none = af.planDates({ ...ctx, dates: ['2025-03-19'], tasks: slim.filter(t => !['10', '11', '13', '15', '16'].includes(t.id)) });
   check('当天没有候选任务：跳过并说明，不硬凑', none.days.length === 0 && /没有你在做的任务可用/.test(none.skipped[0].reason), JSON.stringify(none.skipped));
 
   // ============ AI 输出解析 / 降级 ============
@@ -241,9 +241,9 @@ try {
   const plan = await af.buildPlan({ month: '2025-03', seed: 3 }, { ai: fakeAi, now: NOW });
   const planDates = plan.days.map(d => d.date);
   check('方案：本月过去的工作日里缺工时的天（不含 18 日已满、不含今天及以后）', !planDates.includes('2025-03-18') && !planDates.includes('2025-03-20') && planDates.includes('2025-03-17') && planDates.includes('2025-03-03') && planDates.every(d => d < '2025-03-20' && ![0, 6].includes(new Date(`${d}T00:00:00`).getDay())), planDates.join());
-  check('方案：每天补的小时 = 缺口；任务都在当天候选池里；不含未开始 / 剩余 0 / 早已完成 / 已关闭', plan.days.every(d => d.entries.reduce((n, e) => n + e.hours, 0) === d.gap && d.entries.every(e => d.pool.some(t => t.id === e.taskId) && !['12', '14', '16', '17'].includes(e.taskId))));
-  check('方案：3/3、3/4 只有接口联调和 3/10 才完成的 13 号可选（写文档 3/5 才创建）', plan.days.filter(d => ['2025-03-03', '2025-03-04'].includes(d.date)).every(d => d.entries.every(e => ['10', '13'].includes(e.taskId))));
-  check('方案：3/11 起不会再出现 13 号（它 3/10 就完成了）', plan.days.filter(d => d.date >= '2025-03-11').every(d => d.entries.every(e => e.taskId !== '13')));
+  check('方案：每天补的小时 = 缺口；任务都在当天候选池里；不含未开始 / 剩余 0 / 已关闭', plan.days.every(d => d.entries.reduce((n, e) => n + e.hours, 0) === d.gap && d.entries.every(e => d.pool.some(t => t.id === e.taskId) && !['12', '14', '17'].includes(e.taskId))));
+  check('方案：3/3、3/4 可选的是接口联调和已完成的 13、16 号（写文档 3/5 才创建，不可选）', plan.days.filter(d => ['2025-03-03', '2025-03-04'].includes(d.date)).every(d => d.entries.every(e => ['10', '13', '16'].includes(e.taskId))));
+  check('方案：每天的候选池里都有已完成的任务可补，不再只剩一个选择', plan.days.every(d => d.pool.length >= 2));
   check('方案：条目和候选池里带着任务状态（界面据此标「已完成」）', plan.days.every(d => d.entries.every(e => ['doing', 'done'].includes(e.taskStatus)) && d.pool.every(t => ['doing', 'done'].includes(t.status))));
   check('方案：内容来自 AI，带 source=ai，并按天各调一次（共 ' + aiCalls.length + ' 次）', plan.aiUsed && plan.days.every(d => d.entries.every(e => e.source === 'ai' && e.work.length > 4)) && aiCalls.length === plan.days.length);
   check('方案：提示词里带了任务名、任务描述和用户自己以前的写法，并有不得编造的约束', aiCalls.some(p => /接口联调/.test(p) && /订单接口/.test(p) && /设计接口/.test(p)) && aiCalls.every(p => /不要编造/.test(p) && /不要写“已完成/.test(p)));

@@ -108,17 +108,17 @@ function slimPoolTask(t) {
 }
 
 /**
- * 某一天的候选池：只用「那一天正在做」的任务（先要求当天已存在：创建 / 预计开始 / 实际开始都不晚于当天）——
+ * 某一天的候选池：账号下所有「当天已存在」的任务（创建 / 预计开始 / 实际开始都不晚于当天）里能安全补记的——
  *   · 进行中：剩余工时 > 0
- *   · 已完成：当天还没完成（当天 ≤ 完成日）。已验证禅道允许在已完成的任务上补记工时且不改变其状态
- * 其它状态不进池：未开始 / 暂停（记工时会让禅道自动开始它）、已关闭 / 已取消（没验证过）。
+ *   · 已完成：不管哪天完成。已验证禅道允许在已完成的任务上补记工时且不改变其状态；
+ *     当天还没完成的最贴近事实，更早就完成的权重较低（见 planDay），但只有一个"当时在做"的任务时也能有别的可选
+ * 其它状态不进池：未开始 / 暂停（记工时会让禅道自动开始它，不可逆）、已关闭 / 已取消（没验证过）。
  */
 function poolFor(date, tasks) {
   return tasks.filter(t => {
     if ((t.opened && t.opened > date) || (t.estStarted && t.estStarted > date) || (t.realStarted && t.realStarted > date)) return false;
     if (t.status === 'doing') return t.left > 0;
-    if (t.status === 'done') return !t.finished || date <= t.finished;
-    return false;
+    return t.status === 'done';
   });
 }
 
@@ -215,6 +215,7 @@ function planDay(c) {
     if (t.deadline && daysBetween(date, t.deadline) >= 0 && daysBetween(date, t.deadline) <= 7) w += 1;   // 临近截止
     if (t.lastEdited && Math.abs(daysBetween(t.lastEdited, date)) <= 3) w += 1;                          // 最近编辑过
     if (t.status === 'done' && t.finished && daysBetween(date, t.finished) <= 7) w += 1.5;                 // 当时在做、不久后完成的任务
+    if (t.status === 'done' && t.finished && t.finished < date) w *= 0.4;                                  // 当天之前就完成了：能选，但不如当时在做的贴近事实
     const used = monthUse.get(t.id) || 0;
     if (used > 0) w *= Math.max(0.25, 1 - used * 0.12);                    // 本月已经被抽过的降权
     if (t.estimate > 0 && t.consumed >= t.estimate) w *= 0.4;              // 预计工时已用完
