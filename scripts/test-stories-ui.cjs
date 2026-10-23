@@ -12,7 +12,7 @@ const path = require('path');
 const { JSDOM } = require('jsdom');
 
 const EXT = path.join(__dirname, '..', 'extension');
-const SRC = fs.readFileSync(path.join(EXT, 'stories.js'), 'utf8');
+const SRC = fs.readFileSync(path.join(EXT, 'time-line.js'), 'utf8') + '\n' + fs.readFileSync(path.join(EXT, 'stories.js'), 'utf8');
 const HTML = fs.readFileSync(path.join(EXT, 'newtab.html'), 'utf8').replace(/<script[\s\S]*?<\/script>/g, '');
 
 const results = [];
@@ -22,7 +22,7 @@ const tick = (ms = 0) => new Promise(r => setTimeout(r, ms));
 const st = (id, title, status, tone, stage, pri, product, productName, assignedTo) =>
   ({ id, title, status, statusLabel: status, tone, stage, stageLabel: stage, pri, estimate: 0, category: 'feature', product, productName, openedBy: '张三', assignedTo });
 const STORIES = [
-  st('171', 'iOS通用自动化方案', 'active', 'active', '未开始', 3, '18', '真机拨测', '何俞龙'),
+  { ...st('171', 'iOS通用自动化方案', 'active', 'active', '未开始', 3, '18', '真机拨测', '何俞龙'), openedDate: '2026-10-21 14:30:05', lastEditedDate: '2026-10-23 09:12:44' },
   st('170', 'controller改版A', 'closed', 'closed', '已关闭', 3, '7', 'iOS移动端', ''),
   st('169', 'controller改版B', 'reviewing', 'review', '', 1, '7', 'iOS移动端', ''),
   st('168', '云管需求', 'active', 'active', '研发中', 2, '30', '云管平台', '李四')
@@ -30,7 +30,7 @@ const STORIES = [
 const STORY171 = {
   id: '171', title: 'iOS通用自动化方案', status: 'active', statusLabel: '激活', tone: 'active', stage: 'wait', stageLabel: '未开始',
   pri: 3, category: 'feature', source: 'customer', module: '0', product: '18', productName: '真机拨测',
-  openedBy: '杨凯', assignedTo: '何俞龙', assignedToAccount: 'nuanshu', openedDate: '2025-01-01', lastEditedDate: '',
+  openedBy: '杨凯', assignedTo: '何俞龙', assignedToAccount: 'nuanshu', openedDate: '2026-10-21 14:30:05', lastEditedDate: '2026-10-23 09:12:44',
   specRaw: '<p>需求描述</p><p>第二段</p>', verifyRaw: '<p>验收点一</p>',
   specHtml: '<p>需求描述 <img src="/api/zentao/files/9/content?ext=png" alt="" /></p>',
   verifyHtml: '<ul><li>验收点一</li></ul>', files: [{ id: '50', name: '原型.pdf', ext: 'pdf', size: 1024 }]
@@ -97,6 +97,7 @@ function setup(state = {}) {
   // 卡片内容
   const c171 = list.querySelector('[data-id="171"]');
   check('卡片含状态徽标 / 阶段 / 产品 / 指派', /激活|active/.test(c171.textContent) && /未开始/.test(c171.textContent) && /真机拨测/.test(c171.textContent) && /何俞龙/.test(c171.textContent));
+  check('需求卡片显示创建 / 修改时间；没有时间的需求不显示', /创建 10-21 14:30/.test(c171.textContent) && /修改 10-23 09:12/.test(c171.textContent) && !list.querySelector('[data-id="170"] .times-line'));
   check('高优先级 P1 卡片存在（评审中那条）', list.querySelector('[data-id="169"] .pri-1'));
 
   // 状态过滤：已关闭
@@ -127,6 +128,7 @@ function setup(state = {}) {
   await tick(30);
   const viewer = doc.querySelector('.doc-viewer-overlay');
   check('详情弹窗打开', viewer && !viewer.hidden);
+  check('详情头部显示创建 / 最后修改时间', /创建：2026-10-21 14:30/.test(viewer.querySelector('[data-meta]').textContent) && /最后修改：2026-10-23 09:12/.test(viewer.querySelector('[data-meta]').textContent), viewer.querySelector('[data-meta]').textContent);
   check('标题含编号', /#171/.test(viewer.querySelector('[data-title]').textContent));
   check('描述区渲染 + 内联图走代理', /需求描述/.test(viewer.textContent) && viewer.querySelector('.doc-content-html img').getAttribute('src') === '/api/zentao/files/9/content?ext=png');
   check('有验收标准区', /验收标准/.test(viewer.textContent) && /验收点一/.test(viewer.textContent));

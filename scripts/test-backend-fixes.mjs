@@ -397,6 +397,39 @@ try {
     await zs.syncMyTasks();
     all = await read();
     const o810 = all.find(t => String(t.zentaoId) === '810'), o811 = all.find(t => String(t.zentaoId) === '811'), o812 = all.find(t => String(t.zentaoId) === '812');
+    // 创建 / 修改时间来自禅道；零值当没有
+    seed([]);
+    mock.handler = (url, init) => {
+      const lr = loginHandler(url, init);
+      if (lr) return lr;
+      if (url.includes('/zentao/my-task-')) return zentaoJson({ tasks: [
+        { id: 820, name: '有时间的任务', status: 'wait', pri: 3, openedDate: '2026-10-21 14:30:05', lastEditedDate: '2026-10-23 09:12:44' },
+        { id: 821, name: '零值时间的任务', status: 'wait', pri: 3, openedDate: '2026-10-21 10:00:00', lastEditedDate: '0000-00-00 00:00:00' }
+      ], pager: { pageTotal: 1 } });
+      if (url.includes('/zentao/my-bug-')) return zentaoJson({ bugs: [
+        { id: 830, title: '有时间的 Bug', status: 'active', severity: 3, pri: 3, openedDate: '2026-10-20 08:00:00', lastEditedDate: '2026-10-22 18:45:10' }
+      ], pager: { pageTotal: 1 } });
+      return zentaoJson({ bugs: [], pager: { pageTotal: 1 } });
+    };
+    await zs.syncMyTasks();
+    all = await read();
+    const t820 = all.find(t => t.type === 'task' && String(t.zentaoId) === '820'), t821 = all.find(t => t.type === 'task' && String(t.zentaoId) === '821'), b830 = all.find(t => t.type === 'bug' && Number(t.zentaoId) === 830);
+    check('同步：任务带回禅道的创建 / 最后修改时间', t820 && t820.openedAt === '2026-10-21 14:30:05' && t820.editedAt === '2026-10-23 09:12:44', JSON.stringify(t820 && [t820.openedAt, t820.editedAt]));
+    check('同步：禅道的零值时间(0000-00-00)当没有，不显示成怪日期', t821 && t821.openedAt === '2026-10-21 10:00:00' && !t821.editedAt);
+    check('同步：Bug 也带回创建 / 最后修改时间', b830 && b830.openedAt === '2026-10-20 08:00:00' && b830.editedAt === '2026-10-22 18:45:10', JSON.stringify(b830 && [b830.openedAt, b830.editedAt]));
+    // 禅道里又改了一次：本地跟着更新，但不算"重要变化"（不动本地 updatedAt）
+    const before821 = t821.updatedAt;
+    mock.handler = (url, init) => {
+      const lr = loginHandler(url, init);
+      if (lr) return lr;
+      if (url.includes('/zentao/my-task-')) return zentaoJson({ tasks: [
+        { id: 821, name: '零值时间的任务', status: 'wait', pri: 3, openedDate: '2026-10-21 10:00:00', lastEditedDate: '2026-10-24 11:11:11' }
+      ], pager: { pageTotal: 1 } });
+      return zentaoJson({ bugs: [], pager: { pageTotal: 1 } });
+    };
+    await zs.syncMyTasks();
+    const t821b = (await read()).find(t => t.type === 'task' && String(t.zentaoId) === '821');
+    check('同步：禅道里再次修改后，最后修改时间更新，本地 updatedAt 不变', t821b.editedAt === '2026-10-24 11:11:11' && t821b.updatedAt === before821);
     check('同步：任务带回来源需求（storyId / storyTitle）和来源 Bug（fromBug），没有来源的为空', o810.storyId === '165' && o810.storyTitle === '某需求' && !o810.fromBug && o811.fromBug === '88' && !o811.storyId && !o812.storyId && !o812.fromBug, JSON.stringify([o810.storyId, o811.fromBug, o812.storyId]));
     check('同步后：任务页按那天看，能看到这个任务', view.some(t => String(t.zentaoId) === '804'));
   }

@@ -48,6 +48,7 @@ function setup() {
     const syncTaskToZentao = () => {};
     const openInZentao = (t, id) => { (window.__calls.opened = window.__calls.opened || []).push([t, id]); };
     ${extract(['escapeHtml', 'originChipsHTML', 'resetListenerScope', 'createTaskCard', 'initTaskMultiSelect', 'updateTaskMultiSelectDisplay'])}
+    ${fs.readFileSync(path.join(EXT, 'time-line.js'), 'utf8')}
     ${fs.readFileSync(path.join(EXT, 'attachments.js'), 'utf8')}
     window.__api = { createTaskCard, initTaskMultiSelect };
   `);
@@ -99,6 +100,16 @@ function main() {
     chips[0].dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
     chips[1].dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
     check('点标签在禅道打开对应的需求 / Bug（不触发卡片的其它点击）', JSON.stringify(win.__calls.opened) === JSON.stringify([['story', '165'], ['bug', '88']]));
+  }
+
+  // ============ 创建 / 修改时间 ============
+  {
+    const win = setup();
+    const mk = (extra) => win.__api.createTaskCard({ id: 'tt', title: 't', status: 'todo', priority: 3, progress: 0, createdAt: new Date().toISOString(), ...extra });
+    const synced = mk({ zentaoId: '9', openedAt: '2026-10-21 14:30:05', editedAt: '2026-10-23 09:12:44' }).querySelector('.times-line');
+    check('任务卡片显示禅道的创建 / 修改时间', synced && /创建 10-21 14:30/.test(synced.textContent) && /修改 10-23 09:12/.test(synced.textContent), synced && synced.textContent);
+    check('已关联禅道但时间还没同步下来：不显示本地同步时间冒充', !mk({ zentaoId: '9' }).querySelector('.times-line'));
+    check('本地独有任务显示本地创建时间', !!mk({}).querySelector('.times-line'));
   }
 
   // ============ 指派人下拉：弹窗反复打开后仍能正常展开 ============

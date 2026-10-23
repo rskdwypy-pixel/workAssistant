@@ -33,6 +33,7 @@ const SUITES = [
   'test-zentao-cache.mjs',
   'test-stories.mjs',
   'test-task-link.mjs',
+  'test-time-line',
   'test-task-link-ui',
   'test-stories-ui',
   'test-efforts.mjs',

@@ -643,6 +643,12 @@ async function getMyTasks() {
   }
 }
 
+/** 禅道的时间字段：空 / 零值（0000-00-00 00:00:00）当没有 */
+function zentaoTime(v) {
+  const s = String(v || '').trim();
+  return s && !s.startsWith('0000') ? s : '';
+}
+
 /** 禅道任务（列表项或详情）→ 同步用的字段 */
 function toMyTask(t) {
   return {
@@ -664,7 +670,9 @@ function toMyTask(t) {
     progress: t.progress,
     story: t.story,
     storyTitle: decodeZentaoText(t.storyTitle),
-    fromBug: t.fromBug
+    fromBug: t.fromBug,
+    openedDate: t.openedDate,
+    lastEditedDate: t.lastEditedDate
   };
 }
 
@@ -796,6 +804,8 @@ async function syncMyBugs() {
     confirmed: String(b.confirmed) === '1',
     assignedTo: b.assignedTo || '',
     assignedDate: b.assignedDate || '',
+    openedAt: zentaoTime(b.openedDate),
+    editedAt: zentaoTime(b.lastEditedDate),
     executionId: b.execution && b.execution !== '0' ? String(b.execution) : null,
     projectId: b.project && b.project !== '0' ? String(b.project) : null
   }));
@@ -900,6 +910,8 @@ async function syncMyTasks() {
     t.status === 'wait' || t.status === 'doing' || localTaskIds.has(String(t.id)) || worked.has(String(t.id)));
   const mapped = picked.map((t) => ({
     touchedAt: worked.get(String(t.id)) || '',
+    openedAt: zentaoTime(t.openedDate),
+    editedAt: zentaoTime(t.lastEditedDate),
     storyId: t.story && t.story !== '0' ? String(t.story) : '',
     storyTitle: t.storyTitle || '',
     fromBug: t.fromBug && t.fromBug !== '0' ? String(t.fromBug) : '',

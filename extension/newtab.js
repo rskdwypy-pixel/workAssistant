@@ -2611,6 +2611,7 @@ function createTaskCard(task) {
         </div>
         <button type="button" class="execution-tag execution-tag-btn${task.executionName ? '' : ' is-empty'}" data-exec-task="${escapeHtml(task.id)}" title="点击修改所属执行" style="margin-top: 4px;">${task.executionName ? escapeHtml(task.executionName) : '＋ 设置执行'}</button>
         ${originChipsHTML(task)}
+        ${typeof timesLineHTML === 'function' ? timesLineHTML(...recordTimes(task)) : ''}
       </div>
       ${priorityHTML}
     </div>
@@ -5341,7 +5342,8 @@ function showTaskDetail(task) {
       <div><strong>状态:</strong> ${statusLabels[task.status]}</div>
       ${task.status !== 'done' ? `<div><strong>${task.status === 'in_progress' ? '截止时间' : '提醒时间'}:</strong> ${task.reminderTime ? new Date(task.reminderTime).toLocaleString('zh-CN') : '未设置'}</div>` : ''}
       <div><strong>进度:</strong> ${task.progress ?? 0}%</div>
-      <div><strong>创建时间:</strong> ${new Date(task.createdAt).toLocaleString('zh-CN')}</div>
+      <div><strong>创建时间:</strong> ${task.zentaoId && task.openedAt ? escapeHtml(task.openedAt) : new Date(task.createdAt).toLocaleString('zh-CN')}</div>
+      ${task.zentaoId && task.editedAt ? `<div><strong>最后修改:</strong> ${escapeHtml(task.editedAt)}</div>` : ''}
     </div>
     ${progressUpdatesHtml}
     <div class="att-section" style="margin: 16px 0;"></div>
@@ -8002,6 +8004,7 @@ const BugManager = {
       </div>
       ${bug.projectName ? `<span class="execution-tag">${escapeHtml(bug.projectName)}</span>` : ''}
       <div class="bug-meta">${priorityBtn}${assigneeDisplay}</div>
+      ${typeof timesLineHTML === 'function' ? timesLineHTML(...recordTimes(bug)) : ''}
       ${bug.comment ? `<div class="bug-comment-preview">${escapeHtml(bug.comment.substring(0, 50))}${bug.comment.length > 50 ? '...' : ''}</div>` : ''}
       <div class="bug-card-actions">
         ${quickActionButton}
@@ -9908,6 +9911,7 @@ const BugManager = {
           ${typeText ? `<div class="bdf"><span class="bdf-k">类型</span><span class="bdf-v">${escapeHtml(typeText)}</span></div>` : ''}
           ${bug.productName || bug.projectName ? `<div class="bdf"><span class="bdf-k">所属</span><span class="bdf-v">${escapeHtml(bug.productName || bug.projectName)}</span></div>` : ''}
           ${bug.openedBy ? `<div class="bdf"><span class="bdf-k">创建人</span><span class="bdf-v">${escapeHtml(getDisplayName(bug.openedBy))}</span></div>` : ''}
+          ${(() => { if (typeof recordTimes !== 'function') return ''; const [c, e] = recordTimes(bug); return (c ? `<div class="bdf"><span class="bdf-k">创建时间</span><span class="bdf-v">${escapeHtml(c.slice(0, 16))}</span></div>` : '') + (e && e > c ? `<div class="bdf"><span class="bdf-k">最后修改</span><span class="bdf-v">${escapeHtml(e.slice(0, 16))}</span></div>` : ''); })()}
           ${bug.assignedDate && !String(bug.assignedDate).startsWith('0000') ? `<div class="bdf"><span class="bdf-k">指派时间</span><span class="bdf-v">${escapeHtml(bug.assignedDate)}</span></div>` : ''}
         </div>
         ${bug.steps ? `

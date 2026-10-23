@@ -252,7 +252,7 @@ async function createBugWithSync(bugData) {
 const ZENTAO_BUG_FIELDS = [
   'title', 'status', 'severity', 'priority', 'bugType', 'productName',
   'openedBy', 'resolvedBy', 'resolution', 'confirmed', 'assignedTo',
-  'executionId', 'executionName', 'projectId', 'projectName'
+  'executionId', 'executionName', 'projectId', 'projectName', 'openedAt', 'editedAt'
 ];
 
 /**
@@ -319,6 +319,8 @@ async function importZentaoBugs(zentaoBugs) {
             history: [],
             assignedTo: zentaoBug.assignedTo || '',
             assignedDate: zentaoBug.assignedDate || '',
+            openedAt: zentaoBug.openedAt || '',
+            editedAt: zentaoBug.editedAt || '',
             cc: [],
             assignedToList: [],
             comments: [],

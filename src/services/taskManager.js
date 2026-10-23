@@ -596,7 +596,7 @@ function dedupeZentaoRecords(tasks) {
 /** 禅道同步会覆盖的字段 */
 const ZENTAO_TASK_FIELDS = [
   'title', 'status', 'priority', 'executionId', 'executionName',
-  'projectName', 'projectId', 'progress', 'totalConsumedTime', 'storyId', 'storyTitle', 'fromBug'
+  'projectName', 'projectId', 'progress', 'totalConsumedTime', 'storyId', 'storyTitle', 'fromBug', 'openedAt', 'editedAt'
 ];
 /**
  * 其中只有这些字段变化才刷新 updatedAt：
@@ -643,6 +643,9 @@ async function importZentaoTasks(zentaoTasks) {
           storyTitle: zentaoTask.storyId ? (zentaoTask.storyTitle || '') : '',
           fromBug: zentaoTask.fromBug ? String(zentaoTask.fromBug) : ''
         };
+        // 禅道里的创建 / 最后修改时间（本地的 createdAt / updatedAt 是同步时间，不能当它们用）；没给就不动已有的
+        if (zentaoTask.openedAt) incoming.openedAt = zentaoTask.openedAt;
+        if (zentaoTask.editedAt) incoming.editedAt = zentaoTask.editedAt;
         // 禅道给不出进度（未填预计工时）时传 null，此时保留本地进度
         if (zentaoTask.progress !== null && zentaoTask.progress !== undefined) {
           incoming.progress = zentaoTask.progress;

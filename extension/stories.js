@@ -226,6 +226,7 @@ const StoryPage = {
             <span class="story-dim">${stEsc(s.productName)}</span>
             ${s.assignedTo ? `<span class="story-dim">指派：${stEsc(s.assignedTo)}</span>` : ''}
           </span>
+          ${typeof timesLineHTML === 'function' ? timesLineHTML(s.openedDate, s.lastEditedDate) : ''}
         </span>
       </button>`).join('');
     el.querySelectorAll('.story-card').forEach(b => b.addEventListener('click', () => StoryViewer.open(b.dataset.id)));
@@ -290,7 +291,9 @@ const StoryViewer = {
       (s.stageLabel ? ` · ${stEsc(s.stageLabel)}` : '') +
       (s.pri ? ` · ${STORY_PRI[s.pri] || 'P' + s.pri}` : '') +
       ` · ${stEsc(s.productName || '—')} · 提出：${stEsc(s.openedBy || '—')}` +
-      (s.assignedTo ? ` · 指派：${stEsc(s.assignedTo)}` : '');
+      (s.assignedTo ? ` · 指派：${stEsc(s.assignedTo)}` : '') +
+      (s.openedDate ? ` · 创建：${stEsc(String(s.openedDate).slice(0, 16))}` : '') +
+      (s.lastEditedDate && s.lastEditedDate > s.openedDate ? ` · 最后修改：${stEsc(String(s.lastEditedDate).slice(0, 16))}` : '');
 
     const openBtn = el.querySelector('[data-open]');
     openBtn.hidden = false;

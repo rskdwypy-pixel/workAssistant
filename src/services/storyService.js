@@ -74,6 +74,7 @@ function slimStory(s, users = {}) {
   return {
     sig: storySig(s),
     lastEditedDate: String(s.lastEditedDate || ''),
+    openedDate: String(s.openedDate || ''),
     id: String(s.id),
     title: decodeZentaoText(s.title || '(无标题)'),
     status: String(s.status || ''),
