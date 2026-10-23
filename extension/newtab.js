@@ -9973,6 +9973,9 @@ const BugManager = {
     if (bug.status === 'unconfirmed') addAction('确认', 'btn-primary', () => this.activateBug(bugId));
     if (bug.status === 'unconfirmed' || bug.status === 'activated') addAction('解决', 'btn-primary', () => this.showResolveModal(bugId));
     if (bug.status === 'resolved' && bug.zentaoId) addAction('激活', 'btn-primary', () => this.showReactivateModal(bugId));
+    if ((bug.status === 'unconfirmed' || bug.status === 'activated') && bug.zentaoId && typeof TaskLinkDialog !== 'undefined') {
+      addAction('转任务', 'btn-secondary', () => { this.hideBugDetail(); TaskLinkDialog.openForBug(bug); });
+    }
     addAction('删除', 'btn-danger', () => this.deleteBug(bugId));
     actions.classList.add('bug-detail-actions');
 

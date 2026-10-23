@@ -244,6 +244,7 @@ const StoryViewer = {
         <header class="doc-viewer-head">
           <h2 class="doc-viewer-title" data-title></h2>
           <div class="doc-viewer-actions">
+            <button type="button" class="doc-viewer-act" data-split hidden>拆任务</button>
             <button type="button" class="doc-viewer-act" data-edit hidden>编辑</button>
             <button type="button" class="doc-viewer-act doc-viewer-del" data-del hidden>删除</button>
             <button type="button" class="doc-viewer-open" data-open hidden>在禅道打开</button>
@@ -269,6 +270,7 @@ const StoryViewer = {
     el.querySelector('[data-meta]').textContent = '';
     el.querySelector('[data-open]').hidden = true;
     el.querySelector('[data-edit]').hidden = true;
+    el.querySelector('[data-split]').hidden = true;
     el.querySelector('[data-del]').hidden = true;
     el.querySelector('[data-body]').innerHTML = `<div class="story-loading">正在加载需求…</div>`;
     try {
@@ -296,6 +298,16 @@ const StoryViewer = {
       if (typeof openInZentao === 'function') openInZentao('story', s.id);
       else if (typeof Toast !== 'undefined') Toast.info('暂不支持在禅道打开');
     };
+
+    // 拆任务只对「激活」的需求开放（禅道里其他状态建不了关联任务）；草稿 / 评审中 / 已关闭置灰并说明
+    const splitBtn = el.querySelector('[data-split]');
+    if (typeof TaskLinkDialog !== 'undefined') {
+      splitBtn.hidden = false;
+      const canSplit = s.status === 'active';
+      splitBtn.disabled = !canSplit;
+      splitBtn.title = canSplit ? '把需求拆成任务，建好后与需求自动关联' : `需求是「${s.statusLabel || s.status}」状态，激活后才能拆任务`;
+      splitBtn.onclick = () => { this.close(); TaskLinkDialog.openForStory({ id: s.id, title: s.title }); };
+    }
 
     const editBtn = el.querySelector('[data-edit]');
     editBtn.hidden = false;
