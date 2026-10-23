@@ -7356,7 +7356,7 @@ const TagCloud = {
 // ==================== Tab 切换 ====================
 
 const TabSwitcher = {
-  currentMode: 'task', // 'task' | 'bug' | 'report'
+  currentMode: 'todo', // 'todo' | 'task' | 'bug' | 'story' | 'report' | 'doc'
 
   init() {
     const tabButtons = document.querySelectorAll('.tab-btn');
@@ -7367,7 +7367,7 @@ const TabSwitcher = {
       });
     });
     // 恢复上次选择的标签页
-    const lastMode = localStorage.getItem('lastTabMode') || 'task';
+    const lastMode = localStorage.getItem('lastTabMode') || 'todo';
     this.switchMode(lastMode);
     // 待办角标：启动时取一次，之后每 5 分钟刷新
     if (typeof TodoPage !== 'undefined') {

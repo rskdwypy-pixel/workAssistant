@@ -233,10 +233,10 @@
     <main class="main-content">
       <!-- Tab 切换 -->
       <div class="mode-tabs">
-        <button class="tab-btn" data-mode="todo">📌 待办</button>
-        <button class="tab-btn active" data-mode="task">📋 任务</button>
-        <button class="tab-btn" data-mode="story">📝 需求</button>
+        <button class="tab-btn active" data-mode="todo">📌 待办</button>
+        <button class="tab-btn" data-mode="task">📋 任务</button>
         <button class="tab-btn" data-mode="bug">🐛 Bug</button>
+        <button class="tab-btn" data-mode="story">📝 需求</button>
         <button class="tab-btn" data-mode="report">📊 报告</button>
         <button class="tab-btn" data-mode="doc">📁 文档</button>
         <!-- 右上角：读取账号时显示加载提示；已登录显示头像（点开是用户信息与设置）；未登录显示「登录禅道」和设置图标 -->
@@ -249,7 +249,7 @@
       </div>
 
       <!-- 待办模式（内容由 todos.js 渲染） -->
-      <div class="mode-content" id="todoMode"></div>
+      <div class="mode-content active" id="todoMode"></div>
 
       <!-- 报告模式（内容由 reports.js 渲染） -->
       <div class="mode-content" id="reportMode"></div>
@@ -261,7 +261,7 @@
       <div class="mode-content" id="storyMode"></div>
 
       <!-- 任务模式 -->
-      <div class="mode-content active" id="taskMode">
+      <div class="mode-content" id="taskMode">
         <!-- 任务看板 -->
         <section class="task-board">
         <div class="task-board-header">
