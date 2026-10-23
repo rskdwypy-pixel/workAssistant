@@ -116,6 +116,32 @@ try {
   check('检查：发现新版本，下载、校验后解压到 versions/1.1.0', s.state === 'ready' && s.readyVersion === '1.1.0' && fs.existsSync(path.join(home, 'versions', '1.1.0', 'src', 'index.js')) && !fs.existsSync(path.join(home, 'downloads')), JSON.stringify(s));
   check('检查：记下检查时间', !!JSON.parse(fs.readFileSync(path.join(home, 'data', 'update.json'), 'utf8')).lastCheck);
 
+  // 发布源落后：Gitee 在本机同步之前，/latest 还停在旧版本——要取各源里最高的版本，不能只信第一个源
+  const lagging = http.createServer((req, res) => {
+    if (req.url === '/releases/latest') { res.writeHead(302, { Location: '/releases/tag/v1.0.0' }); return res.end(); }
+    res.writeHead(404); res.end();
+  });
+  await new Promise(r => lagging.listen(0, '127.0.0.1', r));
+  const LAG = `http://127.0.0.1:${lagging.address().port}/releases`;
+  latestTag = 'v1.1.0';
+  const lagHome = makeHome('home-lag');
+  const lag = createUpdater({ root: path.join(lagHome, 'versions', '1.0.0'), waHome: lagHome, dataDir: path.join(lagHome, 'data'), bases: [LAG, BASE], publicKey: PUB, log: () => {} });
+  const lags = await lag.check({ manual: true });
+  check('发布源落后：第一个源还停在旧版本时，仍能发现并下载别的源上的新版本', lags.state === 'ready' && lags.latest === '1.1.0' && lags.readyVersion === '1.1.0', JSON.stringify(lags));
+
+  // 有最新版本号、但安装包没传上来的源（只同步了一半）：换下一个有这个版本的源下载
+  const half = http.createServer((req, res) => {
+    if (req.url === '/releases/latest') { res.writeHead(302, { Location: '/releases/tag/v1.1.0' }); return res.end(); }
+    res.writeHead(404); res.end();
+  });
+  await new Promise(r => half.listen(0, '127.0.0.1', r));
+  const HALF = `http://127.0.0.1:${half.address().port}/releases`;
+  const halfHome = makeHome('home-half');
+  const hf = createUpdater({ root: path.join(halfHome, 'versions', '1.0.0'), waHome: halfHome, dataDir: path.join(halfHome, 'data'), bases: [HALF, BASE], publicKey: PUB, log: () => {} });
+  const hfs = await hf.check({ manual: true });
+  check('只同步了一半的源（有版本号、下载 404）：自动换下一个源下载，照常就绪', hfs.state === 'ready' && hfs.readyVersion === '1.1.0' && fs.existsSync(path.join(halfHome, 'versions', '1.1.0', 'src', 'index.js')), JSON.stringify(hfs));
+  lagging.close(); half.close();
+
   // 发布源回退：主源（这里用一个会立刻拒连的地址模拟 Gitee 不通）连不上时，自动改用备用源（BASE 模拟 GitHub）
   const fbHome = makeHome('home-fallback');
   const fb = createUpdater({

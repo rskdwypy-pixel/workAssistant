@@ -93,6 +93,7 @@ export function createUpdater(opts = {}) {
   const bases = (opts.bases || (override ? [override] : [GITEE_RELEASES, GITHUB_RELEASES])).map(u => u.replace(/\/$/, ''));
   // fetchLatestVersion 选中哪个源能用，后续下载就走那个
   let activeBase = bases[0];
+  let candidateBases = [bases[0]];   // 有最新版本的发布源（下载失败时依次换下一个）
   const publicKey = opts.publicKey || RELEASE_PUBLIC_KEY;
   const now = opts.now || (() => new Date());
   const scheduleHours = opts.scheduleHours || (() => []);
@@ -156,23 +157,30 @@ export function createUpdater(opts = {}) {
 
   /**
    * 最新版本号：/releases/latest 会跳到 /releases/tag/vX.Y.Z（Gitee 与 GitHub 规则一致）。
-   * 依次尝试各发布源，第一个能解析出版本号的即选为后续下载源（activeBase）。
+   * 每个发布源都问一遍，取其中最高的版本——发版时 GitHub 先发布、Gitee 随后在本机同步，
+   * Gitee 落后的那段时间里只问第一个源会看不到新版本。有这个版本的源按顺序都作为下载候选（Gitee 优先）。
    */
   async function fetchLatestVersion() {
     let lastErr = null;
+    const found = [];
     for (const base of bases) {
       try {
         // 只看第一跳的 Location：Gitee 的 tag 页面会再跳到源码压缩包，跟到底就读不到版本号了
         const head = await run('curl', ['-sI', '--connect-timeout', '15', '--max-time', '60', `${base}/latest`], 70 * 1000);
         const loc = (head.match(/^location:\s*(\S+)/im) || [])[1] || '';
         const m = loc.match(/\/tag\/v?(\d+\.\d+\.\d+)$/);
-        if (m) { activeBase = base; return m[1]; }
-        lastErr = new Error(`没有读到最新版本号（${loc || '没有跳转'}）`);
+        if (m) found.push({ base, version: m[1] });
+        else lastErr = new Error(`没有读到最新版本号（${loc || '没有跳转'}）`);
       } catch (err) {
         lastErr = err;
       }
     }
-    throw lastErr || new Error('没有读到最新版本号');
+    if (!found.length) throw lastErr || new Error('没有读到最新版本号');
+    let best = found[0];
+    for (const f of found) if (compareVersions(f.version, best.version) > 0) best = f;
+    candidateBases = found.filter(f => f.version === best.version).map(f => f.base);
+    activeBase = candidateBases[0];
+    return best.version;
   }
 
   async function download(url, file) {
@@ -192,13 +200,26 @@ export function createUpdater(opts = {}) {
     const tgz = join(work, 'workassistant.tar.gz');
     status = { ...status, state: 'downloading', error: '' };
     log(`下载 ${version}`);
-    await download(`${activeBase}/download/${tag}/workassistant.tar.gz`, tgz);
-    await download(`${activeBase}/download/${tag}/workassistant.tar.gz.sha256`, `${tgz}.sha256`);
-    try {
-      await download(`${activeBase}/download/${tag}/workassistant.tar.gz.sig`, `${tgz}.sig`);
-    } catch {
-      throw new Error(`${version} 没有签名文件，不自动安装（可重新运行安装命令手动更新）`);
+    // 安装包、校验文件、签名必须来自同一个源；一个源下载失败就换下一个有这个版本的源
+    let got = false;
+    let dlErr = null;
+    for (const base of candidateBases.length ? candidateBases : [activeBase]) {
+      try {
+        await download(`${base}/download/${tag}/workassistant.tar.gz`, tgz);
+        await download(`${base}/download/${tag}/workassistant.tar.gz.sha256`, `${tgz}.sha256`);
+        try {
+          await download(`${base}/download/${tag}/workassistant.tar.gz.sig`, `${tgz}.sig`);
+        } catch {
+          throw new Error(`${version} 没有签名文件，不自动安装（可重新运行安装命令手动更新）`);
+        }
+        got = true;
+        break;
+      } catch (err) {
+        dlErr = err;
+        log(`从 ${base.split('/')[2]} 下载 ${version} 失败：${err.message}`);
+      }
     }
+    if (!got) throw dlErr || new Error('下载失败');
 
     const data = readFileSync(tgz);
     const expectSha = readText(`${tgz}.sha256`).split(/\s+/)[0];
