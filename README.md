@@ -207,7 +207,7 @@ npm version 1.2.0          # 改版本号并同步到扩展，提交并打标签
 git push --follow-tags     # 推送标签后，GitHub Actions 自动测试、打包、签名并发布
 ```
 
-发版流水线见 `.github/workflows/release.yml`：GitHub 发布完成后，会把同一批产物同步发布到 Gitee（`https://gitee.com/iTreeNewBee/work-assistant`，安装器和自动更新默认从 Gitee 下载、连不上回退 GitHub）。需要仓库 Secret `GITEE_TOKEN`（Gitee 私人令牌，发行版权限；没配则跳过 Gitee 同步）。代码也在 Gitee 上放一份，发版前请把 `main` 同步过去。
+发版流水线见 `.github/workflows/release.yml`：推 `v*` 标签后在 GitHub 上测试、打包、签名并发布。**Gitee 不在流水线里同步**（海外机器传 Gitee 大文件经常卡住）：GitHub 发布成功后，在本机运行 `npm run release:gitee`（可加版本号，如 `npm run release:gitee -- v1.4.1`），它会把该版本的代码和标签推到 Gitee、从 GitHub Release 下载产物并发布到 Gitee、最后验证下载地址；可重复运行。需要 `gh` 已登录和 Gitee 私人令牌（发行版权限），令牌放环境变量 `GITEE_TOKEN` 或 `~/.config/workassistant/gitee-token`（`chmod 600`），不要写进仓库。安装器和自动更新默认从 Gitee 下载、连不上回退 GitHub，所以每次发版别忘了这一步。
 
 安装包用 Ed25519 签名，已安装的电脑只自动安装签名对得上的包：
 

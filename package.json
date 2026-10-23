@@ -11,7 +11,8 @@
     "mcp": "node src/mcp/zentao-server.js",
     "test": "node scripts/run-all-tests.cjs",
     "test:real": "node scripts/test-script-scope.cjs && node scripts/test-progress-real.cjs && node scripts/test-priority-real.cjs",
-    "version": "node scripts/sync-version.mjs && git add extension/manifest.json extension/newtab.html"
+    "version": "node scripts/sync-version.mjs && git add extension/manifest.json extension/newtab.html",
+    "release:gitee": "bash scripts/release-gitee.sh"
   },
   "keywords": [
     "ai",

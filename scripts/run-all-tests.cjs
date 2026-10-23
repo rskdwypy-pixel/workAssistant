@@ -43,6 +43,7 @@ const SUITES = [
   'test-efforts-ui',
   'test-no-local-data',
   'test-repo-hygiene',
+  'test-release-gitee',
   'test-todos.mjs',
   'test-todos-ui',
   'test-ai-settings.mjs',

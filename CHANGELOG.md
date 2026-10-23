@@ -4,6 +4,10 @@
 
 ## 未发布（相对 1.4.1）
 
+### 改进
+
+- **发版流程**：GitHub 流水线不再同步 Gitee（海外机器上传大文件总卡住），改成发版后在本机运行 `npm run release:gitee`——推代码和标签、发布 release、上传附件并验证下载地址，可重复运行。
+
 ### 修复
 
 - 安装脚本：终端所在目录已被删除时，不再在每个步骤后刷 `shell-init: error retrieving current directory`（脚本开头先回到家目录）。
