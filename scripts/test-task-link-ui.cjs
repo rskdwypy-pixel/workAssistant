@@ -17,7 +17,8 @@ function setup(state) {
   const win = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true }).window;
   state.reqs = []; state.toasts = [];
   win.escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  win.Toast = { success: (m) => state.toasts.push(['ok', m]), warning: (m) => state.toasts.push(['warn', m]), info: (m) => state.toasts.push(['info', m]), error: (m) => state.toasts.push(['err', m]) };
+  // 与真实 Toast 一致：方法内部用 this（摘出来单独调用会抛错）
+  win.Toast = { list: state.toasts, add(k, m) { this.list.push([k, m]); }, success(m) { this.add('ok', m); }, warning(m) { this.add('warn', m); }, info(m) { this.add('info', m); }, error(m) { this.add('err', m); } };
   win.ZentaoBrowserClient = { getUsers: async () => ({ lijc: '李佳成', nuanshu: '何俞龙' }) };
   win.ConfigStore = { flat: () => ({ zentaoUsername: 'lijc' }) };
   win.loadTasks = () => { state.reloaded = (state.reloaded || 0) + 1; };
@@ -50,7 +51,11 @@ const $$ = (win, sel) => [...win.document.querySelectorAll(sel)];
     check('Bug：严重程度 2 → 优先级 2', $(win, '[data-f="pri"]').value === '2');
     check('Bug：描述 = 去标签的步骤 + 来源编号', $(win, '[data-f="desc"]').value === '步骤一\n步骤二\n\n来源：Bug #88' || /步骤一\n步骤二/.test($(win, '[data-f="desc"]').value) && /来源：Bug #88/.test($(win, '[data-f="desc"]').value), JSON.stringify($(win, '[data-f="desc"]').value));
     check('Bug：默认执行取"默认执行"，指派默认自己', $(win, '[data-f="executionId"]').value === '180' && $(win, '[data-f="assignedTo"]').value === 'lijc');
-    $(win, '[data-tl="submit"]').click(); await tick(20);
+    const subBtn = $(win, '[data-tl="submit"]');
+    subBtn.click();
+    check('Bug：提交过程中按钮置灰、文案变"创建中…"，再点不会重复提交', subBtn.disabled && subBtn.textContent === '创建中…' && (subBtn.click(), true));
+    await tick(20);
+    check('Bug：只发了一次创建请求', st.reqs.filter(r => r.method === 'POST').length === 1);
     const post = st.reqs.find(r => r.method === 'POST');
     check('Bug：POST /api/bugs/88/to-task，带执行 / 标题 / 类型 / 优先级', post && post.u === '/api/bugs/88/to-task' && post.body.executionId === '180' && post.body.name === '【Bug#88】登录超时' && post.body.type === 'devel' && post.body.pri === 2, JSON.stringify(post));
     check('Bug：成功后关闭弹窗、提示、刷新任务看板', win.__TL.el.hidden === true && st.toasts[0][0] === 'ok' && st.reloaded === 1);

@@ -67,7 +67,15 @@ const TaskLinkDialog = {
   isOpen() { return !!(this.el && !this.el.hidden); },
   close() { if (this.el) this.el.hidden = true; },
   q(sel) { return this.el.querySelector(sel); },
-  setBusy(v) { this.busy = v; this.el.querySelectorAll('button, input, select, textarea').forEach(n => { if (!n.matches('[data-tl="close"]')) n.disabled = v; }); },
+  setBusy(v) {
+    this.busy = v;
+    this.el.querySelectorAll('button, input, select, textarea').forEach(n => { if (!n.matches('[data-tl="close"]')) n.disabled = v; });
+    const sub = this.q('[data-tl="submit"]');
+    if (sub) {
+      if (v) { sub.dataset.label = sub.textContent; sub.textContent = '创建中…'; }
+      else if (sub.dataset.label) { sub.textContent = sub.dataset.label; delete sub.dataset.label; }
+    }
+  },
 
   async loadCommon() {
     try {
@@ -210,7 +218,7 @@ const TaskLinkDialog = {
     try { r = await TaskLinkApi.bugToTask(this.ctx.bug.zentaoId, body); } catch (e) { r = { success: false, message: e.message || '网络错误' }; }
     this.setBusy(false);
     if (!r.success) return this.msg(r.message || '创建失败');
-    if (typeof Toast !== 'undefined') (r.linked === false ? Toast.warning : Toast.success)(r.message || '任务已创建');
+    if (typeof Toast !== 'undefined') { if (r.linked === false) Toast.warning(r.message || '任务已创建'); else Toast.success(r.message || '任务已创建'); }   // 不能把方法摘出来调用：Toast 内部用 this
     this.close();
     try { if (typeof loadTasks === 'function') loadTasks(); } catch { /* 刷新失败不影响 */ }
   },
