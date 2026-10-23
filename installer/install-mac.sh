@@ -200,12 +200,12 @@ else
   GOT=""
   for B in "${RELEASE_BASES[@]}"; do
     SRC_HOST="$(printf '%s' "$B" | awk -F/ '{print $3}')"
-    echo "  下载安装包（$SRC_HOST）"
+    echo "  下载安装包（${SRC_HOST}）"
     if download "$B/workassistant.tar.gz" "$PKG_FILE" && download "$B/workassistant.tar.gz.sha256" "$TMP/pkg.sha256"; then
       PKG_SHA="$(awk '{print $1}' "$TMP/pkg.sha256")"
       GOT="1"; break
     fi
-    warn "$SRC_HOST 下载失败，换下一个源"
+    warn "${SRC_HOST} 下载失败，换下一个源"
   done
   [[ -n "$GOT" ]] || die "安装包下载失败（Gitee 和 GitHub 都连不上，请检查网络或用 --package 指定本地包）"
 fi

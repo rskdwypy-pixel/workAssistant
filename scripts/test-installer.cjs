@@ -197,6 +197,19 @@ try {
   check('端口被别的程序占用：不动它，提示是哪个程序', r.status !== 0 && /被另一个程序占用：PID \d+/.test(plain(r)) && !!fpid, plain(r).slice(-400));
   if (fpid) spawnSync('kill', fpid.split('\n'));
   install('--uninstall', '--purge');
+  // 真实事故（1.4.0）：`（$SRC_HOST）` 在 curl | bash 的非 UTF-8 环境（LANG 没设）里，全角括号的字节被当成变量名的一部分，
+  // set -u 下报 "SRC_HOST?: unbound variable"。安装器里变量后面紧跟非 ASCII 字符的，一律要写成 ${VAR}。
+  {
+    const bad = [];
+    for (const f of [path.join(ROOT, 'installer', 'install-mac.sh'), path.join(ROOT, 'install.sh')]) {
+      fs.readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
+        if (/\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7f]/.test(line)) bad.push(`${path.basename(f)}:${i + 1}`);
+      });
+    }
+    check('安装脚本：变量后面紧跟中文标点时必须用 ${VAR}（否则非 UTF-8 环境下 set -u 报未绑定）', bad.length === 0, bad.join(', '));
+    const probe = spawnSync('bash', ['-c', 'set -u; SRC_HOST=gitee.com; echo "下载（${SRC_HOST}）"'], { encoding: 'utf8', env: { PATH: process.env.PATH, LC_ALL: 'C' } });
+    check('C 语言环境下，${VAR} 紧跟全角括号能正常展开', probe.status === 0 && /gitee\.com/.test(probe.stdout), probe.stderr);
+  }
 } catch (err) {
   check(`异常：${err.stack}`, false);
 } finally {
