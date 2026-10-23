@@ -1,0 +1,33 @@
+# 只把某个已发布的版本（GitHub Release 里的产物）补同步到 Gitee——发版时 Gitee 那一步失败了就手动跑它：
+#   gh workflow run gitee-sync.yml -f tag=v1.4.0
+name: 补同步 Gitee
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 要同步的版本标签，如 v1.4.0
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      # 用主分支上最新的同步脚本（带超时重试、跳过已传附件），产物从 GitHub Release 下载
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.20.0'
+      - name: 下载 GitHub Release 的产物
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" --dir release
+      - name: 同步到 Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_REPO: iTreeNewBee/work-assistant
+          GITEE_BRANCH: main
+        run: node scripts/publish-gitee.mjs "${{ inputs.tag }}" release

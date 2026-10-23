@@ -49,15 +49,29 @@ if (CHECK) { console.log('[publish-gitee] --check 通过（未发请求）'); pr
 const token = process.env.GITEE_TOKEN;
 if (!token) die('缺少 GITEE_TOKEN');
 
+// Gitee 从海外的 CI 机器上传大文件偶尔很慢甚至挂住：每次请求设超时，失败自动重试
+const TIMEOUT_MS = 8 * 60 * 1000;
+const RETRIES = 3;
 async function api(path, { method = 'GET', form } = {}) {
   const url = `${API}${path}`;
-  const init = { method };
-  if (form) init.body = form;
-  const resp = await fetch(url, init);
-  const text = await resp.text();
-  let json = null;
-  try { json = text ? JSON.parse(text) : null; } catch { /* 非 JSON */ }
-  return { ok: resp.ok, status: resp.status, json, text };
+  let lastErr;
+  for (let i = 1; i <= RETRIES; i++) {
+    try {
+      const init = { method, signal: AbortSignal.timeout(TIMEOUT_MS) };
+      if (form) init.body = form;
+      const resp = await fetch(url, init);
+      const text = await resp.text();
+      let json = null;
+      try { json = text ? JSON.parse(text) : null; } catch { /* 非 JSON */ }
+      if (resp.status >= 500 && i < RETRIES) { lastErr = new Error(`HTTP ${resp.status}`); }
+      else return { ok: resp.ok, status: resp.status, json, text };
+    } catch (err) {
+      lastErr = err;
+    }
+    console.warn(`[publish-gitee] 第 ${i} 次请求失败（${(lastErr && (lastErr.cause?.code || lastErr.message)) || '未知'}），${i < RETRIES ? '重试' : '放弃'}`);
+    if (i < RETRIES) await new Promise(r => setTimeout(r, 5000 * i));
+  }
+  die(`请求 ${method} ${path.replace(/access_token=[^&]+/, 'access_token=***')} 失败：${(lastErr && lastErr.message) || '未知'}`);
 }
 
 // 1. 建 release（若该 tag 已有 release，Gitee 会报错，这里当作已存在并尝试找回它的 id）
@@ -80,7 +94,8 @@ async function ensureRelease() {
   die(`建 release 失败：HTTP ${r.status} ${r.text.slice(0, 300)}`);
 }
 
-async function uploadFile(releaseId, name) {
+async function uploadFile(releaseId, name, already) {
+  if (already.has(name)) { console.log(`[publish-gitee]   · ${name}（已在 Gitee 上，跳过）`); return; }
   const buf = readFileSync(join(dir, name));
   const form = new FormData();
   form.set('access_token', token);
@@ -90,7 +105,14 @@ async function uploadFile(releaseId, name) {
   console.log(`[publish-gitee]   ✓ ${name}`);
 }
 
+// 已经传上去的附件（重跑 / 补传时跳过，避免重名报错）
+async function existingAttachments(releaseId) {
+  const r = await api(`/repos/${owner}/${repo}/releases/${releaseId}/attach_files?access_token=${encodeURIComponent(token)}&per_page=100`);
+  return new Set(r.ok && Array.isArray(r.json) ? r.json.map(a => a.name) : []);
+}
+
 const releaseId = await ensureRelease();
-console.log(`[publish-gitee] release id ${releaseId}，开始上传附件`);
-for (const f of files) await uploadFile(releaseId, f);
+const already = await existingAttachments(releaseId);
+console.log(`[publish-gitee] release id ${releaseId}，开始上传附件（已有 ${already.size} 个）`);
+for (const f of files) await uploadFile(releaseId, f, already);
 console.log(`[publish-gitee] 完成：https://gitee.com/${REPO}/releases/tag/${tag}`);
