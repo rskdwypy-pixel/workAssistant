@@ -27,6 +27,9 @@
 #
 set -euo pipefail
 
+# 终端当前所在的目录已被删除时（getcwd 失败），后面每个子命令都会刷一遍 "shell-init: error retrieving current directory"：先回到家目录
+/bin/pwd -P >/dev/null 2>&1 || cd "$HOME" 2>/dev/null || cd /
+
 # 整个脚本包在 main 里、最后一行才调用：通过 curl … | bash 运行时脚本是边下载边执行的，
 # 先读完整个脚本再执行，子命令也就不会误读走还没执行的脚本内容（下面把标准输入接到 /dev/null）
 main() {
