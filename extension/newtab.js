@@ -7258,6 +7258,9 @@ const TabSwitcher = {
     // 1. 保存标签页选择
     localStorage.setItem('lastTabMode', mode);
 
+    // 回到任务页：日历的热度跟着本地任务走（补填工时、别处同步之后会变），切回来时重取一次
+    if (mode === 'task' && typeof loadCalendar === 'function') loadCalendar().catch(() => {});
+
     // 2. 更新 Tab 按钮
     document.querySelectorAll('.tab-btn').forEach(btn => {
       if (btn.dataset.mode === mode) {

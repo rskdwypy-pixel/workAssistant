@@ -117,6 +117,10 @@ try {
     check('B1b 已完成、完成日不在当天，但当天填过工时的任务出现在当天', day.some(t => t.id === 'w1'), JSON.stringify(day.map(t => t.id)));
     check('B1b 别人填的工时 / 同号 Bug 不会把任务带进来', !day.some(t => t.id === 'w2') && !day.some(t => t.id === 'w3'));
     const other = await getAllTasks({ date: '2026-10-10' });
+    const { getCalendarData } = await import('../src/services/taskManager.js');
+    const cal = await getCalendarData(2026, 10);
+    check('B1b 任务页日历：那天填过工时的任务（创建在 9 月）也算在 10-09，已完成计入完成数', cal.days[9] && cal.days[9].total === 1 && cal.days[9].done === 1, JSON.stringify(cal.days));
+    check('B1b 任务页日历：别人填的工时 / 同号 Bug 不算，没填工时的日子仍为空', !cal.days[10] && cal.days[9].total === 1);
     check('B1b 没填工时的其他日子不受影响', !other.some(t => t.id === 'w1'));
   }
 

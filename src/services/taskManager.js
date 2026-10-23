@@ -517,28 +517,34 @@ async function getTaskStats() {
  */
 async function getCalendarData(year, month) {
   const tasks = await getAllTasks();
-  const days = {};
+  const sets = {};   // 日 → 当天的任务集合
+  const put = (day, task) => { (sets[day] || (sets[day] = new Set())).add(task); };
 
-  // 获取该月的所有任务
+  // 当月创建的任务，算在创建那天
   tasks.forEach(task => {
     const taskDate = new Date(task.createdAt);
-    if (taskDate.getFullYear() === year && taskDate.getMonth() + 1 === month) {
-      const day = taskDate.getDate();
-      if (!days[day]) {
-        days[day] = { total: 0, done: 0 };
-      }
-      days[day].total++;
-      if (task.status === 'done') {
-        days[day].done++;
-      }
-    }
+    if (taskDate.getFullYear() === year && taskDate.getMonth() + 1 === month) put(taskDate.getDate(), task);
   });
 
-  return {
-    year,
-    month,
-    days
-  };
+  // 那天填过我的工时的任务，也算在那天（补填、在禅道网页上填的都算），否则补过工时的日子在日历上仍是空的
+  try {
+    const { getMonthEfforts } = await import('./effortService.js');
+    const r = await getMonthEfforts(`${year}-${String(month).padStart(2, '0')}`, { maxAge: 5 * 60 * 1000 });
+    const byZentao = new Map(tasks.filter(t => t.type !== 'bug' && t.zentaoId).map(t => [String(t.zentaoId), t]));
+    for (const [date, entry] of Object.entries(r.days || {})) {
+      for (const item of entry.items || []) {
+        const t = byZentao.get(String(item.taskId));
+        if (t) put(Number(date.slice(8)), t);
+      }
+    }
+  } catch { /* 读不到工时就只按创建日算 */ }
+
+  const days = {};
+  for (const [day, set] of Object.entries(sets)) {
+    const list = [...set];
+    days[day] = { total: list.length, done: list.filter(t => t.status === 'done').length };
+  }
+  return { year, month, days };
 }
 
 /**
