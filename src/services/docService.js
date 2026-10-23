@@ -130,6 +130,7 @@ function slimDoc(d) {
     typeIcon: meta.icon,
     typeLabel: meta.label,
     editedBy: d.editedBy || d.addedBy || '',
+    addedBy: d.addedBy || '',
     editedDate: d.editedDate || d.addedDate || '',
     draft: String(d.draft || '0') === '1'
   };

@@ -1,15 +1,17 @@
 /**
- * 我的待办：把任务 / Bug / 需求 / 日报汇到一个落地页。
+ * 我的待办：任务 / Bug / 与我相关的需求 / 与我相关的文档，四块各自成组。
  *
- *   getTodos()  → { groups:[{key,label,tone,items:[...]}], total, today, errors:[] }
+ *   getTodos()  → { groups:[{key,label,items:[...]}], total, today, errors:[] }
  *
  * 每个数据源独立取，某个源失败（如禅道没连上）只记进 errors，不影响其它分组。
- * 排序：逾期 > 今天到期 > 优先级高 > 其余。
+ * 任务 / Bug / 需求按紧急度排序：逾期 > 今天到期 > 3 天内 > 优先级；文档按最近修改。
+ * 「与我相关」：需求 = 禅道里指派给我 / 我提的 / 我评审的 / 抄送我的（未关闭）；
+ *               文档 = 我创建或最后由我修改的。
  */
 import { getAllTasks } from './taskManager.js';
 import { getBugs } from './bugManager.js';
 import { listStories } from './storyService.js';
-import { getCalendar } from './reportCenter.js';
+import { listDocs, listLibs } from './docService.js';
 import { config } from '../config.js';
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -60,6 +62,16 @@ function storyItem(s) {
   };
 }
 
+/** 文档最多列这么多条（最近修改的在前），再多的去文档页找 */
+const DOC_LIMIT = 50;
+
+function docItem(d, libName) {
+  return {
+    kind: 'doc', id: String(d.id), title: d.title, pri: 3, due: '', dueDate: '',
+    meta: [libName, String(d.editedDate || '').slice(0, 10)].filter(Boolean).join(' · ')
+  };
+}
+
 async function getTodos(now = new Date()) {
   const today = ymd(now);
   const errors = [];
@@ -72,7 +84,7 @@ async function getTodos(now = new Date()) {
     const items = all
       .filter(t => t.type !== 'bug' && t.status !== 'done')
       .map(t => taskItem(t, today)).sort(bySeverity);
-    groups.push({ key: 'task', label: '待办任务', tone: 'task', mode: 'task', items });
+    groups.push({ key: 'task', label: '待办任务', items });
   } catch (e) { errors.push(`任务：${e.message}`); }
 
   // Bug：未确认 / 已确认（未解决）
@@ -80,28 +92,30 @@ async function getTodos(now = new Date()) {
     const bugs = (await getBugs({}))
       .filter(b => b.status === 'unconfirmed' || b.status === 'activated')
       .map(b => bugItem(b, today)).sort(bySeverity);
-    groups.push({ key: 'bug', label: '待处理 Bug', tone: 'bug', mode: 'bug', items: bugs });
+    groups.push({ key: 'bug', label: '待处理 Bug', items: bugs });
   } catch (e) { errors.push(`Bug：${e.message}`); }
 
-  // 需求：指派给我、未关闭；评审中的单独成组（要我评审/确认）
+  // 需求：与我相关（四种关联之一）、未关闭；评审中 / 变更中的排前面
   try {
-    const mine = (await listStories({ maxAge: 60 * 1000 }))
-      .filter(s => s.status !== 'closed' && s.assignedToAccount && s.assignedToAccount.toLowerCase() === me);
-    const review = mine.filter(s => s.status === 'reviewing' || s.status === 'changing').map(storyItem).sort(bySeverity);
-    const rest = mine.filter(s => s.status !== 'reviewing' && s.status !== 'changing').map(storyItem).sort(bySeverity);
-    groups.push({ key: 'story-review', label: '评审中的需求', tone: 'review', mode: 'story', items: review });
-    groups.push({ key: 'story', label: '指派给我的需求', tone: 'story', mode: 'story', items: rest });
+    const rank = (s) => (s.status === 'reviewing' || s.status === 'changing' ? 0 : 1);
+    const items = (await listStories({ maxAge: 60 * 1000 }))
+      .filter(s => s.status !== 'closed')
+      .sort((a, b) => rank(a) - rank(b) || (a.pri || 3) - (b.pri || 3) || Number(b.id) - Number(a.id))
+      .map(storyItem);
+    groups.push({ key: 'story', label: '我的需求', items });
   } catch (e) { errors.push(`需求：${e.message}`); }
 
-  // 日报：今天是工作日且还没生成 → 提醒
+  // 文档：我创建或最后由我修改的，最近修改的在前
   try {
-    const cal = await getCalendar(today.slice(0, 7), now);
-    const day = cal.days.find(d => d.today);
-    const items = day && !day.weekend && !day.report
-      ? [{ kind: 'report', id: today, title: '今天的日报还没生成', pri: 3, due: 'today', dueDate: today, meta: `${cal.eveningHour}:00 后会自动生成，也可手动生成` }]
-      : [];
-    groups.push({ key: 'report', label: '日报', tone: 'report', mode: 'report', items });
-  } catch (e) { errors.push(`日报：${e.message}`); }
+    const [docs, libs] = await Promise.all([listDocs({ maxAge: 60 * 1000 }), listLibs().catch(() => [])]);
+    const libName = new Map(libs.map(l => [l.id, l.name]));
+    const items = docs
+      .filter(d => me && (String(d.editedBy || '').toLowerCase() === me || String(d.addedBy || '').toLowerCase() === me))
+      .sort((a, b) => String(b.editedDate).localeCompare(String(a.editedDate)))
+      .slice(0, DOC_LIMIT)
+      .map(d => docItem(d, libName.get(d.lib) || ''));
+    groups.push({ key: 'doc', label: '我的文档', items });
+  } catch (e) { errors.push(`文档：${e.message}`); }
 
   const total = groups.reduce((n, g) => n + g.items.length, 0);
   return { today, total, groups, errors };

@@ -232,6 +232,13 @@ function setup(state = {}) {
   win.DocViewer.close();
 
   // ============ 未登录禅道 ============
+  // ── reveal：从待办跳过来时清掉过滤 ──
+  win.DocPage.currentLib = DOCLIST[0].lib; win.DocPage.keyword = '不存在的词'; win.DocPage.renderList();
+  check('过滤后列表为空', doc.querySelectorAll('#docList .doc-item').length === 0);
+  win.DocPage.reveal();
+  check('reveal 清掉文档库 / 搜索过滤，显示全部', doc.querySelectorAll('#docList .doc-item').length === DOCLIST.length && win.DocPage.currentLib === 'all' && doc.getElementById('docSearch').value === '');
+  check('文档页没有刷新按钮', !doc.getElementById('docRefresh'));
+
   // ── 本地缓存：先画缓存，再用最新数据刷新 ──
   ({ win, doc, state } = setup({ cache: [DOCLIST[0]], freshDelay: 60, diff: { added: 2, changed: 0, removed: 1 } }));
   win.DocPage.show(); await tick(25);

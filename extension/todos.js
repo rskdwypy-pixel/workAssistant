@@ -1,11 +1,14 @@
 /**
- * 我的待办（与任务、需求、Bug、报告、文档同级的标签页）
+ * 我的待办（与任务、Bug、需求、文档、报告同级的标签页）
  *
- *   TodoApi    后端 /api/todos 的封装
- *   TodoPage   分组列表：待办任务 / 待处理 Bug / 评审中与指派给我的需求 / 日报提醒；点一条跳到对应模块
+ *   TodoApi      后端 /api/todos 的封装
+ *   TodoPage     两列四张卡片：第一列 任务 / Bug（上下各占一半），第二列 需求 / 文档（上下各占一半）；
+ *                点一条跳到对应标签页，并让那一条高亮闪烁
+ *   WaHighlight  滚动到目标并闪烁（目标可能还在加载，会等它出现；列表重绘后会对新节点再闪一次）
  *
- * 汇总是实时算的（任务 / Bug 来自本地库，需求来自禅道）；某个来源失败只提示，不影响其它分组。
+ * 任务 / Bug 来自本地库，需求 / 文档来自禅道（本地缓存）；某个来源失败只提示，不影响其它卡片。
  * 标签上的角标 = 待办总数（有逾期 / 今天到期的变红），没有就不显示。
+ * 没有刷新按钮：刷新浏览器页面即可；每次切到这个标签页都会重新汇总。
  */
 
 const TodoApi = {
@@ -20,6 +23,41 @@ const TodoApi = {
 
 const tdEsc = (s) => (typeof escapeHtml === 'function' ? escapeHtml(String(s ?? '')) : String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
 const TODO_DUE_LABEL = { overdue: '已逾期', today: '今天', soon: '3 天内' };
+
+/** 四张卡片：key 对应后端分组 */
+const TODO_CARDS = [
+  { key: 'task', icon: '📋', title: '任务', empty: '没有未完成的任务' },
+  { key: 'bug', icon: '🐛', title: 'Bug', empty: '没有待处理的 Bug' },
+  { key: 'story', icon: '📝', title: '我的需求', empty: '没有与你相关的需求' },
+  { key: 'doc', icon: '📁', title: '我的文档', empty: '没有你创建或修改过的文档' }
+];
+
+const WaHighlight = {
+  /** 立刻滚动到 el 并闪烁一次 */
+  flash(el) {
+    if (!el) return;
+    try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch { /* 老环境忽略 */ }
+    el.classList.remove('wa-flash');
+    void el.offsetWidth;   // 强制重排，连续点同一条也能重新播放动画
+    el.classList.add('wa-flash');
+    setTimeout(() => el.classList.remove('wa-flash'), 2000);
+  },
+
+  /**
+   * 等 selector 对应的元素出现再闪（目标页刚切过去，列表还在加载）。
+   * 每 100ms 查一次，最多等 4 秒；列表重绘换了新节点（先画缓存、再画最新数据）会对新节点再闪一次。
+   */
+  flashWhenReady(selector, { timeout = 4000, interval = 100 } = {}) {
+    const started = Date.now();
+    let last = null;
+    const timer = setInterval(() => {
+      const el = document.querySelector(selector);
+      if (el && el !== last) { last = el; this.flash(el); }
+      if (Date.now() - started > timeout) clearInterval(timer);
+    }, interval);
+    return timer;
+  }
+};
 
 const TodoPage = {
   loading: false,
@@ -57,26 +95,14 @@ const TodoPage = {
     try { this.renderBadge(await TodoApi.get()); } catch { /* 角标拿不到就不显示 */ }
   },
 
-  filter: 'all',   // 'all' | 分组 key
-
   show() {
     const root = document.getElementById('todoMode');
     if (!root) return;
     if (!root.firstChild) {
-      root.innerHTML = `<div class="task-board-header"><div class="task-board-left"><h2>📌 我的待办</h2><div class="task-board-stats"><div class="stat-item"><span class="stat-label">待处理</span><span class="stat-value" id="todoStatTotal">-</span></div><div class="stat-item"><span class="stat-label">逾期/今天</span><span class="stat-value" id="todoStatUrgent">-</span></div></div></div><button type="button" class="story-refresh" id="todoRefresh" title="刷新">↻</button></div>
-        <section class="todo-page"><div id="todoBody"></div></section>`;
-      root.querySelector('#todoRefresh').addEventListener('click', () => this.load());
+      root.innerHTML = `<div class="task-board-header"><div class="task-board-left"><h2>📌 我的待办</h2><div class="task-board-stats"><div class="stat-item"><span class="stat-label">待处理</span><span class="stat-value" id="todoStatTotal">-</span></div><div class="stat-item"><span class="stat-label">逾期/今天</span><span class="stat-value" id="todoStatUrgent">-</span></div></div></div></div>
+        <section class="todo-page"><div class="todo-grid" id="todoBody"></div></section>`;
     }
     this.load();
-  },
-
-  /** 问候语 + 日期，放在概览卡顶部 */
-  helloText() {
-    const now = new Date();
-    const h = now.getHours();
-    const hello = h < 6 ? '夜深了' : h < 12 ? '早上好' : h < 18 ? '下午好' : '晚上好';
-    const wk = ['日', '一', '二', '三', '四', '五', '六'][now.getDay()];
-    return `${hello} · ${now.getMonth() + 1} 月 ${now.getDate()} 日 星期${wk}`;
   },
 
   async load() {
@@ -95,73 +121,62 @@ const TodoPage = {
     }
   },
 
-  /** 概览卡：总数 + 紧急数 + 各分组计数（点分组计数 = 只看这一组，再点取消） */
-  renderHero(d, nonEmpty) {
-    const total = this.totalCount(d);
-    const urgent = this.urgentCount(d);
-    const sub = !total ? '都处理完了，今天可以轻松一点'
-      : urgent ? `其中 <b>${urgent}</b> 项已逾期或今天到期，建议先处理` : '没有逾期或今天到期的事项';
-    const chips = nonEmpty.map(g => `
-      <button type="button" class="todo-chip${this.filter === g.key ? ' active' : ''}" data-filter="${tdEsc(g.key)}">
-        <span class="todo-chip-n">${g.items.length}</span><span class="todo-chip-l">${tdEsc(g.label)}</span>
-      </button>`).join('');
-    return `<div class="todo-hero">
-      <div class="todo-hero-main">
-        <div class="todo-hero-label">${tdEsc(this.helloText())}</div>
-        <div class="todo-hero-num">${total}</div>
-        <div class="todo-hero-sub">${sub}</div>
+  renderCard(card, group) {
+    const items = (group && group.items) || [];
+    return `<section class="todo-card todo-${card.key}" data-card="${card.key}">
+      <div class="todo-card-head"><span class="todo-card-title">${card.icon} ${tdEsc(card.title)}</span><span class="todo-count">${items.length}</span></div>
+      <div class="todo-list">${items.length ? items.map(it => `
+        <button type="button" class="todo-item pri-${it.pri >= 1 && it.pri <= 4 ? it.pri : 3}" data-kind="${tdEsc(it.kind)}" data-id="${tdEsc(it.id)}">
+          <span class="todo-title">${tdEsc(it.title)}</span>
+          ${it.due ? `<span class="todo-due due-${tdEsc(it.due)}">${TODO_DUE_LABEL[it.due]}</span>` : ''}
+          <span class="todo-meta">${tdEsc(it.meta)}</span>
+        </button>`).join('') : `<div class="todo-empty">${tdEsc(card.empty)}</div>`}
       </div>
-      ${chips ? `<div class="todo-chips">${chips}</div>` : ''}
-    </div>`;
+    </section>`;
   },
 
   render() {
     const d = this.data;
     const body = document.getElementById('todoBody');
     if (!body || !d) return;
-    const nonEmpty = d.groups.filter(g => g.items.length);
-    if (this.filter !== 'all' && !nonEmpty.some(g => g.key === this.filter)) this.filter = 'all';
     const ta = document.getElementById('todoStatTotal'), tu = document.getElementById('todoStatUrgent');
     if (ta) ta.textContent = String(this.totalCount(d));
     if (tu) tu.textContent = String(this.urgentCount(d));
-    let html = this.renderHero(d, nonEmpty);
-    if (!nonEmpty.length) {
-      html += `<div class="todo-allclear"><div class="todo-allclear-ico">✓</div><p>没有待处理的事项</p><span>任务、Bug、需求和日报都清空了</span></div>`;
-    }
-    const shown = this.filter === 'all' ? nonEmpty : nonEmpty.filter(g => g.key === this.filter);
-    for (const g of shown) {
-      html += `<section class="todo-group todo-${tdEsc(g.tone)}">
-        <div class="todo-group-title"><span class="todo-dot"></span>${tdEsc(g.label)}<span class="todo-count">${g.items.length}</span></div>
-        <div class="todo-list">
-        ${g.items.map(it => `
-          <button type="button" class="todo-item pri-${it.pri >= 1 && it.pri <= 4 ? it.pri : 3}" data-mode="${tdEsc(g.mode)}" data-kind="${tdEsc(it.kind)}" data-id="${tdEsc(it.id)}">
-            <span class="todo-title">${tdEsc(it.title)}</span>
-            ${it.due ? `<span class="todo-due due-${tdEsc(it.due)}">${TODO_DUE_LABEL[it.due]}</span>` : ''}
-            <span class="todo-meta">${tdEsc(it.meta)}</span>
-            <span class="todo-arrow" aria-hidden="true">›</span>
-          </button>`).join('')}
-        </div>
-      </section>`;
-    }
+    const byKey = new Map(d.groups.map(g => [g.key, g]));
+    const col = (keys) => `<div class="todo-col">${keys.map(k => this.renderCard(TODO_CARDS.find(c => c.key === k), byKey.get(k))).join('')}</div>`;
+    let html = col(['task', 'bug']) + col(['story', 'doc']);
     if (d.errors && d.errors.length) {
       html += `<div class="todo-errors">部分来源没取到：${d.errors.map(tdEsc).join('；')}</div>`;
     }
     body.innerHTML = html;
-    body.querySelectorAll('.todo-item').forEach(b => b.addEventListener('click', () => this.go(b.dataset.mode, b.dataset.kind, b.dataset.id)));
-    body.querySelectorAll('.todo-chip').forEach(b => b.addEventListener('click', () => {
-      this.filter = this.filter === b.dataset.filter ? 'all' : b.dataset.filter;
-      this.render();
-    }));
+    body.querySelectorAll('.todo-item').forEach(b => b.addEventListener('click', () => this.go(b.dataset.kind, b.dataset.id)));
   },
 
-  /** 跳到对应模块；需求直接打开详情 */
-  go(mode, kind, id) {
-    if (typeof TabSwitcher !== 'undefined') TabSwitcher.switchMode(mode);
-    if (kind === 'story' && typeof StoryViewer !== 'undefined') setTimeout(() => StoryViewer.open(id), 0);
+  /** 跳到对应标签页，并让目标那一条高亮闪烁 */
+  go(kind, id) {
+    const sw = (m) => { if (typeof TabSwitcher !== 'undefined') TabSwitcher.switchMode(m); };
+    const sel = (s) => s.replace('__ID__', (window.CSS && CSS.escape) ? CSS.escape(String(id)) : String(id));
+    if (kind === 'task') {
+      sw('task');
+      WaHighlight.flashWhenReady(sel('.task-card[data-task-id="__ID__"]'));
+    } else if (kind === 'bug') {
+      sw('bug');
+      WaHighlight.flashWhenReady(sel('.bug-card[data-bug-id="__ID__"]'));
+    } else if (kind === 'story') {
+      sw('story');
+      // 去掉可能把它藏起来的过滤（状态 / 产品 / 搜索词）
+      if (typeof StoryPage !== 'undefined' && StoryPage.reveal) StoryPage.reveal();
+      WaHighlight.flashWhenReady(sel('#storyList [data-id="__ID__"]'));
+    } else if (kind === 'doc') {
+      sw('doc');
+      if (typeof DocPage !== 'undefined' && DocPage.reveal) DocPage.reveal();
+      WaHighlight.flashWhenReady(sel('#docList [data-id="__ID__"]'));
+    }
   }
 };
 
 if (typeof window !== 'undefined') {
   window.TodoPage = TodoPage;
   window.TodoApi = TodoApi;
+  window.WaHighlight = WaHighlight;
 }

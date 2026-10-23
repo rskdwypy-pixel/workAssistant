@@ -93,13 +93,11 @@ const StoryPage = {
               </div>
               <div class="story-search"><input type="search" id="storySearch" placeholder="搜索需求标题 / 编号…" autocomplete="off" /></div>
               <button type="button" class="btn-primary story-new" id="storyNew">＋ 新建需求</button>
-              <button type="button" class="story-refresh" id="storyRefresh" title="刷新">↻</button>
             </div>
             <div class="story-list" id="storyList"></div>
           </div>
         </section>`;
       root.querySelector('#storySearch').addEventListener('input', (e) => { this.keyword = e.target.value.trim(); this.renderList(); });
-      root.querySelector('#storyRefresh').addEventListener('click', () => this.load());
       root.querySelector('#storyNew').addEventListener('click', () => StoryEditor.openNew({ product: this.product !== 'all' ? this.product : '' }));
       root.querySelector('#storyStatus').addEventListener('click', (e) => {
         const btn = e.target.closest('[data-st]'); if (!btn) return;
@@ -151,6 +149,17 @@ const StoryPage = {
     } finally {
       this.loading = false;
     }
+  },
+
+  /** 去掉可能把某条需求藏起来的过滤（状态 / 产品 / 搜索词）；从待办页跳过来时用 */
+  reveal() {
+    this.status = 'all'; this.product = 'all'; this.keyword = '';
+    const root = document.getElementById('storyMode');
+    if (!root || !this.rendered) return;
+    const search = root.querySelector('#storySearch');
+    if (search) search.value = '';
+    root.querySelectorAll('#storyStatus [data-st]').forEach(b => b.classList.toggle('active', b.dataset.st === 'all'));
+    this.renderSide(); this.renderList();
   },
 
   renderStats() {

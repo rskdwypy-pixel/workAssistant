@@ -2,7 +2,7 @@
  * 真函数测试：我的待办（后端）
  *   - dueState：逾期 / 今天 / 3 天内 / 较远 / 无效日期
  *   - bySeverity：逾期 > 今天 > 3 天内 > 优先级（1 最高）
- *   - getTodos：各分组齐全；某个来源失败只进 errors，不影响其它
+ *   - getTodos：任务 / Bug / 需求 / 文档四组；某个来源失败只进 errors，不影响其它
  */
 import { dueState, bySeverity, getTodos } from '../src/services/todoService.js';
 
@@ -29,8 +29,9 @@ check('排序：逾期 > 今天 > 3 天内 > 优先级', items === 'cbead', item
 
 const t = await getTodos(new Date('2026-10-23T10:00:00'));
 check('getTodos：返回 groups / total / errors', Array.isArray(t.groups) && typeof t.total === 'number' && Array.isArray(t.errors));
-check('getTodos：任务 / Bug / 日报分组都在', ['task', 'bug', 'report'].every(k => t.groups.some(g => g.key === k)));
-check('getTodos：禅道未配置时需求失败只进 errors', t.errors.some(e => e.startsWith('需求')) && t.groups.some(g => g.key === 'task'));
+check('getTodos：分组顺序固定为 任务 / Bug / 需求 / 文档（取不到的来源不出现）', 'task,bug,story,doc'.startsWith(t.groups.map(g => g.key).join()) && t.groups.length >= 2);
+check('getTodos：不再有日报提醒分组', !t.groups.some(g => g.key === 'report'));
+check('getTodos：禅道未配置时需求 / 文档失败只进 errors，不影响任务 / Bug', t.errors.some(e => e.startsWith('需求')) && t.errors.some(e => e.startsWith('文档')) && t.groups.some(g => g.key === 'task') && t.groups.some(g => g.key === 'bug'));
 
 console.log(`\n待办后端：${pass}/${total} 通过`);
 process.exit(pass === total ? 0 : 1);

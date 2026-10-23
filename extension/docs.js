@@ -88,7 +88,6 @@ const DocPage = {
                 <input type="search" id="docSearch" placeholder="搜索文档标题…" autocomplete="off" />
               </div>
               <button type="button" class="doc-new" id="docNew" title="新建文档">＋ 新建文档</button>
-              <button type="button" class="doc-refresh" id="docRefresh" title="刷新">↻ 刷新</button>
             </div>
             <div class="doc-list" id="docList"></div>
           </div>
@@ -100,8 +99,6 @@ const DocPage = {
           this.renderList();
         });
       }
-      const refresh = root.querySelector('#docRefresh');
-      if (refresh) refresh.addEventListener('click', () => this.load());
       const neu = root.querySelector('#docNew');
       if (neu) neu.addEventListener('click', () => DocEditor.openNew());
     }
@@ -117,6 +114,16 @@ const DocPage = {
   setHint(text) {
     const el = document.getElementById('docSyncHint');
     if (el) el.textContent = text || '';
+  },
+
+  /** 去掉可能把某篇文档藏起来的过滤（文档库 / 搜索词）；从待办页跳过来时用 */
+  reveal() {
+    this.currentLib = 'all'; this.keyword = '';
+    const root = document.getElementById('docMode');
+    if (!root || !this.rendered) return;
+    const search = root.querySelector('#docSearch');
+    if (search) search.value = '';
+    this.renderTree(); this.renderList();
   },
 
   paint() {

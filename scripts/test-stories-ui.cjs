@@ -140,6 +140,15 @@ function setup(state = {}) {
   win.StoryViewer.open('99999'); await tick(30);
   check('不存在的需求：弹窗提示', /不存在|删除/.test(viewer.querySelector('[data-body]').textContent));
 
+  // ── reveal：从待办跳过来时清掉过滤，被藏起来的需求也能看到 ──
+  doc.querySelector('#storyStatus [data-st="closed"]').click();
+  side.querySelector('[data-prod="7"]').click(); await tick(5);
+  search.value = '云管'; search.dispatchEvent(new win.Event('input')); await tick(5);
+  check('过滤后列表为空', list.querySelectorAll('.story-card').length === 0);
+  win.StoryPage.reveal(); await tick(5);
+  check('reveal 清掉状态 / 产品 / 搜索过滤，显示全部 4 条', list.querySelectorAll('.story-card').length === 4 && search.value === '' && doc.querySelector('#storyStatus .active').dataset.st === 'all');
+  check('需求页没有刷新按钮', !doc.getElementById('storyRefresh'));
+
   // ── 新建需求 ──
   check('工具栏有「新建需求」按钮', !!doc.getElementById('storyNew'));
   doc.getElementById('storyNew').click();

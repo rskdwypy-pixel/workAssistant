@@ -1,9 +1,9 @@
 /**
  * 真函数测试：我的待办（前端）
- *   - 分组渲染、逾期 / 今天标记、空分组不显示、全空时的提示
- *   - 点击条目：切到对应模块；需求直接打开详情
- *   - 标签角标 = 逾期 + 今天到期条数，为 0 时不显示
- *   - 部分来源失败的提示
+ *   - 没有顶部总览卡；两列四张卡片：第一列 任务 / Bug，第二列 需求 / 文档
+ *   - 逾期 / 今天标记；空卡片提示；页头统计与标签角标（总数，有紧急的变红）
+ *   - 点击：切到对应标签页，并让目标那一条滚动 + 闪烁；需求 / 文档会先清掉过滤
+ *   - 菜单顺序：待办 任务 Bug 需求 文档 报告；各页没有刷新按钮
  */
 const fs = require('fs');
 const path = require('path');
@@ -18,72 +18,112 @@ const check = (name, pass, extra = '') => results.push({ name, pass: !!pass, ext
 const tick = (ms = 0) => new Promise(r => setTimeout(r, ms));
 
 const DATA = {
-  today: '2026-10-23', total: 4, errors: [],
+  today: '2026-10-23', total: 6, errors: [],
   groups: [
-    { key: 'task', label: '待办任务', tone: 'task', mode: 'task', items: [
-      { kind: 'task', id: '1', title: '改版联调', pri: 2, due: 'overdue', meta: '进行中 30%' },
-      { kind: 'task', id: '2', title: '写文档', pri: 3, due: '', meta: '待办' } ] },
-    { key: 'bug', label: '待处理 Bug', tone: 'bug', mode: 'bug', items: [] },
-    { key: 'story-review', label: '评审中的需求', tone: 'review', mode: 'story', items: [
+    { key: 'task', label: '待办任务', items: [
+      { kind: 'task', id: 't-1', title: '改版联调', pri: 1, due: 'overdue', meta: '进行中 30%' },
+      { kind: 'task', id: 't-2', title: '写文档', pri: 3, due: '', meta: '待办' } ] },
+    { key: 'bug', label: '待处理 Bug', items: [
+      { kind: 'bug', id: 'b-1', title: '登录超时', pri: 2, due: 'today', meta: '未确认' } ] },
+    { key: 'story', label: '我的需求', items: [
       { kind: 'story', id: '172', title: '需求测试', pri: 3, due: '', meta: '评审中' } ] },
-    { key: 'report', label: '日报', tone: 'report', mode: 'report', items: [
-      { kind: 'report', id: '2026-10-23', title: '今天的日报还没生成', pri: 3, due: 'today', meta: '' } ] }
+    { key: 'doc', label: '我的文档', items: [
+      { kind: 'doc', id: '9', title: '接口说明', pri: 3, due: '', meta: '产品主库 · 2026-10-20' },
+      { kind: 'doc', id: '10', title: '部署手册', pri: 3, due: '', meta: '产品主库 · 2026-10-19' } ] }
   ]
 };
 
 function setup(data) {
   const win = new JSDOM(HTML, { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true }).window;
-  const st = { modes: [], stories: [] };
+  const st = { modes: [], revealed: [] };
   win.fetch = async () => ({ ok: true, status: 200, json: async () => (data.fail ? { success: false, message: '炸了' } : { success: true, data }) });
   win.TabSwitcher = { switchMode: (m) => st.modes.push(m) };
-  win.StoryViewer = { open: (id) => st.stories.push(id) };
+  win.StoryPage = { reveal: () => st.revealed.push('story') };
+  win.DocPage = { reveal: () => st.revealed.push('doc') };
+  win.Element.prototype.scrollIntoView = function () { st.scrolled = (st.scrolled || 0) + 1; };
   win.eval(`const API_BASE_URL='http://127.0.0.1:3721';\nfunction escapeHtml(t){const d=document.createElement('div');d.textContent=t==null?'':String(t);return d.innerHTML;}\n${SRC}`);
   return { win, doc: win.document, st };
 }
 
+/** 在页面里造一个目标元素，模拟目标标签页渲染出来的卡片 */
+const addTarget = (doc, parentSel, html) => { const p = doc.querySelector(parentSel) || doc.body; p.insertAdjacentHTML('beforeend', html); };
+
 (async () => {
   let { win, doc, st } = setup(DATA);
-  check('HTML 里有「待办」标签和容器', !!doc.querySelector('.tab-btn[data-mode="todo"]') && !!doc.getElementById('todoMode'));
+  const tabs = [...doc.querySelectorAll('.mode-tabs .tab-btn')].map(b => b.dataset.mode);
+  check('菜单顺序：待办 任务 Bug 需求 文档 报告', tabs.join() === 'todo,task,bug,story,doc,report', tabs.join());
+  check('四个页面容器都用统一外框 mode-card', ['todoMode', 'storyMode', 'docMode', 'reportMode'].every(i => doc.getElementById(i).classList.contains('mode-card')));
+
   win.TodoPage.show(); await tick(20);
-  const body = doc.getElementById('todoBody');
-  check('渲染 3 个非空分组（空的 Bug 组不显示）', body.querySelectorAll('.todo-group').length === 3 && !/待处理 Bug/.test(body.textContent));
-  check('逾期 / 今天有标记', body.querySelector('.due-overdue') && body.querySelector('.due-today'));
-  check('概览卡显示总数 4 与紧急提示', doc.querySelector('.todo-hero-num').textContent === '4' && /其中 2 项/.test(doc.querySelector('.todo-hero-sub').textContent));
-  check('概览卡显示问候语与日期', /月.*日.*星期/.test(doc.querySelector('.todo-hero-label').textContent));
-  check('外框头部有标题与统计（待处理 4 / 紧急 2）', /我的待办/.test(doc.querySelector('.task-board-header h2').textContent) && doc.getElementById('todoStatTotal').textContent === '4' && doc.getElementById('todoStatUrgent').textContent === '2');
-  check('容器使用统一外框 mode-card', ['todoMode', 'storyMode', 'docMode', 'reportMode'].every(i => doc.getElementById(i).classList.contains('mode-card')));
+  check('没有顶部总览卡', !doc.querySelector('.todo-hero') && !doc.querySelector('.todo-chip'));
+  check('没有刷新按钮', !doc.getElementById('todoRefresh'));
+  const cols = doc.querySelectorAll('.todo-col');
+  check('两列', cols.length === 2);
+  const keys = (c) => [...c.querySelectorAll('.todo-card')].map(x => x.dataset.card).join();
+  check('第一列：任务、Bug（上下两张）', keys(cols[0]) === 'task,bug', keys(cols[0]));
+  check('第二列：需求、文档（上下两张）', keys(cols[1]) === 'story,doc', keys(cols[1]));
+  check('卡片头部显示条数', doc.querySelector('[data-card="task"] .todo-count').textContent === '2' && doc.querySelector('[data-card="doc"] .todo-count').textContent === '2');
+  check('逾期 / 今天有标记', doc.querySelector('.due-overdue') && doc.querySelector('.due-today'));
+  check('页头统计：待处理 6 / 逾期+今天 2', doc.getElementById('todoStatTotal').textContent === '6' && doc.getElementById('todoStatUrgent').textContent === '2');
   const badge = doc.querySelector('.tab-badge');
-  check('角标 = 待办总数 4（不是紧急数）', badge && badge.textContent === '4');
-  check('有逾期 / 今天到期时角标变红', badge.classList.contains('urgent'));
-  const chips = [...doc.querySelectorAll('.todo-chip')];
-  check('概览卡有 3 个分组计数（空组不出现）', chips.length === 3);
-  chips.find(c => c.dataset.filter === 'task').click();
-  check('点分组计数 → 只看该组', doc.querySelectorAll('.todo-group').length === 1 && /待办任务/.test(doc.getElementById('todoBody').textContent) && !/评审中的需求/.test(doc.getElementById('todoBody').querySelector('.todo-group').textContent));
-  doc.querySelector('.todo-chip.active').click();
-  check('再点一次 → 恢复全部', doc.querySelectorAll('.todo-group').length === 3);
+  check('角标 = 待办总数 6，有紧急所以变红', badge && badge.textContent === '6' && badge.classList.contains('urgent'));
 
-  body.querySelector('[data-kind="task"][data-id="1"]').click();
-  check('点任务 → 切到任务模块', st.modes.pop() === 'task');
-  body.querySelector('[data-kind="story"]').click(); await tick(10);
-  check('点需求 → 切到需求并打开详情', st.modes.pop() === 'story' && st.stories[0] === '172');
-  body.querySelector('[data-kind="report"]').click();
-  check('点日报 → 切到报告', st.modes.pop() === 'report');
+  // ── 点击跳转 + 闪烁 ──
+  doc.querySelector('[data-kind="task"][data-id="t-1"]').click();
+  check('点任务 → 切到任务标签页', st.modes.pop() === 'task');
+  addTarget(doc, 'body', '<div class="task-card" data-task-id="t-1">卡片</div>');
+  await tick(250);
+  check('任务目标：滚动到视野并闪烁', doc.querySelector('.task-card[data-task-id="t-1"]').classList.contains('wa-flash') && st.scrolled >= 1);
 
-  // 全空
-  ({ win, doc, st } = setup({ today: 'x', total: 0, errors: [], groups: [{ key: 'task', label: '待办任务', tone: 'task', mode: 'task', items: [] }] }));
+  doc.querySelector('[data-kind="bug"][data-id="b-1"]').click();
+  check('点 Bug → 切到 Bug 标签页', st.modes.pop() === 'bug');
+  addTarget(doc, 'body', '<div class="task-card bug-card" data-bug-id="b-1">Bug</div>');
+  await tick(250);
+  check('Bug 目标闪烁', doc.querySelector('.bug-card[data-bug-id="b-1"]').classList.contains('wa-flash'));
+
+  doc.querySelector('[data-kind="story"][data-id="172"]').click();
+  check('点需求 → 切到需求标签页并清掉过滤', st.modes.pop() === 'story' && st.revealed.includes('story'));
+  addTarget(doc, 'body', '<div id="storyList"><button class="story-card" data-id="172">需求</button></div>');
+  await tick(250);
+  check('需求目标闪烁（不再直接弹详情）', doc.querySelector('#storyList [data-id="172"]').classList.contains('wa-flash'));
+
+  doc.querySelector('[data-kind="doc"][data-id="9"]').click();
+  check('点文档 → 切到文档标签页并清掉过滤', st.modes.pop() === 'doc' && st.revealed.includes('doc'));
+  addTarget(doc, 'body', '<div id="docList"><button class="doc-item" data-id="9">文档</button></div>');
+  await tick(250);
+  check('文档目标闪烁', doc.querySelector('#docList [data-id="9"]').classList.contains('wa-flash'));
+
+  // 列表重绘换了新节点（先缓存后最新）：对新节点再闪一次
+  const oldEl = doc.querySelector('#docList [data-id="9"]');
+  doc.querySelector('[data-kind="doc"][data-id="9"]').click();
+  await tick(150);
+  oldEl.remove();
+  doc.getElementById('docList').insertAdjacentHTML('beforeend', '<button class="doc-item" data-id="9">新节点</button>');
+  await tick(250);
+  check('重绘后的新节点也会闪', doc.querySelector('#docList [data-id="9"]').classList.contains('wa-flash'));
+
+  // 闪烁会自己结束
+  await tick(2200);
+  check('闪烁约 2 秒后自动结束', !doc.querySelector('#docList [data-id="9"]').classList.contains('wa-flash'));
+
+  // ── 空卡片 / 缺分组 ──
+  ({ win, doc, st } = setup({ today: 'x', total: 0, errors: [], groups: [{ key: 'task', label: '任务', items: [] }] }));
   win.TodoPage.show(); await tick(20);
-  check('全空：显示「没有待处理的事项」', /没有待处理的事项/.test(doc.getElementById('todoBody').textContent));
+  check('取不到的来源也显示空卡片和提示', doc.querySelectorAll('.todo-card').length === 4 && /没有与你相关的需求/.test(doc.getElementById('todoBody').textContent));
   check('全空：不显示角标', !doc.querySelector('.tab-badge'));
 
-  // 部分来源失败
   ({ win, doc, st } = setup({ ...DATA, errors: ['需求：禅道未启用或未配置'] }));
   win.TodoPage.show(); await tick(20);
   check('部分失败：提示哪些来源没取到', /部分来源没取到.*需求/.test(doc.getElementById('todoBody').textContent));
 
-  // 接口失败
   ({ win, doc, st } = setup({ fail: true }));
   win.TodoPage.show(); await tick(20);
   check('接口失败：显示错误', /炸了/.test(doc.getElementById('todoBody').textContent));
+
+  // 其它页面没有刷新按钮
+  const stories = fs.readFileSync(path.join(EXT, 'stories.js'), 'utf8');
+  const docs = fs.readFileSync(path.join(EXT, 'docs.js'), 'utf8');
+  check('需求页、文档页没有刷新按钮', !/storyRefresh|docRefresh/.test(stories + docs));
 
   const passed = results.filter(r => r.pass).length;
   for (const r of results) console.log(`${r.pass ? '✅' : '❌'} ${r.name}${r.extra ? `  (${r.extra})` : ''}`);
