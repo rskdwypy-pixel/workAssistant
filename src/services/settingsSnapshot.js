@@ -39,7 +39,10 @@ async function buildSnapshot() {
     schedule: {
       morningHour: cfg.schedule.morningHour,
       eveningHour: cfg.schedule.eveningHour,
-      workHours: cfg.schedule.workHours
+      workHours: cfg.schedule.workHours,
+      // 上班日历：节假日 / 调休日（文本，如 2026-10-01~2026-10-07, 2026-12-25）
+      holidays: (cfg.workCalendar && cfg.workCalendar.holidays) || '',
+      makeup: (cfg.workCalendar && cfg.workCalendar.makeup) || ''
     },
     webhook: {
       hasUrl: !!cfg.webhook.url,
@@ -47,6 +50,13 @@ async function buildSnapshot() {
       // 完整地址：设置页以后端为准回填（只有本插件能访问本接口，见 requestGuard）
       url: cfg.webhook.url || '',
       urlPrefix: cfg.webhook.url ? cfg.webhook.url.substring(0, 30) + '...' : '(空)'
+    },
+    autofill: {
+      maxTasksPerDay: cfg.autofill.maxTasksPerDay,
+      minChunk: cfg.autofill.minChunk,
+      maxChunk: cfg.autofill.maxChunk,
+      maxDaysPerTask: cfg.autofill.maxDaysPerTask,
+      prompt: cfg.autofill.prompt || ''
     },
     zentao: {
       enabled: cfg.zentao.enabled,

@@ -19,6 +19,7 @@ import { fetchMyList, getZentaoJson, getTaskEfforts, isConfigured, getZentaoCook
 import { getMonthEfforts, addEffort, deleteEffort, standardHours, myEffortsByTask } from './effortService.js';
 import { readJSON, writeJSON } from '../utils/storage.js';
 import { decodeZentaoText } from '../utils/text.js';
+import { isRestDay, restReason } from '../utils/workCalendar.js';
 
 const DEFAULTS = {
   minChunk: 1,          // 单条最少小时（缺口不足 1 小时时例外）
@@ -34,7 +35,7 @@ const pad = (n) => String(n).padStart(2, '0');
 const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const day10 = (v) => { const s = String(v || ''); return /^\d{4}-\d{2}-\d{2}/.test(s) && !s.startsWith('0000') ? s.slice(0, 10) : ''; };
 const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); return ymd(new Date(y, m - 1, d + n)); };
-const isWeekend = (s) => { const [y, m, d] = s.split('-').map(Number); const w = new Date(y, m - 1, d).getDay(); return w === 0 || w === 6; };
+const isWeekend = (s) => isRestDay(s);   // 周末 / 节假日；调休上班的周末算工作日
 const round05 = (n) => Math.round(n * 2) / 2;
 const round1 = (n) => Math.round(n * 10) / 10;
 const daysBetween = (a, b) => Math.round((new Date(`${b}T00:00:00`) - new Date(`${a}T00:00:00`)) / 86400000);
@@ -115,26 +116,44 @@ function poolFor(date, tasks) {
 /* ───────────────────────── 选任务 + 分配小时 ───────────────────────── */
 
 /** 缺口大小决定抽几个任务：≤2h 一个；≤5h 一到两个；更大两到三个 */
-function chooseCount(gap, available, rng) {
+function chooseCount(gap, available, rng, { maxTasks = 3, minChunk = DEFAULTS.minChunk } = {}) {
   let n = gap <= 2 ? 1 : gap <= 5 ? 1 + (rng() < 0.5 ? 1 : 0) : 2 + (rng() < 0.5 ? 1 : 0);
-  n = Math.min(n, available, Math.max(1, Math.floor(gap / DEFAULTS.minChunk)));
+  n = Math.min(n, available, maxTasks, Math.max(1, Math.floor(gap / minChunk)));
   return Math.max(1, n);
 }
 
-/** 把缺口（0.5 的倍数）分给 n 条：每条至少 minChunk（缺口太小时例外），至多 maxChunk，总和恰好等于缺口 */
-function allocateHours(gap, n, rng, { minChunk = DEFAULTS.minChunk, maxChunk = DEFAULTS.maxChunk } = {}) {
+/** 一条最多分多少小时：不超过 maxChunk，也不超过该任务剩余工时的 1.5 倍（剩 0.9h 的任务不该一天记 3.5h），至少 1h */
+function chunkCap(task, maxChunk = DEFAULTS.maxChunk) {
+  return Math.max(1, Math.min(maxChunk, round05((Number(task.left) || 0) * 1.5)));
+}
+
+/**
+ * 把缺口（0.5 的倍数）分给 n 条：每条至少 minChunk（缺口太小时例外），总和恰好等于缺口。
+ * 每条的上限默认 maxChunk；传 caps（小时）可以按条各自限制（见 chunkCap）。
+ * 所有条都到上限了还有剩：先让剩余充足的任务多承担（最多 8h），再放宽到 maxChunk，最后才放进最大的那条（保证总和等于缺口）。
+ */
+function allocateHours(gap, n, rng, { minChunk = DEFAULTS.minChunk, maxChunk = DEFAULTS.maxChunk, caps } = {}) {
   const units = Math.round(gap * 2);
-  const minU = Math.max(1, Math.min(Math.round(minChunk * 2), Math.floor(units / n)));
   const maxU = Math.round(maxChunk * 2);
+  const capU = Array.from({ length: n }, (_, i) => Math.min(maxU, caps && caps[i] ? Math.round(caps[i] * 2) : maxU));
+  const minU = Math.max(1, Math.min(Math.round(minChunk * 2), Math.floor(units / n), ...capU));
   const alloc = Array(n).fill(minU);
   let rest = units - minU * n;
-  while (rest > 0) {
-    const open = alloc.map((u, i) => (u < maxU ? i : -1)).filter(i => i >= 0);
-    if (!open.length) { alloc[alloc.indexOf(Math.max(...alloc))] += rest; break; }   // 全到上限了：多出来的放最大的那条
-    const i = open[Math.floor(rng() * open.length)];
-    const step = Math.min(rest, maxU - alloc[i], 1 + Math.floor(rng() * 3));
-    alloc[i] += step; rest -= step;
-  }
+  const fill = (limits) => {
+    while (rest > 0) {
+      const open = alloc.map((u, i) => (u < limits[i] ? i : -1)).filter(i => i >= 0);
+      if (!open.length) return;
+      const i = open[Math.floor(rng() * open.length)];
+      const step = Math.min(rest, limits[i] - alloc[i], 1 + Math.floor(rng() * 3));
+      alloc[i] += step; rest -= step;
+    }
+  };
+  fill(capU);
+  // 都到各自的封顶了还有剩：先让「剩余工时充足」的任务（本来就到 maxChunk 的）多承担，最多一整天 8h，
+  // 剩余很小的任务仍守着自己的封顶；还不够再放宽所有条到 maxChunk，最后才放进最大的那条
+  if (rest > 0) fill(capU.map(u => (u >= maxU ? Math.max(maxU, 16) : u)));
+  if (rest > 0) fill(Array(n).fill(maxU));
+  if (rest > 0) alloc[alloc.indexOf(Math.max(...alloc))] += rest;
   return alloc.map(u => u / 2);
 }
 
@@ -144,9 +163,22 @@ function allocateHours(gap, n, rng, { minChunk = DEFAULTS.minChunk, maxChunk = D
  *   history: Map(taskId → [已有工时的日期])；dayExecs: 当天已有工时所在的执行名；monthUse: Map(taskId → 本月已被抽的天数)
  * @returns {Array<{taskId,taskName,execName,hours}>}
  */
+/** 补填参数：调用方（测试 / 方案）显式传的优先，其次设置里的（调试页），最后默认值 */
+function limits(c = {}) {
+  const cfg = config.autofill || {};
+  const pick = (a, b, d) => (a > 0 ? a : b > 0 ? b : d);
+  return {
+    maxTasks: pick(c.maxTasks, cfg.maxTasksPerDay, 3),
+    minChunk: pick(c.minChunk, cfg.minChunk, DEFAULTS.minChunk),
+    maxChunk: pick(c.maxChunk, cfg.maxChunk, DEFAULTS.maxChunk),
+    maxDaysPerTask: pick(c.maxDaysPerTask, cfg.maxDaysPerTask, DEFAULTS.maxDaysPerTask)
+  };
+}
+
 function planDay(c) {
   const { date, gap, history, dayExecs = [], monthUse = new Map(), rng } = c;
-  const cap = c.maxDaysPerTask || DEFAULTS.maxDaysPerTask;
+  const lim = limits(c);
+  const cap = lim.maxDaysPerTask;
   const pool = c.pool.filter(t => (monthUse.get(t.id) || 0) < cap);
   if (!pool.length || gap < 0.5) return [];
   const weights = pool.map(t => {
@@ -161,9 +193,16 @@ function planDay(c) {
     if (t.estimate > 0 && t.consumed >= t.estimate) w *= 0.4;              // 预计工时已用完
     return Math.max(0.1, w);
   });
-  const n = chooseCount(gap, pool.length, rng);
+  const maxChunk = lim.maxChunk;
+  const n = chooseCount(gap, pool.length, rng, { maxTasks: lim.maxTasks, minChunk: lim.minChunk });
   const picked = weightedSample(pool, weights, n, rng);
-  const hours = allocateHours(gap, picked.length, rng, c);
+  // 按各任务的剩余工时封顶后，容量不够补满缺口：再多抽几个任务（最多 3 个）；还不够就放宽封顶
+  const capacity = () => picked.reduce((s, t) => s + chunkCap(t, maxChunk), 0);
+  while (capacity() < gap && picked.length < Math.min(lim.maxTasks, pool.length)) {
+    const rest = pool.filter(t => !picked.includes(t));
+    picked.push(...weightedSample(rest, rest.map(t => weights[pool.indexOf(t)]), 1, rng));
+  }
+  const hours = allocateHours(gap, picked.length, rng, { minChunk: lim.minChunk, maxChunk, caps: picked.map(t => chunkCap(t, maxChunk)) });
   return picked.map((t, i) => ({ taskId: t.id, taskName: t.name, execName: t.execName, hours: hours[i] }));
 }
 
@@ -179,7 +218,7 @@ function planDates(ctx) {
   for (const date of [...dates].sort()) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { skipped.push({ date, reason: '日期格式不对' }); continue; }
     if (date >= today) { skipped.push({ date, reason: date === today ? '今天还没过完，不补' : '将来的日期不能补' }); continue; }
-    if (isWeekend(date)) { skipped.push({ date, reason: '周末不补' }); continue; }
+    if (isWeekend(date)) { skipped.push({ date, reason: `${restReason(date)}不补` }); continue; }
     const entryDay = daysMap[date] || { hours: 0, items: [] };
     const existing = entryDay.hours || 0;
     const gap = round05(standard - existing);
@@ -228,7 +267,7 @@ async function describeTask(taskId, CH) {
   return text;
 }
 
-function buildWorkPrompt({ date, items, samples }) {
+function buildWorkPrompt({ date, items, samples, extra = '' }) {
   return `你在帮用户补写工时的“工作内容”。用户是软件团队成员，这些内容会显示在禅道的工时记录里。
 
 要求：
@@ -237,7 +276,7 @@ function buildWorkPrompt({ date, items, samples }) {
 - 不要编造具体数字、缺陷编号、人名、版本号；不要写“已完成 / 已上线 / 验收通过”这类结论；
 - 同一批里各条的措辞不要雷同；工时长的写具体一些，工时短的写简短。
 
-用户以前的写法（学习口吻，不要照抄）：
+${extra ? `用户的额外要求（优先遵守，但不得违反上面的约束）：\n${extra}\n\n` : ''}用户以前的写法（学习口吻，不要照抄）：
 ${samples.length ? samples.map(s => `- ${s}`).join('\n') : '- （暂无，写简洁的工作描述即可）'}
 
 日期：${date}。需要写 ${items.length} 条，每条对应一个任务：
@@ -274,7 +313,7 @@ async function writeWorks({ date, entries, history, CH, ai, rng }) {
   }
   let works = null;
   if (ai) {
-    try { works = parseWorks(await ai(buildWorkPrompt({ date, items, samples }), 700), entries.length); }
+    try { works = parseWorks(await ai(buildWorkPrompt({ date, items, samples, extra: (config.autofill && config.autofill.prompt) || '' }), 700), entries.length); }
     catch (err) { console.warn('[Autofill] AI 写内容失败，改用模板:', err.message); }
   }
   const used = new Set();
@@ -567,6 +606,6 @@ async function undoBatch(batchId) {
 
 export {
   buildPlan, rewriteWorks, startExecution, getJob, stopJob, undoBatch, getLog,
-  poolFor, planDay, planDates, allocateHours, chooseCount, seedFrom, mulberry32, slimPoolTask,
+  poolFor, planDay, planDates, allocateHours, chooseCount, chunkCap, seedFrom, mulberry32, slimPoolTask,
   parseWorks, templateWork, styleSamples, validateExecution, pastWorkdaysOfMonth, DEFAULTS
 };

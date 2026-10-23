@@ -18,7 +18,8 @@ const tick = (ms = 0) => new Promise(r => setTimeout(r, ms));
 
 const SNAP = (over = {}) => ({
   ai: { apiBaseUrl: 'https://relay.example/v1', aiModel: 'minimax-m3', aiReportModel: 'kimi-k3-1' },
-  schedule: { morningHour: 9, eveningHour: 21, workHours: 8 },
+  schedule: { morningHour: 9, eveningHour: 21, workHours: 8, holidays: '2026-10-01~2026-10-07', makeup: '2026-10-10' },
+  autofill: { maxTasksPerDay: 2, minChunk: 1.5, maxChunk: 3, maxDaysPerTask: 5, prompt: '每条不超过 40 字' },
   webhook: { url: 'https://hook.example', type: 'wecom' },
   zentao: { enabled: true, url: 'http://10.0.0.1:8088', username: 'lijc', createTaskUrl: '167' },
   client: { aiProvider: 'custom', aiProfiles: { custom: { apiBaseUrl: 'https://relay.example/v1' } } },
@@ -56,6 +57,7 @@ function setup({ local = {}, backend = {} } = {}) {
   check('启动读出缓存（不用等后端）', store.rev === 'rev0' && store.get().ai.aiModel === 'minimax-m3');
   const f = store.flat();
   check('平铺字段名与旧版一致（apiBaseUrl / morningHour / webhookUrl / zentaoUrl / aiProvider…）', f.apiBaseUrl === 'https://relay.example/v1' && f.morningHour === '9' && f.webhookUrl === 'https://hook.example' && f.zentaoUrl === 'http://10.0.0.1:8088' && f.zentaoCreateTaskUrl === '167' && f.aiProvider === 'custom' && f.aiProfiles.custom && f.workHours === '8');
+  check('平铺字段：上班日历（节假日 / 调休日）和补填参数也带出来', f.workHolidays === '2026-10-01~2026-10-07' && f.workMakeup === '2026-10-10' && f.autofill.maxTasksPerDay === 2 && f.autofill.prompt === '每条不超过 40 字');
   check('没有缓存时 flat() 是空对象（设置页据此用预设）', setup().store.flat() && Object.keys(setup().store.flat()).length === 0);
   check('缓存损坏当没有，不抛错', Object.keys(setup({ local: { waSettingsCache: '{坏的' } }).store.flat()).length === 0);
 

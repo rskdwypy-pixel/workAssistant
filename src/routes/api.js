@@ -718,6 +718,9 @@ router.post('/config', async (req, res) => {
       morningHour,
       eveningHour,
       workHours,
+      workHolidays,
+      workMakeup,
+      autofill,
       webhookUrl,
       webhookType,
       client,
@@ -731,6 +734,33 @@ router.post('/config', async (req, res) => {
       if (String(baseRev) !== cur.rev) {
         return res.status(409).json({ success: false, code: 'CONFIG_CONFLICT', message: '配置已在别处被修改，已刷新为最新，请确认后再保存', rev: cur.rev });
       }
+    }
+
+    // 上班日历：节假日 / 调休日。格式不对就整个请求拒绝，且必须在改任何东西之前（否则内存里的配置已被前面的字段改掉）
+    if (workHolidays !== undefined || workMakeup !== undefined) {
+      const { parseDateList } = await import('../utils/workCalendar.js');
+      for (const [label, text] of [['节假日', workHolidays], ['调休日', workMakeup]]) {
+        if (text === undefined) continue;
+        const bad = parseDateList(text).errors;
+        if (bad.length) return res.status(400).json({ success: false, message: `${label}的格式不对：${bad.slice(0, 3).join('、')}（写法：2026-10-01~2026-10-07, 2026-12-25）` });
+      }
+    }
+    if (workHours !== undefined && !(parseFloat(workHours) > 0 && parseFloat(workHours) <= 24)) {
+      return res.status(400).json({ success: false, message: '每日标准工时应大于 0 且不超过 24 小时' });
+    }
+    // 工时补填参数：范围不对整个请求拒绝（同样在改任何东西之前）
+    let af = null;
+    if (autofill && typeof autofill === 'object') {
+      const n = (v) => Number(v);
+      af = { maxTasksPerDay: n(autofill.maxTasksPerDay), minChunk: n(autofill.minChunk), maxChunk: n(autofill.maxChunk), maxDaysPerTask: n(autofill.maxDaysPerTask), prompt: String(autofill.prompt || '').trim() };
+      const half = (v) => Math.round(v * 2) === v * 2;
+      const err = !(Number.isInteger(af.maxTasksPerDay) && af.maxTasksPerDay >= 1 && af.maxTasksPerDay <= 5) ? '每天最多任务数应是 1~5 的整数'
+        : !(af.minChunk >= 0.5 && af.minChunk <= 4 && half(af.minChunk)) ? '单条工时的下限应在 0.5~4 小时之间（0.5 步长）'
+        : !(af.maxChunk >= 1 && af.maxChunk <= 8 && half(af.maxChunk)) ? '单条工时的上限应在 1~8 小时之间（0.5 步长）'
+        : af.minChunk > af.maxChunk ? '单条工时的下限不能大于上限'
+        : !(Number.isInteger(af.maxDaysPerTask) && af.maxDaysPerTask >= 1 && af.maxDaysPerTask <= 31) ? '同一任务单月最多的天数应是 1~31 的整数'
+        : af.prompt.length > 500 ? '额外要求最多 500 字' : '';
+      if (err) return res.status(400).json({ success: false, message: err });
     }
 
     // 更新运行时配置
@@ -749,6 +779,9 @@ router.post('/config', async (req, res) => {
     if (aiReportModel !== undefined) configModule.config.ai.reportModel = String(aiReportModel || '').trim();
     if (morningHour !== undefined) configModule.config.schedule.morningHour = parseInt(morningHour);
     if (eveningHour !== undefined) configModule.config.schedule.eveningHour = parseInt(eveningHour);
+    if (af) Object.assign(configModule.config.autofill, af);
+    if (workHolidays !== undefined) configModule.config.workCalendar.holidays = String(workHolidays).trim();
+    if (workMakeup !== undefined) configModule.config.workCalendar.makeup = String(workMakeup).trim();
     if (workHours !== undefined) {
       const wh = parseFloat(workHours);
       if (!(wh > 0 && wh <= 24)) return res.status(400).json({ success: false, message: '每日标准工时应大于 0 且不超过 24 小时' });
@@ -767,6 +800,15 @@ router.post('/config', async (req, res) => {
     if (morningHour !== undefined) envUpdates.MORNING_HOUR = morningHour;
     if (eveningHour !== undefined) envUpdates.EVENING_HOUR = eveningHour;
     if (workHours !== undefined) envUpdates.WORK_HOURS_PER_DAY = configModule.config.schedule.workHours;
+    if (af) {
+      envUpdates.AUTOFILL_MAX_TASKS = af.maxTasksPerDay;
+      envUpdates.AUTOFILL_MIN_CHUNK = af.minChunk;
+      envUpdates.AUTOFILL_MAX_CHUNK = af.maxChunk;
+      envUpdates.AUTOFILL_MAX_DAYS_PER_TASK = af.maxDaysPerTask;
+      envUpdates.AUTOFILL_PROMPT = af.prompt ? Buffer.from(af.prompt, 'utf-8').toString('base64') : '';
+    }
+    if (workHolidays !== undefined) envUpdates.WORK_HOLIDAYS = configModule.config.workCalendar.holidays;
+    if (workMakeup !== undefined) envUpdates.WORK_MAKEUP_DAYS = configModule.config.workCalendar.makeup;
     if (webhookUrl !== undefined) envUpdates.WEBHOOK_URL = webhookUrl;
     if (webhookType !== undefined) envUpdates.WEBHOOK_TYPE = webhookType;
 

@@ -16,6 +16,7 @@
 import { fetchMyList, getTaskEfforts, recordTaskEstimate, editTaskEstimate, deleteTaskEstimate, isConfigured, getZentaoCookies, cookiesToString, getTeamMembers, listExecutionTasks } from './zentaoService.js';
 import { createCache, singleFlight } from './zentaoCache.js';
 import { decodeZentaoText } from '../utils/text.js';
+import { isRestDay } from '../utils/workCalendar.js';
 import { config } from '../config.js';
 
 const MY_TASK_LISTS = ['assignedTo', 'openedBy', 'finishedBy', 'closedBy', 'canceledBy'];
@@ -420,7 +421,7 @@ async function getEffortGaps({ now = new Date(), lookback = 7, limit = 3 } = {})
   const dates = [];
   for (let i = 1; i <= lookback; i++) {
     const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
-    if (d.getDay() === 0 || d.getDay() === 6) continue;
+    if (isRestDay(ymd(d))) continue;   // 周末 / 节假日不提醒；调休上班的周末要提醒
     dates.push(ymd(d));
   }
   const months = [...new Set(dates.map(d => d.slice(0, 7)))];

@@ -104,6 +104,42 @@ try {
   check('数量：缺口大时抽 2~3 个；缺口 ≤ 2h 只抽 1 个', [...ns].every(n => n === 2 || n === 3) && af.chooseCount(2, 5, af.mulberry32(1)) === 1);
   check('数量：候选只有 1 个时只抽 1 个', af.chooseCount(8, 1, af.mulberry32(1)) === 1);
 
+  // ============ 按剩余工时封顶 ============
+  check('封顶：剩 0.9h 的任务一条最多 1.5h；剩 10h 的最多 4h；剩 0.2h 也至少 1h', af.chunkCap({ left: 0.9 }) === 1.5 && af.chunkCap({ left: 10 }) === 4 && af.chunkCap({ left: 0.2 }) === 1);
+  let capOk = true, capWhy = '';
+  for (let s = 1; s <= 300 && capOk; s++) {
+    const small = { id: '1', name: '快做完的任务', execName: '', left: 0.9, estimate: 0, consumed: 0, deadline: '', lastEdited: '' };
+    const big = { id: '2', name: '大任务', execName: '', left: 12, estimate: 0, consumed: 0, deadline: '', lastEdited: '' };
+    const e = af.planDay({ date: '2025-03-14', gap: 7, pool: [small, big], history: new Map(), rng: af.mulberry32(s) });
+    const sm = e.find(x => x.taskId === '1');
+    if (sm && sm.hours > 1.5) { capOk = false; capWhy = `seed ${s} 小任务被分到 ${sm.hours}h`; }
+    if (Math.abs(e.reduce((n, x) => n + x.hours, 0) - 7) > 1e-9) { capOk = false; capWhy = `seed ${s} 总和 ${e.map(x => x.hours)}`; }
+  }
+  check('封顶：剩余很小的任务不会被分到超过 1.5h，且总和仍等于缺口（300 个种子）', capOk, capWhy);
+  const onlySmall = af.planDay({ date: '2025-03-14', gap: 7, pool: [{ id: '1', name: '唯一的小任务', execName: '', left: 0.9, estimate: 0, consumed: 0, deadline: '', lastEdited: '' }], history: new Map(), rng: af.mulberry32(1) });
+  check('封顶：候选只有一个小任务时放宽封顶，仍然补满缺口（不留空）', onlySmall.length === 1 && onlySmall[0].hours === 4 || onlySmall.reduce((n, x) => n + x.hours, 0) === 7, JSON.stringify(onlySmall));
+
+  // ============ 调试页参数 ============
+  const poolLim = [10, 11, 15].map(i => slim.find(t => t.id === String(i)));
+  config.autofill.maxTasksPerDay = 1;
+  let manyTasks = 0; for (let s = 1; s <= 100; s++) if (af.planDay({ date: '2025-03-14', gap: 8, pool: poolLim, history: new Map(), rng: af.mulberry32(s) }).length > 1) manyTasks++;
+  check('参数：每天最多任务数设成 1 → 每天只抽 1 个任务', manyTasks === 0, `${manyTasks}`);
+  config.autofill.maxTasksPerDay = 3; config.autofill.minChunk = 2; config.autofill.maxChunk = 3;
+  let chunkOk = true; for (let s = 1; s <= 200; s++) { const e = af.planDay({ date: '2025-03-14', gap: 8, pool: poolLim, history: new Map(), rng: af.mulberry32(s) }); if (e.some(x => x.hours < 2) || Math.abs(e.reduce((n, x) => n + x.hours, 0) - 8) > 1e-9) chunkOk = false; }
+  check('参数：单条下限 2h → 每条不少于 2h，总和仍等于缺口', chunkOk);
+  config.autofill.minChunk = 1; config.autofill.maxChunk = 4; config.autofill.maxDaysPerTask = 2;
+  check('参数：同一任务单月最多 2 天 → 被抽过 2 天的不再入选', Array.from({ length: 60 }, (_, i) => af.planDay({ date: '2025-03-14', gap: 6, pool: poolLim, history: new Map(), monthUse: new Map([['10', 2]]), rng: af.mulberry32(i + 1) })).every(e => !e.some(x => x.taskId === '10')));
+  config.autofill.maxDaysPerTask = 8;
+  reset();   // 模拟禅道回到初始数据（下面要真的生成方案，会读工时）
+  config.autofill.prompt = '每条不超过 40 字，多用「配合」';
+  const promptsSeen = [];
+  await af.buildPlan({ dates: ['2025-03-17'], seed: 1 }, { ai: async (p) => { promptsSeen.push(p); return '[]'; }, now: NOW });
+  check('参数：额外要求会附在 AI 提示词里，并声明不得违反上面的约束', promptsSeen.length === 1 && /用户的额外要求/.test(promptsSeen[0]) && /每条不超过 40 字，多用「配合」/.test(promptsSeen[0]) && /不得违反上面的约束/.test(promptsSeen[0]));
+  config.autofill.prompt = '';
+  const promptsNone = [];
+  await af.buildPlan({ dates: ['2025-03-17'], seed: 1 }, { ai: async (p) => { promptsNone.push(p); return '[]'; }, now: NOW });
+  check('参数：没填额外要求时提示词里没有这一段', !/用户的额外要求/.test(promptsNone[0]));
+
   // ============ 选任务 ============
   const poolT = [10, 11, 15].map(i => slim.find(t => t.id === String(i)));
   const one = (seed, extra = {}) => af.planDay({ date: '2025-03-14', gap: 6, pool: poolT, history: new Map(), rng: af.mulberry32(seed), ...extra });

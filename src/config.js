@@ -92,6 +92,21 @@ const config = {
     workHours: parseFloat(process.env.WORK_HOURS_PER_DAY || '8') || 8
   },
 
+  // 工时补填（调试模式下工作日历里的「补」）的参数
+  autofill: {
+    maxTasksPerDay: parseInt(process.env.AUTOFILL_MAX_TASKS || '3', 10) || 3,
+    minChunk: parseFloat(process.env.AUTOFILL_MIN_CHUNK || '1') || 1,
+    maxChunk: parseFloat(process.env.AUTOFILL_MAX_CHUNK || '4') || 4,
+    maxDaysPerTask: parseInt(process.env.AUTOFILL_MAX_DAYS_PER_TASK || '8', 10) || 8,
+    prompt: process.env.AUTOFILL_PROMPT ? Buffer.from(process.env.AUTOFILL_PROMPT, 'base64').toString('utf-8') : ''
+  },
+
+  // 上班日历：法定节假日（不上班的工作日）和调休日（要上班的周末），文本形式如 "2026-10-01~2026-10-07, 2026-12-25"
+  workCalendar: {
+    holidays: process.env.WORK_HOLIDAYS || '',
+    makeup: process.env.WORK_MAKEUP_DAYS || ''
+  },
+
   // 报告页：全员部分只统计这些账号（逗号分隔；空 = 团队全员）
   reports: {
     members: parseAccountList(process.env.REPORT_MEMBERS)

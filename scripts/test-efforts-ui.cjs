@@ -78,7 +78,7 @@ function setup(state = {}) {
     const body = init.body ? JSON.parse(init.body) : null;
     state.reqs.push({ u, method, body });
     const reply = (b, s = 200) => ({ ok: s < 400, status: s, json: async () => b });
-    if (u.startsWith('/api/reports/calendar')) return reply({ success: true, data: calendar() });
+    if (u.startsWith('/api/reports/calendar')) return reply({ success: true, data: state.calOverride || calendar() });
     if (u === '/api/efforts?month=2025-03&cache=only') return reply({ success: true, data: { ...EFFORTS, days: state.cache === undefined ? null : state.cache }, syncedAt: 1741000000000, fromCache: true });
     if (u === '/api/efforts?month=2025-03') {
       if (state.freshDelay) await new Promise(r => setTimeout(r, state.freshDelay));
@@ -146,6 +146,20 @@ function setup(state = {}) {
   check('周末没填不标红', !cell(15).classList.contains('is-missing') && !cell(16).classList.contains('is-missing'));
   check('未来日期不可点', root.querySelector('.report-day.is-future').getAttribute('aria-disabled') === 'true' && !root.querySelector('.report-day.is-future').dataset.effortDay);
   check('周累计：3/17 那周 = 8 + 3.5 + 1 = 12.5h', /12\.5h/.test(root.querySelector('[data-report-key="2025-03-17"].report-week').textContent));
+
+  // ── 节假日 / 调休：休息的标「休」、调休上班的标「班」，不算缺填 ──
+  {
+    const cal2 = calendar();
+    const d3 = cal2.days.find(x => x.date === '2025-03-05'), d4 = cal2.days.find(x => x.date === '2025-03-08');
+    Object.assign(d3, { holiday: true, weekend: true });      // 周三放假
+    Object.assign(d4, { makeup: true, weekend: false });      // 周六调休上班
+    const w2 = setup({}); w2.state.calOverride = cal2;
+    w2.win.ReportPage.month = '2025-03'; w2.win.ReportPage.show(); await tick(60);
+    const c5 = w2.doc.querySelector('[data-effort-day="2025-03-05"]'), c8 = w2.doc.querySelector('[data-effort-day="2025-03-08"]');
+    check('节假日（3/5）：有「休」标签，不标红、不算缺填', !!c5.querySelector('.report-rest-tag') && !c5.classList.contains('is-missing') && !/未填工时/.test(c5.textContent));
+    check('调休上班的周六（3/8）：有「班」标签，没填工时标红（要上班）', !!c8.querySelector('.report-work-tag') && c8.classList.contains('is-missing') && /未填工时/.test(c8.textContent));
+    check('缺填天数：节假日不算，调休上班的周六算（比不设置时 11 天：-1 +1 = 11）', /11 天/.test(w2.doc.getElementById('reportStats').textContent), w2.doc.getElementById('reportStats').textContent);
+  }
 
   // ── 页头统计 ──
   const stats = doc.getElementById('reportStats');

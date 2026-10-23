@@ -70,6 +70,32 @@ try {
   check('不带 baseRev 的老调用方照常保存（向后兼容）', noBase.success && (await get('/config')).data.ai.aiModel === 'glm-5.1');
   check('其它设置变化也会让 rev 变（改定时）', (await post('/config', { eveningHour: '22' })).rev !== noBase.rev && (await get('/config')).data.schedule.eveningHour === 22);
 
+  // 上班日历（节假日 / 调休日）
+  const gh0 = await get('/config');
+  check('快照：上班日历默认为空', gh0.data.schedule.holidays === '' && gh0.data.schedule.makeup === '');
+  const badH = await post('/config', { workHolidays: '2026-10-01~2026-10-07, 乱写的', aiModel: 'should-not-save-2' });
+  check('节假日格式不对：400 并指出哪一项，同一次请求里的其它设置也不写', badH.status === 400 && /节假日的格式不对：乱写的/.test(badH.message) && (await get('/config')).data.ai.aiModel !== 'should-not-save-2');
+  const badM = await post('/config', { workMakeup: '2026-02-30' });
+  check('调休日格式不对（不存在的日期）：400', badM.status === 400 && /调休日的格式不对/.test(badM.message));
+  const goodH = await post('/config', { workHolidays: '2026-10-01~2026-10-07, 2026-12-25', workMakeup: '2026-09-20, 2026-10-10' });
+  const gh1 = await get('/config');
+  check('保存成功：快照里有节假日和调休日，rev 变了', goodH.success && gh1.data.schedule.holidays === '2026-10-01~2026-10-07, 2026-12-25' && gh1.data.schedule.makeup === '2026-09-20, 2026-10-10' && gh1.rev !== gh0.rev);
+  check('写进了 .env（WORK_HOLIDAYS / WORK_MAKEUP_DAYS）', /WORK_HOLIDAYS=.*2026-10-01~2026-10-07/.test(readFileSync(envFile, 'utf8')) && /WORK_MAKEUP_DAYS=.*2026-10-10/.test(readFileSync(envFile, 'utf8')));
+  await post('/config', { workHolidays: '', workMakeup: '' });
+  check('可以清空', (await get('/config')).data.schedule.holidays === '');
+
+  // 工时补填参数（调试页）
+  const ga0 = await get('/config');
+  check('快照：补填参数有默认值（3 个任务 / 1~4 小时 / 同一任务 8 天 / 无额外要求）', JSON.stringify(ga0.data.autofill) === JSON.stringify({ maxTasksPerDay: 3, minChunk: 1, maxChunk: 4, maxDaysPerTask: 8, prompt: '' }), JSON.stringify(ga0.data.autofill));
+  for (const [bad, re] of [[{ maxTasksPerDay: 9 }, /1~5/], [{ minChunk: 5 }, /下限/], [{ maxChunk: 0.5 }, /上限/], [{ minChunk: 3, maxChunk: 2 }, /不能大于/], [{ maxDaysPerTask: 0 }, /1~31/], [{ prompt: 'x'.repeat(501) }, /500/], [{ minChunk: 1.3 }, /下限/]]) {
+    const r = await post('/config', { aiModel: 'should-not-save-3', autofill: { maxTasksPerDay: 3, minChunk: 1, maxChunk: 4, maxDaysPerTask: 8, prompt: '', ...bad } });
+    check(`补填参数不合法被拒（${JSON.stringify(bad).slice(0, 40)}）：400，且同一请求里的其它设置也不写`, r.status === 400 && re.test(r.message) && (await get('/config')).data.ai.aiModel !== 'should-not-save-3', JSON.stringify(r).slice(0, 120));
+  }
+  const okAf = await post('/config', { autofill: { maxTasksPerDay: 2, minChunk: 1.5, maxChunk: 3, maxDaysPerTask: 5, prompt: '每条不超过 40 字' } });
+  const ga1 = await get('/config');
+  check('合法的补填参数保存成功，快照与 rev 更新', okAf.success && ga1.data.autofill.maxTasksPerDay === 2 && ga1.data.autofill.minChunk === 1.5 && ga1.data.autofill.prompt === '每条不超过 40 字' && ga1.rev !== ga0.rev);
+  check('写进 .env（提示词用 base64，避免换行和特殊字符）', /AUTOFILL_MAX_TASKS=2/.test(readFileSync(envFile, 'utf8')) && readFileSync(envFile, 'utf8').includes(`AUTOFILL_PROMPT=${Buffer.from('每条不超过 40 字').toString('base64')}`));
+
   // 清洗
   const bad = await post('/config', { client: { aiProvider: 123, aiProfiles: 'x', evil: '<script>' } });
   const g5 = await get('/config');

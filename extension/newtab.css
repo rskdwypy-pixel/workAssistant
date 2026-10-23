@@ -3496,3 +3496,8 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
 .af-res.failed { color: var(--danger); }
 .af-res.skipped { color: var(--text-secondary); }
 .af-danger { color: var(--danger); border-color: rgba(239, 68, 68, .45); }
+
+/* 节假日 / 调休标签 */
+.report-rest-tag, .report-work-tag { font-size: 10px; font-weight: 700; line-height: 1; padding: 2px 4px; border-radius: 4px; }
+.report-rest-tag { background: rgba(16, 185, 129, .15); color: #047857; }
+.report-work-tag { background: rgba(239, 68, 68, .14); color: var(--danger); }

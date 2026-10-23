@@ -1357,7 +1357,8 @@ const AiModelPicker = {
     }
     set('aiModel', ai.aiModel);
     if (ai.aiReportModel !== undefined) { const el = document.getElementById('aiReportModel'); if (el) el.value = ai.aiReportModel || ''; }
-    if (d.schedule) { set('morningHour', d.schedule.morningHour); set('eveningHour', d.schedule.eveningHour); set('workHours', d.schedule.workHours); }
+    if (d.schedule) { set('morningHour', d.schedule.morningHour); set('eveningHour', d.schedule.eveningHour); set('workHours', d.schedule.workHours); set('workHolidays', d.schedule.holidays); set('workMakeup', d.schedule.makeup); }
+    if (d.autofill) { set('afMaxTasks', d.autofill.maxTasksPerDay); set('afMinChunk', d.autofill.minChunk); set('afMaxChunk', d.autofill.maxChunk); set('afMaxDays', d.autofill.maxDaysPerTask); const afp = document.getElementById('afPrompt'); if (afp) afp.value = d.autofill.prompt || ''; }
     if (d.webhook) {
       if (d.webhook.url !== undefined) { const el = document.getElementById('webhookUrl'); if (el) el.value = d.webhook.url || ''; }
       set('webhookType', d.webhook.type);
@@ -2032,6 +2033,15 @@ async function importAllConfig() {
             eveningHour: config.eveningHour || '21',
             // 每日标准工时只存后端，不放进 config（config 会被存成浏览器里的副本）
             workHours: document.getElementById('workHours')?.value || '8',
+            // 上班日历（节假日 / 调休日）同样只存后端
+            workHolidays: document.getElementById('workHolidays')?.value ?? '',
+            workMakeup: document.getElementById('workMakeup')?.value ?? '',
+            // 工时补填参数（调试页）同样只存后端
+            autofill: document.getElementById('afMaxTasks') ? {
+              maxTasksPerDay: document.getElementById('afMaxTasks').value, minChunk: document.getElementById('afMinChunk').value,
+              maxChunk: document.getElementById('afMaxChunk').value, maxDaysPerTask: document.getElementById('afMaxDays').value,
+              prompt: document.getElementById('afPrompt').value
+            } : undefined,
             webhookUrl: config.webhookUrl || '',
             webhookType: config.webhookType || 'generic',
             // 各服务商记住的地址与模型：真身在后端
@@ -5665,6 +5675,14 @@ function loadSettings() {
   setVal('morningHour', config.morningHour || 9);
   setVal('eveningHour', config.eveningHour || 21);
   setVal('workHours', config.workHours || 8);
+  setVal('workHolidays', config.workHolidays || '');
+  setVal('workMakeup', config.workMakeup || '');
+  const afc = config.autofill || {};
+  setVal('afMaxTasks', afc.maxTasksPerDay || 3);
+  setVal('afMinChunk', afc.minChunk || 1);
+  setVal('afMaxChunk', afc.maxChunk || 4);
+  setVal('afMaxDays', afc.maxDaysPerTask || 8);
+  setVal('afPrompt', afc.prompt || '');
   setVal('webhookUrl', config.webhookUrl || '');
   setVal('webhookType', config.webhookType || 'generic');
 

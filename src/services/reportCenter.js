@@ -16,6 +16,7 @@ import { join } from 'path';
 import { config } from '../config.js';
 import { decodeZentaoText } from '../utils/text.js';
 import { readJSON, writeJSON, readHistory } from '../utils/storage.js';
+import { isRestDay, dayKind } from '../utils/workCalendar.js';
 
 const KIND_LABEL = { daily: '日报', weekly: '周报', monthly: '月报' };
 const STATUS_LABEL = { wait: '未开始', doing: '进行中', pause: '已暂停', done: '已完成', closed: '已关闭', cancel: '已取消' };
@@ -28,7 +29,8 @@ const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate(
 const parseYmd = (s) => { const [y, m, d] = String(s).split('-').map(Number); return new Date(y, m - 1, d); };
 const addDays = (s, n) => { const d = parseYmd(s); d.setDate(d.getDate() + n); return ymd(d); };
 const dayOf = (v) => { const s = String(v || ''); return /^\d{4}-\d{2}-\d{2}/.test(s) && !s.startsWith('0000') ? s.slice(0, 10) : ''; };
-const isWeekend = (s) => { const w = parseYmd(s).getDay(); return w === 0 || w === 6; };
+// 「不用上班」：周末 + 节假日，调休上班的周末不算（见 utils/workCalendar.js）
+const isWeekend = (s) => isRestDay(s);
 const round1 = (n) => Math.round(n * 10) / 10;
 const cnDate = (s) => { const d = parseYmd(s); return `${d.getMonth() + 1}月${d.getDate()}日`; };
 
@@ -533,6 +535,8 @@ async function getCalendar(month, now = new Date()) {
       date: s,
       weekday: parseYmd(s).getDay(),
       weekend: isWeekend(s),
+      holiday: dayKind(s) === 'holiday',
+      makeup: dayKind(s) === 'makeup',
       future: s > today,
       today: s === today,
       report: brief(r),

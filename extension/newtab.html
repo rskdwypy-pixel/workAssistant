@@ -1003,6 +1003,22 @@
             </div>
 
             <div class="set-row">
+              <div class="sr-label">法定节假日<small>不用上班的工作日</small></div>
+              <div class="sr-control">
+                <textarea class="set-input" id="workHolidays" rows="2" placeholder="2026-10-01~2026-10-07, 2026-12-25" style="width:100%"></textarea>
+                <span class="input-hint">多个用逗号或换行隔开，连续几天写成「开始~结束」。这些天不算缺填、不能「补」。</span>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="sr-label">调休上班日<small>要上班的周末</small></div>
+              <div class="sr-control">
+                <textarea class="set-input" id="workMakeup" rows="2" placeholder="2026-09-20, 2026-10-10" style="width:100%"></textarea>
+                <span class="input-hint">写在这里的周六 / 周日按工作日算（没填工时会算缺填）。</span>
+              </div>
+            </div>
+
+            <div class="set-row">
               <div class="sr-label">Webhook<small>可选</small></div>
               <div class="sr-control">
                 <input type="text" class="set-input" id="webhookUrl" placeholder="飞书 / 钉钉 / 企业微信 Webhook 地址" style="max-width:340px">
@@ -1090,7 +1106,17 @@
                 <span id="zentaoUsersResult" class="test-result"></span>
               </div>
             </div>
-          </section>
+          
+            <!-- 仅调试模式：工作日历里「补」的参数（设计见 docs/AUTOFILL-PRD.md） -->
+            <div class="set-sub debug-only block" id="autofillSettings">
+              <h5 style="margin:18px 0 6px">工时补填（调试模式）</h5>
+              <p class="set-desc">工作日历里「补」按钮用的参数。保存后下次生成方案生效。</p>
+              <div class="set-row"><div class="sr-label">每天最多任务数</div><div class="sr-control"><input type="number" class="set-input" id="afMaxTasks" min="1" max="5" step="1" value="3" style="width:80px"><span class="input-hint">个（1~5）。缺口小的日子会更少</span></div></div>
+              <div class="set-row"><div class="sr-label">单条工时</div><div class="sr-control"><input type="number" class="set-input" id="afMinChunk" min="0.5" max="4" step="0.5" value="1" style="width:80px"> ~ <input type="number" class="set-input" id="afMaxChunk" min="1" max="8" step="0.5" value="4" style="width:80px"><span class="input-hint">小时，最少 ~ 最多（0.5 步长）</span></div></div>
+              <div class="set-row"><div class="sr-label">同一任务单月最多</div><div class="sr-control"><input type="number" class="set-input" id="afMaxDays" min="1" max="31" step="1" value="8" style="width:80px"><span class="input-hint">天，避免整月都是同一个任务</span></div></div>
+              <div class="set-row"><div class="sr-label">内容的额外要求</div><div class="sr-control"><textarea class="set-input" id="afPrompt" rows="3" maxlength="500" placeholder="例如：多用「完成…」「配合…」这类说法；每条不超过 40 字" style="width:100%"></textarea><span class="input-hint">会附加在 AI 写工作内容的提示词后面（最多 500 字），留空用默认写法</span></div></div>
+            </div>
+</section>
 
           <!-- ========== 提示词 ========== -->
           <section class="set-panel" id="p-prompt" role="tabpanel" aria-label="提示词">

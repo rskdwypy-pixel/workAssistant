@@ -74,6 +74,8 @@ const ConfigStore = {
       apiBaseUrl: ai.apiBaseUrl || '', aiModel: ai.aiModel || '', aiReportModel: ai.aiReportModel || '',
       morningHour: sc.morningHour !== undefined ? String(sc.morningHour) : '', eveningHour: sc.eveningHour !== undefined ? String(sc.eveningHour) : '',
       workHours: sc.workHours !== undefined ? String(sc.workHours) : '',
+      workHolidays: sc.holidays || '', workMakeup: sc.makeup || '',
+      autofill: s.autofill || {},
       webhookUrl: wh.url || '', webhookType: wh.type || 'generic',
       zentaoEnabled: !!z.enabled, zentaoUrl: z.url || '', zentaoUsername: z.username || '', zentaoCreateTaskUrl: z.createTaskUrl || '',
       aiProvider: c.aiProvider || '', aiProfiles: c.aiProfiles || {}

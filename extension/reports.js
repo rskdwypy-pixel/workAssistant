@@ -291,7 +291,7 @@ const ReportPage = {
     }
     const attrs = day.future ? 'aria-disabled="true"' : `data-effort-day="${day.date}" tabindex="0" role="button"`;
     return `<div class="${cls.join(' ')}" ${attrs} title="${reportEsc(day.date)} ${WEEKDAY[day.weekday]}">
-      <div class="report-day-num"><span class="report-day-n">${n}</span>${day.today ? '<span class="report-today-tag">今天</span>' : ''}${day.report ? '<span class="report-dot" title="已有日报"></span>' : ''}</div>${body}</div>`;
+      <div class="report-day-num"><span class="report-day-n">${n}</span>${day.today ? '<span class="report-today-tag">今天</span>' : ''}${day.holiday ? '<span class="report-rest-tag" title="节假日，不上班">休</span>' : ''}${day.makeup ? '<span class="report-work-tag" title="调休，要上班">班</span>' : ''}${day.report ? '<span class="report-dot" title="已有日报"></span>' : ''}</div>${body}</div>`;
   },
 
   teamWeekCell(w) {
@@ -394,7 +394,7 @@ const ReportPage = {
     if (this.canFill(day)) body += `<button type="button" class="report-fill-btn" data-fill-day="${day.date}" title="补填 ${day.date} 缺少的工时">补</button>`;
     const attrs = day.future ? 'aria-disabled="true"' : `data-effort-day="${day.date}" tabindex="0" role="button"`;
     return `<div class="${cls.join(' ')}" ${attrs} title="${reportEsc(day.date)} ${WEEKDAY[day.weekday]}">
-      <div class="report-day-num"><span class="report-day-n">${n}</span>${day.today ? '<span class="report-today-tag">今天</span>' : ''}${r ? '<span class="report-dot" title="已有日报"></span>' : ''}</div>${body}</div>`;
+      <div class="report-day-num"><span class="report-day-n">${n}</span>${day.today ? '<span class="report-today-tag">今天</span>' : ''}${day.holiday ? '<span class="report-rest-tag" title="节假日，不上班">休</span>' : ''}${day.makeup ? '<span class="report-work-tag" title="调休，要上班">班</span>' : ''}${r ? '<span class="report-dot" title="已有日报"></span>' : ''}</div>${body}</div>`;
   },
 
   weekCell(w) {
