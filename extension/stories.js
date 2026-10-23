@@ -11,14 +11,37 @@
 
 const StoryApi = {
   base() { return typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : 'http://127.0.0.1:3721'; },
-  async request(path) {
-    const resp = await fetch(`${this.base()}${path}`);
+  async request(path, init) {
+    const resp = await fetch(`${this.base()}${path}`, init);
     const json = await resp.json().catch(() => ({ success: false, message: `HTTP ${resp.status}` }));
     if (!json.success) { const e = new Error(json.message || `HTTP ${resp.status}`); e.code = json.code; throw e; }
     return json;
   },
   list(keyword) { return this.request(`/api/stories${keyword ? `?keyword=${encodeURIComponent(keyword)}` : ''}`); },
-  get(id) { return this.request(`/api/stories/${encodeURIComponent(id)}`); }
+  get(id) { return this.request(`/api/stories/${encodeURIComponent(id)}`); },
+  meta(product) { return this.request(`/api/stories/meta${product ? `?product=${encodeURIComponent(product)}` : ''}`); },
+  create(body) { return this.request('/api/stories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); },
+  update(id, body) { return this.request(`/api/stories/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); },
+  remove(id) { return this.request(`/api/stories/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
+};
+
+/** 纯文本 ↔ 禅道正文 HTML（需求模块无 markdown，正文恒为 <p> 段落）。 */
+const storyText = {
+  toHtml(text) {
+    return String(text || '').replace(/\r\n/g, '\n').split('\n')
+      .map(line => `<p>${line ? stEsc(line) : '<br>'}</p>`).join('');
+  },
+  fromHtml(html) {
+    if (!html) return '';
+    let t = String(html)
+      .replace(/<\s*br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
+      .replace(/<li[^>]*>/gi, '· ')
+      .replace(/<[^>]+>/g, '');
+    const ta = document.createElement('textarea');
+    ta.innerHTML = t;
+    return ta.value.replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '');
+  }
 };
 
 const stEsc = (s) => (typeof escapeHtml === 'function' ? escapeHtml(String(s ?? '')) : String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
@@ -60,6 +83,7 @@ const StoryPage = {
                 <button type="button" data-st="all">全部</button>
               </div>
               <div class="story-search"><input type="search" id="storySearch" placeholder="搜索需求标题 / 编号…" autocomplete="off" /></div>
+              <button type="button" class="btn-primary story-new" id="storyNew">＋ 新建需求</button>
               <button type="button" class="story-refresh" id="storyRefresh" title="刷新">↻</button>
             </div>
             <div class="story-list" id="storyList"></div>
@@ -67,6 +91,7 @@ const StoryPage = {
         </section>`;
       root.querySelector('#storySearch').addEventListener('input', (e) => { this.keyword = e.target.value.trim(); this.renderList(); });
       root.querySelector('#storyRefresh').addEventListener('click', () => this.load());
+      root.querySelector('#storyNew').addEventListener('click', () => StoryEditor.openNew({ product: this.product !== 'all' ? this.product : '' }));
       root.querySelector('#storyStatus').addEventListener('click', (e) => {
         const btn = e.target.closest('[data-st]'); if (!btn) return;
         this.status = btn.dataset.st;
@@ -170,6 +195,8 @@ const StoryViewer = {
         <header class="doc-viewer-head">
           <h2 class="doc-viewer-title" data-title></h2>
           <div class="doc-viewer-actions">
+            <button type="button" class="doc-viewer-act" data-edit hidden>编辑</button>
+            <button type="button" class="doc-viewer-act doc-viewer-del" data-del hidden>删除</button>
             <button type="button" class="doc-viewer-open" data-open hidden>在禅道打开</button>
             <button type="button" class="doc-viewer-close" data-close aria-label="关闭">✕</button>
           </div>
@@ -192,6 +219,8 @@ const StoryViewer = {
     el.querySelector('[data-title]').textContent = '加载中…';
     el.querySelector('[data-meta]').textContent = '';
     el.querySelector('[data-open]').hidden = true;
+    el.querySelector('[data-edit]').hidden = true;
+    el.querySelector('[data-del]').hidden = true;
     el.querySelector('[data-body]').innerHTML = `<div class="story-loading">正在加载需求…</div>`;
     try {
       const { data: s } = await StoryApi.get(id);
@@ -217,6 +246,29 @@ const StoryViewer = {
     openBtn.onclick = () => {
       if (typeof openInZentao === 'function') openInZentao('story', s.id);
       else if (typeof Toast !== 'undefined') Toast.info('暂不支持在禅道打开');
+    };
+
+    const editBtn = el.querySelector('[data-edit]');
+    editBtn.hidden = false;
+    editBtn.onclick = () => { this.close(); StoryEditor.openEdit(s); };
+
+    const delBtn = el.querySelector('[data-del]');
+    delBtn.hidden = false;
+    delBtn.onclick = async () => {
+      const ok = typeof Confirm !== 'undefined'
+        ? await Confirm.show('删除需求', `确定删除需求 #${s.id}「${s.title}」？将放入禅道回收站。`, '删除', '取消', { danger: true })
+        : true;
+      if (!ok) return;
+      delBtn.disabled = true;
+      try {
+        await StoryApi.remove(s.id);
+        if (typeof Toast !== 'undefined') Toast.success('需求已删除');
+        this.close();
+        StoryPage.load();
+      } catch (err) {
+        if (typeof Toast !== 'undefined') Toast.error(err.message || '删除失败');
+        delBtn.disabled = false;
+      }
     };
 
     let html = `<div class="story-section-title">需求描述</div>`;
@@ -247,7 +299,222 @@ const StoryViewer = {
   }
 };
 
+const StoryEditor = {
+  el: null,
+  mode: 'new',    // 'new' | 'edit'
+  storyId: null,
+  meta: null,
+
+  ensure() {
+    if (this.el) return this.el;
+    const wrap = document.createElement('div');
+    wrap.className = 'doc-viewer-overlay doc-editor-overlay story-editor-overlay';
+    wrap.hidden = true;
+    wrap.innerHTML = `
+      <div class="doc-viewer doc-editor story-editor" role="dialog" aria-modal="true">
+        <header class="doc-viewer-head">
+          <h2 class="doc-viewer-title" data-etitle>新建需求</h2>
+          <div class="doc-viewer-actions">
+            <button type="button" class="doc-viewer-act doc-editor-save" data-save>保存</button>
+            <button type="button" class="doc-viewer-close" data-close aria-label="关闭">✕</button>
+          </div>
+        </header>
+        <div class="doc-editor-body">
+          <div class="story-field-row">
+            <label class="doc-field" data-prodfield>
+              <span class="doc-field-label">所属产品</span>
+              <select data-product></select>
+            </label>
+            <label class="doc-field">
+              <span class="doc-field-label">模块</span>
+              <select data-module></select>
+            </label>
+          </div>
+          <label class="doc-field">
+            <span class="doc-field-label">标题</span>
+            <input type="text" data-title placeholder="需求标题" maxlength="200" />
+          </label>
+          <label class="doc-field">
+            <span class="doc-field-label">需求描述（纯文本，每行一段）</span>
+            <textarea data-spec rows="7" placeholder="描述这个需求要解决什么…"></textarea>
+          </label>
+          <label class="doc-field">
+            <span class="doc-field-label">验收标准</span>
+            <textarea data-verify rows="4" placeholder="怎样算做完 / 验收通过…"></textarea>
+          </label>
+          <div class="story-field-row">
+            <label class="doc-field">
+              <span class="doc-field-label">评审人（必填，可多选）</span>
+              <select data-reviewer multiple size="3"></select>
+            </label>
+            <label class="doc-field">
+              <span class="doc-field-label">指派给</span>
+              <select data-assigned></select>
+            </label>
+          </div>
+          <div class="story-field-row">
+            <label class="doc-field">
+              <span class="doc-field-label">分类</span>
+              <select data-category></select>
+            </label>
+            <label class="doc-field">
+              <span class="doc-field-label">来源</span>
+              <select data-source></select>
+            </label>
+            <label class="doc-field story-field-pri">
+              <span class="doc-field-label">优先级</span>
+              <select data-pri></select>
+            </label>
+          </div>
+          <div class="doc-editor-err" data-err hidden></div>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+    wrap.querySelector('[data-close]').addEventListener('click', () => this.close());
+    wrap.querySelector('[data-save]').addEventListener('click', () => this.save());
+    // 新建时换产品要重拉该产品的模块/评审人
+    wrap.querySelector('[data-product]').addEventListener('change', (e) => {
+      if (this.mode === 'new') this.loadMeta(e.target.value);
+    });
+    this._esc = (e) => { if (e.key === 'Escape') this.close(); };
+    this.el = wrap;
+    return wrap;
+  },
+
+  opts(list, selected) {
+    const sel = Array.isArray(selected) ? selected.map(String) : [String(selected ?? '')];
+    return (list || []).map(o => `<option value="${stEsc(o.value)}"${sel.includes(String(o.value)) ? ' selected' : ''}>${stEsc(o.label)}</option>`).join('');
+  },
+
+  /** 拉取某产品的下拉项并填充；preserve 为编辑时要保留的已选值 */
+  async loadMeta(product, preserve) {
+    const el = this.el;
+    const errEl = el.querySelector('[data-err]');
+    try {
+      const { data } = await StoryApi.meta(product);
+      this.meta = data;
+      const p = preserve || {};
+      if (!el.querySelector('[data-product]').options.length || this.mode === 'new') {
+        el.querySelector('[data-product]').innerHTML = this.opts(data.products, p.product != null ? p.product : data.product);
+      }
+      el.querySelector('[data-module]').innerHTML = this.opts(data.modules, p.module != null ? p.module : '0');
+      el.querySelector('[data-reviewer]').innerHTML = this.opts(data.reviewers, p.reviewers || []);
+      el.querySelector('[data-assigned]').innerHTML = this.opts(
+        [{ value: '', label: '（不指派）' }, ...data.assignees],
+        p.assignedTo != null ? p.assignedTo : (data.defaultAssignedTo || ''));
+      el.querySelector('[data-category]').innerHTML = this.opts(data.categories, p.category != null ? p.category : 'feature');
+      el.querySelector('[data-source]').innerHTML = this.opts([{ value: '', label: '（不填）' }, ...data.sources], p.source != null ? p.source : '');
+      el.querySelector('[data-pri]').innerHTML = this.opts(data.pris, p.pri != null ? String(p.pri) : '3');
+      errEl.hidden = true;
+    } catch (err) {
+      errEl.textContent = err.message || '加载表单选项失败';
+      errEl.hidden = false;
+    }
+  },
+
+  async openNew({ product } = {}) {
+    const el = this.ensure();
+    this.mode = 'new'; this.storyId = null;
+    el.querySelector('[data-etitle]').textContent = '新建需求';
+    el.querySelector('[data-prodfield]').style.display = '';
+    el.querySelector('[data-err]').hidden = true;
+    el.querySelector('[data-title]').value = '';
+    el.querySelector('[data-spec]').value = '';
+    el.querySelector('[data-verify]').value = '';
+    ['data-product', 'data-module', 'data-reviewer', 'data-assigned', 'data-category', 'data-source', 'data-pri']
+      .forEach(a => { el.querySelector(`[${a}]`).innerHTML = '<option>加载中…</option>'; });
+    this.show();
+    await this.loadMeta(product || '');
+  },
+
+  async openEdit(s) {
+    const el = this.ensure();
+    this.mode = 'edit'; this.storyId = s.id;
+    el.querySelector('[data-etitle]').textContent = `编辑需求 #${s.id}`;
+    el.querySelector('[data-err]').hidden = true;
+    el.querySelector('[data-title]').value = s.title || '';
+    el.querySelector('[data-spec]').value = storyText.fromHtml(s.specRaw || s.specHtml || '');
+    el.querySelector('[data-verify]').value = storyText.fromHtml(s.verifyRaw || s.verifyHtml || '');
+    // 编辑不换产品：产品固定展示为当前产品
+    el.querySelector('[data-product]').innerHTML = `<option value="${stEsc(s.product)}" selected>${stEsc(s.productName || ('产品 ' + s.product))}</option>`;
+    el.querySelector('[data-prodfield]').style.display = '';
+    el.querySelector('[data-product]').disabled = true;
+    if (s.status === 'reviewing' || s.status === 'changing') {
+      const note = el.querySelector('[data-err]');
+      note.textContent = '该需求当前为「' + (s.statusLabel || s.status) + '」，保存时会自动撤回评审再提交，提交后仍回到评审中。';
+      note.hidden = false;
+      note.classList.add('story-note');
+    } else {
+      el.querySelector('[data-err]').classList.remove('story-note');
+    }
+    this.show();
+    await this.loadMeta(s.product, {
+      module: s.module, category: s.category, source: s.source,
+      pri: s.pri, assignedTo: s.assignedToAccount
+    });
+  },
+
+  show() {
+    this.el.hidden = false;
+    document.addEventListener('keydown', this._esc);
+    setTimeout(() => this.el.querySelector('[data-title]').focus(), 0);
+  },
+
+  selectedReviewers() {
+    return [...this.el.querySelector('[data-reviewer]').selectedOptions].map(o => o.value).filter(Boolean);
+  },
+
+  async save() {
+    const el = this.el;
+    const errEl = el.querySelector('[data-err]');
+    errEl.classList.remove('story-note');
+    const title = el.querySelector('[data-title]').value.trim();
+    const reviewers = this.selectedReviewers();
+    const body = {
+      title,
+      spec: storyText.toHtml(el.querySelector('[data-spec]').value),
+      verify: storyText.toHtml(el.querySelector('[data-verify]').value),
+      reviewers,
+      module: el.querySelector('[data-module]').value,
+      assignedTo: el.querySelector('[data-assigned]').value,
+      category: el.querySelector('[data-category]').value,
+      source: el.querySelector('[data-source]').value,
+      pri: el.querySelector('[data-pri]').value
+    };
+    if (!title) { errEl.textContent = '请填写标题'; errEl.hidden = false; return; }
+    if (!reviewers.length) { errEl.textContent = '请至少选择一位评审人'; errEl.hidden = false; return; }
+    const saveBtn = el.querySelector('[data-save]');
+    saveBtn.disabled = true;
+    errEl.hidden = true;
+    try {
+      if (this.mode === 'new') {
+        body.product = el.querySelector('[data-product]').value;
+        if (!body.product) throw new Error('请选择所属产品');
+        await StoryApi.create(body);
+        if (typeof Toast !== 'undefined') Toast.success('需求已创建');
+      } else {
+        await StoryApi.update(this.storyId, body);
+        if (typeof Toast !== 'undefined') Toast.success('需求已保存');
+      }
+      this.close();
+      StoryPage.load();
+    } catch (err) {
+      errEl.textContent = err.message || '保存失败';
+      errEl.hidden = false;
+    } finally {
+      saveBtn.disabled = false;
+    }
+  },
+
+  close() {
+    if (!this.el) return;
+    this.el.hidden = true;
+    document.removeEventListener('keydown', this._esc);
+  }
+};
+
 if (typeof window !== 'undefined') {
   window.StoryPage = StoryPage;
   window.StoryViewer = StoryViewer;
+  window.StoryEditor = StoryEditor;
 }

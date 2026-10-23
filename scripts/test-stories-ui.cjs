@@ -29,17 +29,38 @@ const STORIES = [
 ];
 const STORY171 = {
   id: '171', title: 'iOS通用自动化方案', status: 'active', statusLabel: '激活', tone: 'active', stage: 'wait', stageLabel: '未开始',
-  pri: 3, category: 'feature', product: '18', productName: '真机拨测', openedBy: '杨凯', assignedTo: '何俞龙', openedDate: '2025-01-01', lastEditedDate: '',
+  pri: 3, category: 'feature', source: 'customer', module: '0', product: '18', productName: '真机拨测',
+  openedBy: '杨凯', assignedTo: '何俞龙', assignedToAccount: 'nuanshu', openedDate: '2025-01-01', lastEditedDate: '',
+  specRaw: '<p>需求描述</p><p>第二段</p>', verifyRaw: '<p>验收点一</p>',
   specHtml: '<p>需求描述 <img src="/api/zentao/files/9/content?ext=png" alt="" /></p>',
   verifyHtml: '<ul><li>验收点一</li></ul>', files: [{ id: '50', name: '原型.pdf', ext: 'pdf', size: 1024 }]
+};
+const META = {
+  product: '18',
+  products: [{ value: '18', label: '真机拨测' }, { value: '7', label: 'iOS移动端' }],
+  modules: [{ value: '0', label: '/' }],
+  reviewers: [{ value: 'luotw', label: '罗天文' }, { value: 'wangrui', label: '王锐' }],
+  assignees: [{ value: 'lijc', label: '李佳成' }, { value: 'nuanshu', label: '何俞龙' }],
+  plans: [], categories: [{ value: 'feature', label: '功能' }, { value: 'interface', label: '接口' }],
+  sources: [{ value: 'customer', label: '客户' }, { value: 'user', label: '用户' }],
+  pris: [{ value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }, { value: '4', label: '4' }],
+  defaultAssignedTo: 'lijc'
 };
 
 function setup(state = {}) {
   const win = new JSDOM(HTML, { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true }).window;
   state.opened = [];
-  win.fetch = async (url) => {
+  state.reqs = [];
+  win.fetch = async (url, init = {}) => {
     const u = String(url).replace('http://127.0.0.1:3721', '');
+    const method = (init.method || 'GET').toUpperCase();
+    const body = init.body ? JSON.parse(init.body) : null;
+    state.reqs.push({ u, method, body });
     const reply = (b, s = 200) => ({ ok: s < 400, status: s, json: async () => b });
+    if (u.startsWith('/api/stories/meta')) return reply({ success: true, data: META });
+    if (u === '/api/stories' && method === 'POST') return reply({ success: true, data: { id: '200', message: '保存成功' } });
+    if (/^\/api\/stories\/\d+$/.test(u) && method === 'PUT') return reply({ success: true, data: { id: u.split('/').pop(), message: '保存成功' } });
+    if (/^\/api\/stories\/\d+$/.test(u) && method === 'DELETE') return reply({ success: true, data: { success: true } });
     if (u.startsWith('/api/stories/')) {
       const id = u.split('/').pop();
       if (id === '171') return reply({ success: true, data: STORY171 });
@@ -112,6 +133,50 @@ function setup(state = {}) {
   // 不存在的需求
   win.StoryViewer.open('99999'); await tick(30);
   check('不存在的需求：弹窗提示', /不存在|删除/.test(viewer.querySelector('[data-body]').textContent));
+
+  // ── 新建需求 ──
+  check('工具栏有「新建需求」按钮', !!doc.getElementById('storyNew'));
+  doc.getElementById('storyNew').click();
+  await tick(30);
+  const editor = doc.querySelector('.story-editor-overlay');
+  check('新建弹窗打开', editor && !editor.hidden);
+  check('产品下拉来自 meta', [...editor.querySelectorAll('[data-product] option')].some(o => o.value === '7'));
+  check('评审人下拉来自 meta（多选）', editor.querySelector('[data-reviewer]').multiple && [...editor.querySelectorAll('[data-reviewer] option')].length === 2);
+  check('默认指派为 defaultAssignedTo', editor.querySelector('[data-assigned]').value === 'lijc');
+  // 不选评审人直接保存 → 拦截
+  editor.querySelector('[data-title]').value = '新需求A';
+  editor.querySelector('[data-save]').click(); await tick(10);
+  check('缺评审人被拦截（未发 POST）', !editor.hidden && !state.reqs.some(r => r.method === 'POST') && /评审/.test(editor.querySelector('[data-err]').textContent));
+  // 选产品 7、评审人、填描述 → 保存
+  editor.querySelector('[data-product]').value = '7';
+  const rv = editor.querySelector('[data-reviewer]'); rv.options[0].selected = true;
+  editor.querySelector('[data-spec]').value = '第一行\n第二行';
+  editor.querySelector('[data-save]').click(); await tick(20);
+  const post = state.reqs.find(r => r.method === 'POST' && r.u === '/api/stories');
+  check('新建发出 POST /api/stories', !!post);
+  check('POST 带产品与评审人', post && post.body.product === '7' && Array.isArray(post.body.reviewers) && post.body.reviewers.includes('luotw'));
+  check('描述转成 <p> 段落 HTML', post && post.body.spec === '<p>第一行</p><p>第二行</p>');
+  check('保存成功后关闭弹窗', editor.hidden);
+
+  // ── 编辑需求 ──（从详情弹窗进入）
+  list.querySelector('[data-id="171"]'); // 确保列表在
+  win.StoryViewer.open('171'); await tick(30);
+  viewer.querySelector('[data-edit]').click(); await tick(30);
+  check('编辑弹窗打开且标题含编号', !editor.hidden && /#171/.test(editor.querySelector('[data-etitle]').textContent));
+  check('编辑：产品锁定为当前产品', editor.querySelector('[data-product]').disabled && editor.querySelector('[data-product]').value === '18');
+  check('编辑：描述由 HTML 反解析为纯文本', editor.querySelector('[data-spec]').value === '需求描述\n第二段');
+  check('编辑：带回已有指派人', editor.querySelector('[data-assigned]').value === 'nuanshu');
+  editor.querySelector('[data-title]').value = 'iOS通用自动化方案-改';
+  editor.querySelector('[data-reviewer]').options[0].selected = true;
+  editor.querySelector('[data-save]').click(); await tick(20);
+  const put = state.reqs.find(r => r.method === 'PUT' && r.u === '/api/stories/171');
+  check('编辑发出 PUT /api/stories/171', !!put && put.body.title === 'iOS通用自动化方案-改');
+
+  // ── 删除需求 ──（详情弹窗里）
+  win.Confirm = { show: async () => true };
+  win.StoryViewer.open('171'); await tick(30);
+  viewer.querySelector('[data-del]').click(); await tick(20);
+  check('删除发出 DELETE /api/stories/171', state.reqs.some(r => r.method === 'DELETE' && r.u === '/api/stories/171'));
 
   // 未登录
   ({ win, doc, state } = setup({ localMode: true }));

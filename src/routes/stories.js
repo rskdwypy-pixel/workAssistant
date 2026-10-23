@@ -1,8 +1,12 @@
 /**
  * 需求（story）接口
  *
- *   GET  /api/stories?keyword=   当前账号相关的需求（前端按产品 / 状态分组、搜索）
- *   GET  /api/stories/:id        需求详情（描述 + 验收标准，已消毒 + 内联图代理；附件）
+ *   GET    /api/stories?keyword=   当前账号相关的需求（前端按产品 / 状态分组、搜索）
+ *   GET    /api/stories/meta       新建/编辑所需下拉选项（产品、模块、评审人、分类、来源…）
+ *   GET    /api/stories/:id        需求详情（描述 + 验收标准，已消毒 + 内联图代理；附件）
+ *   POST   /api/stories            新建需求
+ *   PUT    /api/stories/:id        编辑需求（含正文 spec/verify、备注；评审中会自动撤回评审）
+ *   DELETE /api/stories/:id        删除需求（放回收站）
  *
  * 文件预览 / 下载复用：GET /api/zentao/files/:fileId/content
  */
@@ -25,9 +29,41 @@ router.get('/stories', async (req, res) => {
   }
 });
 
+router.get('/stories/meta', async (req, res) => {
+  try {
+    res.json({ success: true, data: await storyService.getStoryForm({ product: req.query.product }) });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
 router.get('/stories/:id', async (req, res) => {
   try {
     res.json({ success: true, data: await storyService.getStory(req.params.id) });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+router.post('/stories', async (req, res) => {
+  try {
+    res.json({ success: true, data: await storyService.createStory(req.body || {}) });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+router.put('/stories/:id', async (req, res) => {
+  try {
+    res.json({ success: true, data: await storyService.editStory({ ...(req.body || {}), id: req.params.id }) });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+router.delete('/stories/:id', async (req, res) => {
+  try {
+    res.json({ success: true, data: await storyService.deleteStory(req.params.id) });
   } catch (err) {
     fail(res, err);
   }

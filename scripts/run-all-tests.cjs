@@ -30,6 +30,7 @@ const SUITES = [
   'test-reports-ui',
   'test-docs.mjs',
   'test-docs-ui',
+  'test-stories.mjs',
   'test-stories-ui',
   'test-ai-settings.mjs',
   'test-zentao-truth.mjs',
