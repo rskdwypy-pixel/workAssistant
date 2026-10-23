@@ -59,12 +59,15 @@ function setup(state = {}) {
     const method = (init.method || 'GET').toUpperCase();
     state.calls.push({ method, url: u, body: init.body ? JSON.parse(init.body) : null });
     const reply = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
+    if (u === '/api/docs/libs?cache=only') return reply({ success: true, data: state.cache === undefined ? null : (state.libs || LIBS) });
+    if (u === '/api/docs/list?cache=only') return reply({ success: true, data: state.cache === undefined ? null : state.cache, syncedAt: 1760000000000 });
     if (u === '/api/docs/libs') return reply({ success: true, data: state.libs || LIBS });
     if (u.startsWith('/api/docs/list')) {
+      if (state.freshDelay) await new Promise(r => setTimeout(r, state.freshDelay));
       const kw = new URL(`http://x${u}`).searchParams.get('keyword');
       let data = state.docs || DOCLIST;
       if (kw) data = data.filter(d => d.title.includes(kw));
-      return reply({ success: true, data });
+      return reply({ success: true, data, syncedAt: Date.now(), diff: state.diff });
     }
     let m;
     if ((m = u.match(/^\/api\/docs\/(\d+)\/collect$/)) && method === 'POST') {
@@ -229,6 +232,14 @@ function setup(state = {}) {
   win.DocViewer.close();
 
   // ============ 未登录禅道 ============
+  // ── 本地缓存：先画缓存，再用最新数据刷新 ──
+  ({ win, doc, state } = setup({ cache: [DOCLIST[0]], freshDelay: 60, diff: { added: 2, changed: 0, removed: 1 } }));
+  win.DocPage.show(); await tick(25);
+  check('缓存先画出来（最新数据还没回来）', doc.querySelectorAll('#docList .doc-item, #docList [data-id]').length === 1 && /缓存/.test(doc.getElementById('docSyncHint').textContent));
+  await tick(120);
+  check('最新数据回来后刷新列表', doc.querySelectorAll('#docList [data-id]').length === DOCLIST.length);
+  check('页头显示已同步 + 新增 / 移除条数', /已同步/.test(doc.getElementById('docSyncHint').textContent) && /新增 2/.test(doc.getElementById('docSyncHint').textContent) && /移除 1/.test(doc.getElementById('docSyncHint').textContent));
+
   ({ win, doc, state } = setup({ localMode: true }));
   win.DocPage.show();
   await tick(10);

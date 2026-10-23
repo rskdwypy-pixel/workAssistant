@@ -25,6 +25,9 @@ const DocApi = {
   },
   libs() { return this.request('/api/docs/libs'); },
   list(keyword) { return this.request(`/api/docs/list${keyword ? `?keyword=${encodeURIComponent(keyword)}` : ''}`); },
+  /** 只读后端本地缓存（没有缓存时 data 为 null），页面先画它，再等最新数据 */
+  cachedLibs() { return this.request('/api/docs/libs?cache=only'); },
+  cachedList() { return this.request('/api/docs/list?cache=only'); },
   get(id) { return this.request(`/api/docs/${encodeURIComponent(id)}`); },
   create(body) { return this.request('/api/docs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); },
   update(id, body) { return this.request(`/api/docs/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); },
@@ -43,6 +46,14 @@ const DocApi = {
 const docEsc = (s) => (typeof escapeHtml === 'function' ? escapeHtml(String(s ?? '')) : String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
 const DOC_OTHER_SPACE = '其他';
 
+const docClock = (ms) => { if (!ms) return '--:--'; const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+/** 「已同步 14:03 · 新增 1 · 变更 2」；没变化就只显示时间 */
+const docSyncText = (r) => {
+  const d = r && r.diff || {};
+  const parts = [d.added && `新增 ${d.added}`, d.changed && `变更 ${d.changed}`, d.removed && `移除 ${d.removed}`].filter(Boolean);
+  return `已同步 ${docClock(r && r.syncedAt)}${parts.length ? ' · ' + parts.join(' · ') : ''}`;
+};
+
 const DocPage = {
   rendered: false,
   libs: [],
@@ -58,7 +69,7 @@ const DocPage = {
     // 本地模式（没登录禅道）：文档来自禅道，给出登录入口
     if (typeof Account !== 'undefined' && Account.isLocalMode()) {
       this.rendered = false;
-      root.innerHTML = `<section class="doc-page"><div class="doc-empty doc-login-empty">
+      root.innerHTML = `<div class="task-board-header"><div class="task-board-left"><h2>📁 文档</h2><div class="task-board-stats"><div class="stat-item"><span class="stat-label">文档</span><span class="stat-value" id="docStatAll">-</span></div></div><span class="sync-hint" id="docSyncHint"></span></div></div><section class="doc-page"><div class="doc-empty doc-login-empty">
         <p><strong>文档来自禅道</strong></p>
         <p class="doc-muted">这里浏览、查看、下载禅道里的文档，登录禅道后即可使用。</p>
         <button type="button" class="btn-primary" data-doc-login>登录禅道</button></div></section>`;
@@ -68,7 +79,7 @@ const DocPage = {
     }
     if (!this.rendered) {
       this.rendered = true;
-      root.innerHTML = `
+      root.innerHTML = `<div class="task-board-header"><div class="task-board-left"><h2>📁 文档</h2><div class="task-board-stats"><div class="stat-item"><span class="stat-label">文档</span><span class="stat-value" id="docStatAll">-</span></div></div><span class="sync-hint" id="docSyncHint"></span></div></div>
         <section class="doc-page">
           <aside class="doc-tree" id="docTree"></aside>
           <div class="doc-main">
@@ -103,22 +114,50 @@ const DocPage = {
   /** 可写入的文档库（新建时的下拉）；默认选当前选中的库 */
   writableLibs() { return this.libs; },
 
+  setHint(text) {
+    const el = document.getElementById('docSyncHint');
+    if (el) el.textContent = text || '';
+  },
+
+  paint() {
+    const st = document.getElementById('docStatAll'); if (st) st.textContent = String(this.docs.length);
+    this.renderTree();
+    this.renderList();
+  },
+
   async load() {
     if (this.loading) return;
     this.loading = true;
     const listEl = document.getElementById('docList');
     const treeEl = document.getElementById('docTree');
-    if (listEl) listEl.innerHTML = `<div class="doc-loading">正在从禅道加载文档…</div>`;
+    let showedCache = false;
     try {
+      // 1. 先画本地缓存（后端读文件，几乎瞬时）
+      try {
+        const [cl, cd] = await Promise.all([DocApi.cachedLibs(), DocApi.cachedList()]);
+        if (cl.data && cd.data) {
+          this.libs = cl.data; this.docs = cd.data;
+          this.paint();
+          this.setHint(`缓存 ${docClock(cd.syncedAt)} · 正在更新…`);
+          showedCache = true;
+        }
+      } catch { /* 没缓存就直接等最新的 */ }
+      if (!showedCache && listEl) listEl.innerHTML = `<div class="doc-loading">正在从禅道加载文档…</div>`;
+      // 2. 再向禅道要最新的；后端会和缓存比对，只让变化过的文档的详情缓存失效
       const [libsRes, docsRes] = await Promise.all([DocApi.libs(), DocApi.list()]);
       this.libs = libsRes.data || [];
       this.docs = docsRes.data || [];
-      this.renderTree();
-      this.renderList();
+      this.paint();
+      this.setHint(docSyncText(docsRes));
     } catch (err) {
-      const msg = err && err.code === 'ZENTAO_DISABLED' ? '请先在设置里登录禅道' : (err.message || '加载失败');
-      if (listEl) listEl.innerHTML = `<div class="doc-empty"><p>${docEsc(msg)}</p></div>`;
-      if (treeEl) treeEl.innerHTML = '';
+      if (showedCache) {
+        this.setHint('更新失败，当前显示的是缓存');
+      } else {
+        const msg = err && err.code === 'ZENTAO_DISABLED' ? '请先在设置里登录禅道' : (err.message || '加载失败');
+        if (listEl) listEl.innerHTML = `<div class="doc-empty"><p>${docEsc(msg)}</p></div>`;
+        if (treeEl) treeEl.innerHTML = '';
+        this.setHint('');
+      }
     } finally {
       this.loading = false;
     }

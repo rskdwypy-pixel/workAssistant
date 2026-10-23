@@ -57,6 +57,12 @@ function setup(state = {}) {
     const body = init.body ? JSON.parse(init.body) : null;
     state.reqs.push({ u, method, body });
     const reply = (b, s = 200) => ({ ok: s < 400, status: s, json: async () => b });
+    if (u === '/api/stories?cache=only') return reply({ success: true, data: state.cache === undefined ? null : state.cache, syncedAt: 1760000000000, fromCache: true });
+    if (u === '/api/stories' && method === 'GET') {
+      if (state.freshDelay) await new Promise(r => setTimeout(r, state.freshDelay));
+      if (state.freshFail) return reply({ success: false, message: '禅道连不上' }, 500);
+      return reply({ success: true, data: state.stories || STORIES, syncedAt: Date.now(), diff: state.diff });
+    }
     if (u.startsWith('/api/stories/meta')) return reply({ success: true, data: META });
     if (u === '/api/stories' && method === 'POST') return reply({ success: true, data: { id: '200', message: '保存成功' } });
     if (/^\/api\/stories\/\d+$/.test(u) && method === 'PUT') return reply({ success: true, data: { id: u.split('/').pop(), message: '保存成功' } });
@@ -177,6 +183,18 @@ function setup(state = {}) {
   win.StoryViewer.open('171'); await tick(30);
   viewer.querySelector('[data-del]').click(); await tick(20);
   check('删除发出 DELETE /api/stories/171', state.reqs.some(r => r.method === 'DELETE' && r.u === '/api/stories/171'));
+
+  // ── 本地缓存：先画缓存，再用最新数据刷新 ──
+  ({ win, doc, state } = setup({ cache: [STORIES[0]], freshDelay: 60, diff: { added: 3, changed: 1, removed: 0 } }));
+  win.StoryPage.show(); await tick(20);
+  check('缓存先画出来（最新数据还没回来）', doc.querySelectorAll('#storyList .story-card').length === 1 && /缓存/.test(doc.getElementById('storySyncHint').textContent) && /更新/.test(doc.getElementById('storySyncHint').textContent));
+  await tick(100);
+  check('最新数据回来后刷新列表', doc.querySelectorAll('#storyList .story-card').length === 3);
+  check('页头显示已同步 + 新增 / 变更条数', /已同步/.test(doc.getElementById('storySyncHint').textContent) && /新增 3/.test(doc.getElementById('storySyncHint').textContent) && /变更 1/.test(doc.getElementById('storySyncHint').textContent));
+  check('页头统计：全部 4 / 进行中 3', doc.getElementById('storyStatAll').textContent === '4' && doc.getElementById('storyStatOpen').textContent === '3');
+  ({ win, doc, state } = setup({ cache: [STORIES[0]], freshFail: true }));
+  win.StoryPage.show(); await tick(40);
+  check('更新失败时保留缓存列表并提示', doc.querySelectorAll('#storyList .story-card').length === 1 && /更新失败/.test(doc.getElementById('storySyncHint').textContent));
 
   // 未登录
   ({ win, doc, state } = setup({ localMode: true }));

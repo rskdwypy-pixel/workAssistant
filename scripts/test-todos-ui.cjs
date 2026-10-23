@@ -48,8 +48,19 @@ function setup(data) {
   const body = doc.getElementById('todoBody');
   check('渲染 3 个非空分组（空的 Bug 组不显示）', body.querySelectorAll('.todo-group').length === 3 && !/待处理 Bug/.test(body.textContent));
   check('逾期 / 今天有标记', body.querySelector('.due-overdue') && body.querySelector('.due-today'));
-  check('副标题显示总数', /共 4 项/.test(doc.getElementById('todoSub').textContent));
-  check('角标 = 逾期 + 今天 = 2', doc.querySelector('.tab-badge') && doc.querySelector('.tab-badge').textContent === '2');
+  check('概览卡显示总数 4 与紧急提示', doc.querySelector('.todo-hero-num').textContent === '4' && /其中 2 项/.test(doc.querySelector('.todo-hero-sub').textContent));
+  check('概览卡显示问候语与日期', /月.*日.*星期/.test(doc.querySelector('.todo-hero-label').textContent));
+  check('外框头部有标题与统计（待处理 4 / 紧急 2）', /我的待办/.test(doc.querySelector('.task-board-header h2').textContent) && doc.getElementById('todoStatTotal').textContent === '4' && doc.getElementById('todoStatUrgent').textContent === '2');
+  check('容器使用统一外框 mode-card', ['todoMode', 'storyMode', 'docMode', 'reportMode'].every(i => doc.getElementById(i).classList.contains('mode-card')));
+  const badge = doc.querySelector('.tab-badge');
+  check('角标 = 待办总数 4（不是紧急数）', badge && badge.textContent === '4');
+  check('有逾期 / 今天到期时角标变红', badge.classList.contains('urgent'));
+  const chips = [...doc.querySelectorAll('.todo-chip')];
+  check('概览卡有 3 个分组计数（空组不出现）', chips.length === 3);
+  chips.find(c => c.dataset.filter === 'task').click();
+  check('点分组计数 → 只看该组', doc.querySelectorAll('.todo-group').length === 1 && /待办任务/.test(doc.getElementById('todoBody').textContent) && !/评审中的需求/.test(doc.getElementById('todoBody').querySelector('.todo-group').textContent));
+  doc.querySelector('.todo-chip.active').click();
+  check('再点一次 → 恢复全部', doc.querySelectorAll('.todo-group').length === 3);
 
   body.querySelector('[data-kind="task"][data-id="1"]').click();
   check('点任务 → 切到任务模块', st.modes.pop() === 'task');

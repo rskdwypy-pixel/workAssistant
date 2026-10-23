@@ -85,7 +85,7 @@ async function getTodos(now = new Date()) {
 
   // 需求：指派给我、未关闭；评审中的单独成组（要我评审/确认）
   try {
-    const mine = (await listStories({}))
+    const mine = (await listStories({ maxAge: 60 * 1000 }))
       .filter(s => s.status !== 'closed' && s.assignedToAccount && s.assignedToAccount.toLowerCase() === me);
     const review = mine.filter(s => s.status === 'reviewing' || s.status === 'changing').map(storyItem).sort(bySeverity);
     const rest = mine.filter(s => s.status !== 'reviewing' && s.status !== 'changing').map(storyItem).sort(bySeverity);

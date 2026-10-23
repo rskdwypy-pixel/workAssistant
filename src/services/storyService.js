@@ -11,6 +11,7 @@ import { fetchMyList, getZentaoJson, isConfigured, zentaoFetch, getZentaoCookies
 import { sanitizeDocHtml, slimFiles } from './docService.js';
 import { decodeZentaoText } from '../utils/text.js';
 import { config } from '../config.js';
+import { createCache, diffById, singleFlight, trimDetails } from './zentaoCache.js';
 
 /** 我与需求的关联方式（对应 my-story-{type}） */
 const MY_STORY_LISTS = ['assignedTo', 'openedBy', 'reviewedBy', 'mailto'];
@@ -59,9 +60,20 @@ function statusMeta(s) {
   return STORY_STATUS[String(s || '')] || { label: String(s || '未知'), tone: 'muted' };
 }
 
+/** 能反映「这条需求变没变」的签名：列表项和详情用同一个算法，缓存的详情是否还有效靠它判断 */
+function storySig(s) {
+  return [s.status, s.stage, s.assignedTo, s.lastEditedDate, s.pri, s.title].map(v => String(v ?? '')).join('|');
+}
+
+const storyCache = createCache('stories');
+/** 列表缓存刚同步过多久内，信任缓存的详情（签名一致时直接用，不再请求禅道） */
+const DETAIL_TRUST_MS = 5 * 60 * 1000;
+
 function slimStory(s, users = {}) {
   const st = statusMeta(s.status);
   return {
+    sig: storySig(s),
+    lastEditedDate: String(s.lastEditedDate || ''),
     id: String(s.id),
     title: decodeZentaoText(s.title || '(无标题)'),
     status: String(s.status || ''),
@@ -81,31 +93,75 @@ function slimStory(s, users = {}) {
   };
 }
 
-/**
- * 当前账号相关的需求列表。
- * @param {{keyword?:string}} opts
- * @returns {Promise<Array>}
- */
-async function listStories({ keyword = '' } = {}) {
-  assertReady();
+/** 从禅道拉当前账号相关的需求（四种关联并行拉，去重、去已删除、新的在前） */
+async function fetchStoriesRemote() {
+  const results = await Promise.all(MY_STORY_LISTS.map(t => fetchMyList('story', t).then(r => ({ r }), error => ({ error }))));
+  const ok = results.filter(x => x.r);
+  if (!ok.length) throw (results[0] && results[0].error) || new Error('无法从禅道获取需求');
   const picked = new Map();
   let users = {};
-  for (const type of MY_STORY_LISTS) {
-    let res;
-    try { res = await fetchMyList('story', type); } catch { continue; }
-    if (res.users) users = { ...users, ...res.users };
-    for (const s of res.items) {
+  for (const { r } of ok) {
+    if (r.users) users = { ...users, ...r.users };
+    for (const s of r.items) {
       if (!s || !s.id || String(s.deleted) === '1') continue;
       const id = String(s.id);
       if (!picked.has(id)) picked.set(id, s);
     }
   }
-  let items = [...picked.values()].map(s => slimStory(s, users));
-  // 按 id 倒序（新的在前）
-  items.sort((a, b) => Number(b.id) - Number(a.id));
+  return [...picked.values()].map(s => slimStory(s, users)).sort((a, b) => Number(b.id) - Number(a.id));
+}
+
+/** 整拉一次 → 和缓存比对 → 只让变更 / 删除的需求的详情缓存失效 → 写缓存 */
+function syncStories() {
+  return singleFlight('stories', async () => {
+    const items = await fetchStoriesRemote();
+    const cache = storyCache.read();
+    const diff = diffById(cache && cache.items, items, s => s.sig);
+    const details = { ...((cache && cache.details) || {}) };
+    for (const id of [...diff.changed, ...diff.removed]) delete details[id];
+    const syncedAt = Date.now();
+    storyCache.write({ items, details, syncedAt });
+    return { items, syncedAt, diff };
+  });
+}
+
+/**
+ * 需求列表（带缓存信息）。
+ * @param {{maxAge?:number, cacheOnly?:boolean}} opts
+ *   cacheOnly  只读缓存，没有就返回 items:null（页面先画缓存用）
+ *   maxAge     缓存新于这么多毫秒就直接用，不请求禅道（待办页汇总用）；默认 0 = 总是向禅道要最新
+ * @returns {Promise<{items:Array|null, syncedAt:number, fromCache:boolean, diff?:object}>}
+ */
+async function loadStories({ maxAge = 0, cacheOnly = false } = {}) {
+  assertReady();
+  const cache = storyCache.read();
+  const has = cache && Array.isArray(cache.items);
+  if (cacheOnly) return { items: has ? cache.items : null, syncedAt: has ? cache.syncedAt || 0 : 0, fromCache: true };
+  if (has && maxAge > 0 && Date.now() - (cache.syncedAt || 0) < maxAge) {
+    return { items: cache.items, syncedAt: cache.syncedAt, fromCache: true };
+  }
+  const r = await syncStories();
+  return { ...r, fromCache: false };
+}
+
+/**
+ * 当前账号相关的需求列表（数组；兼容旧调用）。
+ * @param {{keyword?:string, maxAge?:number}} opts
+ * @returns {Promise<Array>}
+ */
+async function listStories({ keyword = '', maxAge = 0 } = {}) {
+  const { items } = await loadStories({ maxAge });
   const kw = String(keyword || '').trim().toLowerCase();
-  if (kw) items = items.filter(s => s.title.toLowerCase().includes(kw) || s.id.includes(kw));
-  return items;
+  return kw ? items.filter(s => s.title.toLowerCase().includes(kw) || s.id.includes(kw)) : items;
+}
+
+/** 写操作之后让缓存失效：列表下次一定重拉，该需求的详情丢掉 */
+function invalidateStories(id) {
+  const cache = storyCache.read();
+  if (!cache) return;
+  const details = { ...(cache.details || {}) };
+  if (id) delete details[String(id)];
+  storyCache.write({ syncedAt: 0, details });
 }
 
 /**
@@ -116,6 +172,11 @@ async function listStories({ keyword = '' } = {}) {
 async function getStory(id) {
   assertReady();
   if (!/^\d+$/.test(String(id))) throw new Error('非法的需求 ID');
+  id = String(id);
+  const cache = storyCache.read();
+  const hit = cache && cache.details && cache.details[id];
+  const listed = cache && Array.isArray(cache.items) && cache.items.find(i => i.id === id);
+  if (hit && listed && Date.now() - (cache.syncedAt || 0) < DETAIL_TRUST_MS && hit.sig === listed.sig) return hit.data;
   let data;
   try {
     data = await getZentaoJson(`story-view-${id}.json?onlybody=yes`);
@@ -135,7 +196,7 @@ async function getStory(id) {
   }
   const st = statusMeta(s.status);
   const users = data.users || {};
-  return {
+  const result = {
     id: String(s.id),
     title: decodeZentaoText(s.title || '(无标题)'),
     status: String(s.status || ''),
@@ -163,6 +224,11 @@ async function getStory(id) {
     openedDate: s.openedDate || '',
     lastEditedDate: s.lastEditedDate || s.changedDate || ''
   };
+  const fresh = storyCache.read();
+  const details = { ...((fresh && fresh.details) || {}) };
+  details[id] = { sig: storySig(s), at: Date.now(), data: result };
+  storyCache.write({ details: trimDetails(details) });
+  return result;
 }
 
 /* ───────────────────────── 新建 / 编辑（写操作） ─────────────────────────
@@ -342,6 +408,7 @@ async function createStory(opts = {}) {
     throw new Error(detail || '创建失败');
   }
   const id = await findStoryIdByTitle(product, title);
+  invalidateStories();
   return { id, message: (typeof json.message === 'string' && json.message) || '保存成功' };
 }
 
@@ -357,7 +424,8 @@ async function editStory(opts = {}) {
   const id = String(opts.id || '');
   if (!/^\d+$/.test(id)) throw new Error('非法的需求 ID');
 
-  // 1. 读当前需求；评审中/变更中需先撤回评审，正文才可编辑
+  // 1. 读当前需求（要最新的状态，不能用缓存）；评审中/变更中需先撤回评审，正文才可编辑
+  invalidateStories(id);
   let cur = await getStory(id);
   if (cur.status === 'reviewing' || cur.status === 'changing') {
     await zentaoFetch(`${ZENTAO_PATH()}/story-recall-${id}-view-no-story.html`, {
@@ -418,9 +486,9 @@ async function editStory(opts = {}) {
       const detail = msg && typeof msg === 'object' ? Object.values(msg).join('；') : msg;
       throw new Error(detail || '保存失败');
     }
-    if (json && json.result === 'success') return { id, message: (typeof json.message === 'string' && json.message) || '保存成功' };
+    if (json && json.result === 'success') { invalidateStories(id); return { id, message: (typeof json.message === 'string' && json.message) || '保存成功' }; }
   }
-  if (/story-view-\d+/.test(text) || /parent\.location/.test(text)) return { id, message: '保存成功' };
+  if (/story-view-\d+/.test(text) || /parent\.location/.test(text)) { invalidateStories(id); return { id, message: '保存成功' }; }
   const alertMsg = (text.match(/alert\(['"]([\s\S]*?)['"]\)/) || [])[1];
   throw new Error(alertMsg ? alertMsg.replace(/\\(.)/g, '$1') : '保存失败：禅道没有接受这次修改');
 }
@@ -440,11 +508,12 @@ async function deleteStory(id) {
   try { gone = !(await listStories({})).some(s => String(s.id) === String(id)); }
   catch { gone = true; }
   if (!gone) throw new Error('删除未生效');
+  invalidateStories(id);
   return { success: true };
 }
 
 export {
-  listStories, getStory, getStoryForm, createStory, editStory, deleteStory,
+  listStories, loadStories, getStory, getStoryForm, createStory, editStory, deleteStory,
   parseSelectOptions, findStoryIdByTitle,
   STORY_STATUS, STORY_STAGE, STORY_CATEGORY, STORY_SOURCE, STORY_PRI
 };

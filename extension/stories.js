@@ -18,6 +18,8 @@ const StoryApi = {
     return json;
   },
   list(keyword) { return this.request(`/api/stories${keyword ? `?keyword=${encodeURIComponent(keyword)}` : ''}`); },
+  /** 只读后端本地缓存（没有缓存时 data 为 null），页面先画它，再等最新数据 */
+  cached() { return this.request('/api/stories?cache=only'); },
   get(id) { return this.request(`/api/stories/${encodeURIComponent(id)}`); },
   meta(product) { return this.request(`/api/stories/meta${product ? `?product=${encodeURIComponent(product)}` : ''}`); },
   create(body) { return this.request('/api/stories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); },
@@ -46,6 +48,13 @@ const storyText = {
 
 const stEsc = (s) => (typeof escapeHtml === 'function' ? escapeHtml(String(s ?? '')) : String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
 const STORY_PRI = { 1: 'P1', 2: 'P2', 3: 'P3', 4: 'P4' };
+const stClock = (ms) => { if (!ms) return '--:--'; const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+/** 「已同步 14:03 · 新增 1 · 变更 2」；没变化就只显示时间 */
+const stSyncText = (r) => {
+  const d = r && r.diff || {};
+  const parts = [d.added && `新增 ${d.added}`, d.changed && `变更 ${d.changed}`, d.removed && `移除 ${d.removed}`].filter(Boolean);
+  return `已同步 ${stClock(r && r.syncedAt)}${parts.length ? ' · ' + parts.join(' · ') : ''}`;
+};
 
 const StoryPage = {
   rendered: false,
@@ -60,7 +69,7 @@ const StoryPage = {
     if (!root) return;
     if (typeof Account !== 'undefined' && Account.isLocalMode()) {
       this.rendered = false;
-      root.innerHTML = `<section class="story-page"><div class="story-empty story-login-empty">
+      root.innerHTML = `<div class="task-board-header"><div class="task-board-left"><h2>📝 需求</h2><div class="task-board-stats"><div class="stat-item"><span class="stat-label">全部</span><span class="stat-value" id="storyStatAll">-</span></div><div class="stat-item"><span class="stat-label">进行中</span><span class="stat-value" id="storyStatOpen">-</span></div></div></div><span class="sync-hint" id="storySyncHint"></span></div><section class="story-page"><div class="story-empty story-login-empty">
         <p><strong>需求来自禅道</strong></p>
         <p class="story-muted">这里查看与你相关的需求（你提的 / 指派你的 / 你评审的），登录禅道后即可使用。</p>
         <button type="button" class="btn-primary" data-story-login>登录禅道</button></div></section>`;
@@ -70,7 +79,7 @@ const StoryPage = {
     }
     if (!this.rendered) {
       this.rendered = true;
-      root.innerHTML = `
+      root.innerHTML = `<div class="task-board-header"><div class="task-board-left"><h2>📝 需求</h2><div class="task-board-stats"><div class="stat-item"><span class="stat-label">全部</span><span class="stat-value" id="storyStatAll">-</span></div><div class="stat-item"><span class="stat-label">进行中</span><span class="stat-value" id="storyStatOpen">-</span></div></div></div><span class="sync-hint" id="storySyncHint"></span></div>
         <section class="story-page">
           <aside class="story-side" id="storySide"></aside>
           <div class="story-main">
@@ -102,22 +111,53 @@ const StoryPage = {
     this.load();
   },
 
+  /** 页头右侧的同步状态：缓存时间 / 更新中 / 已同步（带新增、变更、移除条数） */
+  setHint(text) {
+    const el = document.getElementById('storySyncHint');
+    if (el) el.textContent = text || '';
+  },
+
   async load() {
     if (this.loading) return;
     this.loading = true;
     const listEl = document.getElementById('storyList');
-    if (listEl) listEl.innerHTML = `<div class="story-loading">正在从禅道加载需求…</div>`;
+    let showedCache = false;
     try {
-      this.stories = (await StoryApi.list()).data || [];
-      this.renderSide();
-      this.renderList();
+      // 1. 先画本地缓存（后端读文件，几乎瞬时）
+      try {
+        const c = await StoryApi.cached();
+        if (c.data) {
+          this.stories = c.data;
+          this.renderStats(); this.renderSide(); this.renderList();
+          this.setHint(`缓存 ${stClock(c.syncedAt)} · 正在更新…`);
+          showedCache = true;
+        }
+      } catch { /* 没缓存就直接等最新的 */ }
+      if (!showedCache && listEl) listEl.innerHTML = `<div class="story-loading">正在从禅道加载需求…</div>`;
+      // 2. 再向禅道要最新的；后端会和缓存比对，只让变化过的需求的详情缓存失效
+      const r = await StoryApi.list();
+      this.stories = r.data || [];
+      this.renderStats(); this.renderSide(); this.renderList();
+      this.setHint(stSyncText(r));
     } catch (err) {
-      const msg = err && err.code === 'ZENTAO_DISABLED' ? '请先在设置里登录禅道' : (err.message || '加载失败');
-      if (listEl) listEl.innerHTML = `<div class="story-empty"><p>${stEsc(msg)}</p></div>`;
-      const side = document.getElementById('storySide'); if (side) side.innerHTML = '';
+      if (showedCache) {
+        this.setHint('更新失败，当前显示的是缓存');
+      } else {
+        const msg = err && err.code === 'ZENTAO_DISABLED' ? '请先在设置里登录禅道' : (err.message || '加载失败');
+        if (listEl) listEl.innerHTML = `<div class="story-empty"><p>${stEsc(msg)}</p></div>`;
+        const side = document.getElementById('storySide'); if (side) side.innerHTML = '';
+        this.setHint('');
+      }
     } finally {
       this.loading = false;
     }
+  },
+
+  renderStats() {
+    const a = document.getElementById('storyStatAll');
+    const o = document.getElementById('storyStatOpen');
+    if (a) a.textContent = String(this.stories.length);
+    if (o) o.textContent = String(this.stories.filter(x => x.status !== 'closed').length);
   },
 
   /** 当前状态过滤下的需求（不含产品 / 搜索过滤），用于左侧产品计数 */

@@ -13,6 +13,7 @@ import { getZentaoJson, isConfigured, zentaoFetch, getZentaoCookies, cookiesToSt
 import { config } from '../config.js';
 import { decodeZentaoText } from '../utils/text.js';
 import { marked } from 'marked';
+import { createCache, diffById, singleFlight, trimDetails } from './zentaoCache.js';
 import { randomBytes } from 'crypto';
 
 marked.setOptions({ gfm: true, breaks: true });
@@ -56,8 +57,24 @@ function toArray(v) {
  * 文档库列表：合并各空间的 libs。
  * @returns {Promise<Array<{id,name,space,spaceLabel,docCount}>>}
  */
-async function listLibs() {
+const libCache = createCache('doc-libs');
+const LIBS_TTL_MS = 10 * 60 * 1000;
+
+/** 文档库列表（带缓存）。cacheOnly 只读缓存，没有返回 null；force 忽略有效期强制重拉 */
+async function listLibs({ cacheOnly = false, force = false } = {}) {
   assertReady();
+  const c = libCache.read();
+  const has = c && Array.isArray(c.libs);
+  if (cacheOnly) return has ? c.libs : null;
+  if (!force && has && Date.now() - (c.syncedAt || 0) < LIBS_TTL_MS) return c.libs;
+  return singleFlight('doc-libs', async () => {
+    const libs = await fetchLibsRemote();
+    libCache.write({ libs, syncedAt: Date.now() });
+    return libs;
+  });
+}
+
+async function fetchLibsRemote() {
   const seen = new Map();
   for (const space of LIB_SPACES) {
     let data;
@@ -91,10 +108,20 @@ async function listLibs() {
 }
 
 /** 列表项精简字段 */
+/** 能反映「这篇文档变没变」的签名：列表项和详情用同一个算法 */
+function docSig(d) {
+  return [d.title, d.lib, d.module, d.editedDate || d.addedDate].map(v => String(v ?? '')).join('|');
+}
+
+const docCache = createCache('docs');
+/** 列表缓存刚同步过多久内，信任缓存的详情（签名一致时直接用，不再请求禅道） */
+const DETAIL_TRUST_MS = 5 * 60 * 1000;
+
 function slimDoc(d) {
   const type = String(d.type || 'text');
   const meta = DOC_TYPE_META[type] || DOC_TYPE_META.text;
   return {
+    sig: docSig(d),
     id: String(d.id),
     lib: String(d.lib || ''),
     module: String(d.module || '0'),
@@ -108,12 +135,8 @@ function slimDoc(d) {
   };
 }
 
-/**
- * 当前账号可见的全部文档（翻页拉全量，过滤已删除）。
- * @param {{keyword?:string}} opts 可选标题关键字（后端兜底过滤）
- */
-async function listDocs({ keyword = '' } = {}) {
-  assertReady();
+/** 翻页拉全量（过滤已删除） */
+async function fetchDocsRemote() {
   const perPage = 200;
   const out = [];
   let page = 1;
@@ -127,9 +150,58 @@ async function listDocs({ keyword = '' } = {}) {
     if (docs.length === 0) break;
     page += 1;
   }
+  return out;
+}
+
+/** 整拉一次 → 和缓存比对 → 只让变更 / 删除的文档的详情缓存失效 → 写缓存 */
+function syncDocs() {
+  return singleFlight('docs', async () => {
+    const items = await fetchDocsRemote();
+    const cache = docCache.read();
+    const diff = diffById(cache && cache.items, items, d => d.sig);
+    const details = { ...((cache && cache.details) || {}) };
+    for (const id of [...diff.changed, ...diff.removed]) delete details[id];
+    const syncedAt = Date.now();
+    docCache.write({ items, details, syncedAt });
+    return { items, syncedAt, diff };
+  });
+}
+
+/**
+ * 文档列表（带缓存信息）。
+ * @param {{maxAge?:number, cacheOnly?:boolean}} opts 含义同 storyService.loadStories
+ */
+async function loadDocs({ maxAge = 0, cacheOnly = false } = {}) {
+  assertReady();
+  const cache = docCache.read();
+  const has = cache && Array.isArray(cache.items);
+  if (cacheOnly) return { items: has ? cache.items : null, syncedAt: has ? cache.syncedAt || 0 : 0, fromCache: true };
+  if (has && maxAge > 0 && Date.now() - (cache.syncedAt || 0) < maxAge) {
+    return { items: cache.items, syncedAt: cache.syncedAt, fromCache: true };
+  }
+  const r = await syncDocs();
+  return { ...r, fromCache: false };
+}
+
+/**
+ * 当前账号可见的全部文档（数组；兼容旧调用）。
+ * @param {{keyword?:string, maxAge?:number}} opts 可选标题关键字（后端兜底过滤）
+ */
+async function listDocs({ keyword = '', maxAge = 0 } = {}) {
+  const { items } = await loadDocs({ maxAge });
   const kw = String(keyword || '').trim().toLowerCase();
-  const items = kw ? out.filter(d => d.title.toLowerCase().includes(kw)) : out;
-  return items;
+  return kw ? items.filter(d => d.title.toLowerCase().includes(kw)) : items;
+}
+
+/** 写操作之后让缓存失效：列表下次一定重拉，该文档的详情丢掉，文档库（文档数）也重拉 */
+function invalidateDocs(id) {
+  const cache = docCache.read();
+  if (cache) {
+    const details = { ...(cache.details || {}) };
+    if (id) delete details[String(id)];
+    docCache.write({ syncedAt: 0, details });
+  }
+  libCache.write({ syncedAt: 0 });
 }
 
 /** 把正文里的禅道内联图片改写为后端代理地址，顺手去掉危险内容 */
@@ -222,6 +294,7 @@ async function createDoc({ lib, module = '0', title, body = '', contentType = 'm
   }
   // locate 形如 /zentao/doc-objectLibs-product-24-75-13.html，末段即新文档 id
   const id = (String(json.locate || '').match(/-(\d+)\.html/) || [])[1] || null;
+  invalidateDocs();
   return { id, message: json.message || '保存成功' };
 }
 
@@ -279,6 +352,7 @@ async function editDoc({ id, title, body, keywords, acl } = {}) {
     const errs = json.errors && typeof json.errors === 'object' ? Object.values(json.errors).join('；') : '';
     throw new Error(json.message || errs || '保存失败');
   }
+  invalidateDocs(id);
   return { id: String(id), message: json.message || '保存成功' };
 }
 
@@ -317,6 +391,7 @@ async function deleteDoc(id) {
   // 回查：禅道删除响应形态多变，以「列表里已不在」为准
   const gone = !(await listDocs({})).some(d => String(d.id) === String(id));
   if (!gone) throw new Error('删除未生效');
+  invalidateDocs(id);
   return { success: true };
 }
 
@@ -343,6 +418,11 @@ function slimFiles(files) {
 async function getDoc(id) {
   assertReady();
   if (!/^\d+$/.test(String(id))) throw new Error('非法的文档 ID');
+  id = String(id);
+  const cache = docCache.read();
+  const hit = cache && cache.details && cache.details[id];
+  const listed = cache && Array.isArray(cache.items) && cache.items.find(i => i.id === id);
+  if (hit && listed && Date.now() - (cache.syncedAt || 0) < DETAIL_TRUST_MS && hit.sig === listed.sig) return hit.data;
   let data;
   try {
     data = await getZentaoJson(`doc-view-${id}.json?onlybody=yes`);
@@ -365,7 +445,7 @@ async function getDoc(id) {
   const contentType = String(doc.contentType || 'html').toLowerCase();
   const { contentHtml, contentText } = renderContent(type, contentType, doc.content || '');
   const isText = type === 'text' || type === 'markdown';
-  return {
+  const result = {
     id: String(doc.id),
     title: decodeZentaoText(doc.title || '(无标题)'),
     type,
@@ -386,6 +466,11 @@ async function getDoc(id) {
     // 外链型文档的目标地址（type=url 时 content 存链接）
     externalUrl: type === 'url' ? String(doc.content || '').trim() : ''
   };
+  const fresh = docCache.read();
+  const details = { ...((fresh && fresh.details) || {}) };
+  details[id] = { sig: docSig(doc), at: Date.now(), data: result };
+  docCache.write({ details: trimDetails(details) });
+  return result;
 }
 
-export { listLibs, listDocs, getDoc, createDoc, editDoc, deleteDoc, collectDoc, genUid, sanitizeDocHtml, slimFiles, renderContent, SPACE_LABEL, DOC_TYPE_META };
+export { listLibs, listDocs, loadDocs, getDoc, createDoc, editDoc, deleteDoc, collectDoc, genUid, sanitizeDocHtml, slimFiles, renderContent, SPACE_LABEL, DOC_TYPE_META };

@@ -1,8 +1,9 @@
 /**
  * 文档中心接口
  *
- *   GET    /api/docs/libs                 文档库列表（各空间的库）
- *   GET    /api/docs/list?keyword=        当前账号可见的全部文档（前端按库分组 / 搜索）
+ *   GET    /api/docs/libs                 文档库列表（各空间的库，本地缓存 10 分钟；cache=only 只读缓存）
+ *   GET    /api/docs/list?keyword=        当前账号可见的全部文档（前端按库分组 / 搜索）；
+ *                                  cache=only 只读本地缓存（没有则 data:null）；响应带 syncedAt 与 diff
  *   GET    /api/docs/:id                  文档详情（正文已消毒 + 内联图代理；附件列表）
  *   POST   /api/docs                      新建正文文档 body:{lib,module,title,body,contentType,keywords,acl}
  *   PUT    /api/docs/:id                  编辑文档 body:{title,body,keywords,acl}
@@ -28,7 +29,7 @@ function fail(res, err) {
 
 router.get('/docs/libs', async (req, res) => {
   try {
-    res.json({ success: true, data: await docService.listLibs() });
+    res.json({ success: true, data: await docService.listLibs({ cacheOnly: req.query.cache === 'only' }) });
   } catch (err) {
     fail(res, err);
   }
@@ -36,8 +37,15 @@ router.get('/docs/libs', async (req, res) => {
 
 router.get('/docs/list', async (req, res) => {
   try {
-    const items = await docService.listDocs({ keyword: req.query.keyword || '' });
-    res.json({ success: true, data: items });
+    // cache=only：只读本地缓存（页面先画缓存）；否则向禅道要最新并和缓存比对
+    const r = await docService.loadDocs({ cacheOnly: req.query.cache === 'only' });
+    const kw = String(req.query.keyword || '').trim().toLowerCase();
+    const data = r.items && kw ? r.items.filter(d => d.title.toLowerCase().includes(kw)) : r.items;
+    const d = r.diff;
+    res.json({
+      success: true, data, syncedAt: r.syncedAt, fromCache: r.fromCache,
+      diff: d ? { added: d.added.length, changed: d.changed.length, removed: d.removed.length } : undefined
+    });
   } catch (err) {
     fail(res, err);
   }

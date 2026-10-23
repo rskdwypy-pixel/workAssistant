@@ -3303,18 +3303,56 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
 }
 
 /* 我的待办 */
-.tab-btn .tab-badge { margin-left: 6px; min-width: 16px; padding: 0 5px; border-radius: 8px; background: #e5484d; color: #fff; font-size: 11px; line-height: 16px; display: inline-block; text-align: center; }
-.todo-page { max-width: 860px; margin: 0 auto; padding: 4px 2px 24px; }
-.todo-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
-.todo-head h2 { margin: 0; font-size: 18px; }
-.todo-sub { flex: 1; color: var(--text-secondary); font-size: 13px; }
-.todo-group { margin-bottom: 16px; }
-.todo-group-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
-.todo-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); border-radius: var(--radius-sm); padding: 9px 12px; margin-bottom: 6px; cursor: pointer; font-size: 13px; }
-.todo-item:hover { border-color: var(--primary); }
+.tab-btn .tab-badge { margin-left: 6px; min-width: 18px; padding: 0 6px; border-radius: 9px; background: var(--primary); color: #fff; font-size: 11px; font-weight: 600; line-height: 18px; display: inline-block; text-align: center; }
+.tab-btn .tab-badge.urgent { background: var(--danger); }
+.todo-page { max-width: 880px; margin: 0 auto; padding: 8px 4px 32px; }
+
+.todo-hero { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; padding: 24px 28px; margin-bottom: 20px; border-radius: var(--radius-xl); color: #fff; background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%); box-shadow: 0 8px 24px rgba(99, 102, 241, .22); }
+.todo-hero-label { font-size: 13px; opacity: .85; }
+.todo-hero-num { font-size: 52px; font-weight: 700; line-height: 1.1; letter-spacing: -1px; margin: 2px 0 4px; }
+.todo-hero-sub { font-size: 13px; opacity: .9; }
+.todo-hero-sub b { font-weight: 700; }
+.todo-chips { display: flex; gap: 10px; flex-wrap: wrap; }
+.todo-chip { display: flex; flex-direction: column; align-items: flex-start; min-width: 86px; padding: 10px 14px; border: 1px solid rgba(255,255,255,.28); border-radius: var(--radius); background: rgba(255,255,255,.14); color: #fff; cursor: pointer; transition: background .15s; }
+.todo-chip:hover { background: rgba(255,255,255,.24); }
+.todo-chip.active { background: #fff; color: var(--primary-dark); border-color: #fff; }
+.todo-chip-n { font-size: 22px; font-weight: 700; line-height: 1.2; }
+.todo-chip-l { font-size: 12px; opacity: .9; }
+
+.todo-group { margin-bottom: 16px; background: var(--bg-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
+.todo-group-title { display: flex; align-items: center; gap: 8px; padding: 14px 18px 8px; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.todo-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+.todo-task .todo-dot { background: var(--primary); }
+.todo-bug .todo-dot { background: var(--danger); }
+.todo-review .todo-dot { background: var(--warning); }
+.todo-story .todo-dot { background: #8b5cf6; }
+.todo-report .todo-dot { background: var(--success); }
+.todo-count { margin-left: 2px; padding: 0 8px; border-radius: 10px; background: var(--bg-base); color: var(--text-secondary); font-size: 12px; font-weight: 500; line-height: 20px; }
+.todo-list { padding: 0 8px 8px; }
+.todo-item { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; background: transparent; color: var(--text-primary); border-radius: var(--radius); padding: 11px 12px 11px 16px; cursor: pointer; font-size: 14px; transition: background .12s; }
+.todo-item::before { content: ''; position: absolute; left: 5px; top: 50%; width: 3px; height: 16px; margin-top: -8px; border-radius: 2px; background: transparent; }
+.todo-item.pri-1::before { background: var(--danger); }
+.todo-item.pri-2::before { background: var(--warning); }
+.todo-item:hover { background: var(--bg-base); }
 .todo-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.todo-meta { color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
-.todo-due { font-size: 11px; padding: 1px 7px; border-radius: 9px; background: rgba(127,127,127,.15); white-space: nowrap; }
-.todo-due.due-overdue { background: #e5484d; color: #fff; }
-.todo-due.due-today { background: #f5a524; color: #fff; }
-.todo-errors { color: var(--text-secondary); font-size: 12px; margin-top: 8px; }
+.todo-meta { max-width: 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12px; }
+.todo-arrow { color: var(--text-muted); font-size: 18px; line-height: 1; opacity: 0; transition: opacity .12s; }
+.todo-item:hover .todo-arrow { opacity: 1; }
+.todo-due { padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; background: var(--bg-base); color: var(--text-secondary); }
+.todo-due.due-overdue { background: rgba(239, 68, 68, .12); color: var(--danger); }
+.todo-due.due-today { background: rgba(245, 158, 11, .15); color: #b45309; }
+.todo-allclear { text-align: center; padding: 44px 0; background: var(--bg-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); color: var(--text-secondary); }
+.todo-allclear-ico { width: 44px; height: 44px; margin: 0 auto 10px; border-radius: 50%; background: rgba(16,185,129,.12); color: var(--success); font-size: 22px; line-height: 44px; }
+.todo-allclear p { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 2px; }
+.todo-allclear span { font-size: 13px; color: var(--text-muted); }
+.todo-errors { color: var(--text-muted); font-size: 12px; margin-top: 4px; padding: 0 4px; }
+
+/* 待办 / 需求 / 文档 / 报告：与任务、Bug 页统一的外框卡片 */
+.mode-card.active { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); }
+.mode-card .report-page, .mode-card .doc-page, .mode-card .story-page { padding: 20px; }
+.mode-card .todo-page { max-width: none; margin: 0; padding: 20px; }
+.mode-card .task-board-header .story-refresh { margin-left: auto; }
+.mode-card .todo-group { box-shadow: none; border: 1px solid var(--border); }
+.mode-card .todo-allclear { box-shadow: none; border: 1px solid var(--border); }
+.mode-card .sync-hint { margin-left: auto; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.mode-card .sync-hint + .story-refresh { margin-left: 10px; }
