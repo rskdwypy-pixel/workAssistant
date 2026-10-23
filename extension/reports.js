@@ -268,7 +268,7 @@ const ReportPage = {
     }
     const attrs = day.future ? 'aria-disabled="true"' : `data-effort-day="${day.date}" tabindex="0" role="button"`;
     return `<div class="${cls.join(' ')}" ${attrs} title="${reportEsc(day.date)} ${WEEKDAY[day.weekday]}">
-      <div class="report-day-num">${n}${day.report ? '<span class="report-dot" title="已有日报"></span>' : ''}</div>${body}</div>`;
+      <div class="report-day-num"><span class="report-day-n">${n}</span>${day.today ? '<span class="report-today-tag">今天</span>' : ''}${day.report ? '<span class="report-dot" title="已有日报"></span>' : ''}</div>${body}</div>`;
   },
 
   teamWeekCell(w) {
@@ -370,7 +370,7 @@ const ReportPage = {
     else if (day.legacy) body += '<div class="report-day-pending">旧版日报</div>';
     const attrs = day.future ? 'aria-disabled="true"' : `data-effort-day="${day.date}" tabindex="0" role="button"`;
     return `<div class="${cls.join(' ')}" ${attrs} title="${reportEsc(day.date)} ${WEEKDAY[day.weekday]}">
-      <div class="report-day-num">${n}${r ? '<span class="report-dot" title="已有日报"></span>' : ''}</div>${body}</div>`;
+      <div class="report-day-num"><span class="report-day-n">${n}</span>${day.today ? '<span class="report-today-tag">今天</span>' : ''}${r ? '<span class="report-dot" title="已有日报"></span>' : ''}</div>${body}</div>`;
   },
 
   weekCell(w) {

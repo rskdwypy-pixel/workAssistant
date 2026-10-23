@@ -3430,3 +3430,9 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
 .effort-edit-form { flex-direction: column; border-color: var(--primary); }
 .effort-edit-form .effort-main { width: 100%; display: flex; flex-direction: column; gap: 10px; }
 .effort-edit-form .effort-actions { gap: 8px; }
+
+/* 工作日历：今天一眼能看出来（放在状态色之后，只加外圈和日期徽标，不盖掉填满 / 不足 / 缺填的底色） */
+.report-day.is-today { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary), 0 6px 16px rgba(99, 102, 241, .28); position: relative; z-index: 1; }
+.report-day.is-today:hover { box-shadow: 0 0 0 2px var(--primary), 0 8px 20px rgba(99, 102, 241, .36); }
+.report-day.is-today .report-day-n { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 11px; background: var(--primary); color: #fff; font-weight: 700; }
+.report-today-tag { font-size: 11px; font-weight: 700; color: var(--primary); letter-spacing: 1px; }

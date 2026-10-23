@@ -141,6 +141,8 @@ function setup(state = {}) {
   check('不足（3.5h）：琥珀色 + 进度条 44%', cell(18).classList.contains('is-partial') && /3\.5h/.test(cell(18).textContent) && cell(18).querySelector('.report-day-bar span').style.width === '44%');
   check('过去的工作日一小时没填：标红「未填工时」', cell(19).classList.contains('is-missing') && /未填工时/.test(cell(19).textContent));
   check('今天没填满不标红，今天有工时显示小时数', !cell(20).classList.contains('is-missing') && /1h/.test(cell(20).textContent) && cell(20).classList.contains('is-today'));
+  check('今天高亮：有「今天」徽标、日期是实心圆、有高亮外圈的样式', cell(20).classList.contains('is-today') && !!cell(20).querySelector('.report-today-tag') && /今天/.test(cell(20).querySelector('.report-today-tag').textContent) && !!cell(20).querySelector('.report-day-n') && !cell(19).querySelector('.report-today-tag'));
+  check('今天只有一个格子带徽标', root.querySelectorAll('.report-today-tag').length === 1);
   check('周末没填不标红', !cell(15).classList.contains('is-missing') && !cell(16).classList.contains('is-missing'));
   check('未来日期不可点', root.querySelector('.report-day.is-future').getAttribute('aria-disabled') === 'true' && !root.querySelector('.report-day.is-future').dataset.effortDay);
   check('周累计：3/17 那周 = 8 + 3.5 + 1 = 12.5h', /12\.5h/.test(root.querySelector('[data-report-key="2025-03-17"].report-week').textContent));
@@ -294,6 +296,7 @@ function setup(state = {}) {
   doc.querySelector('[data-report-lens="team"]').click(); await tick(80);
   const tcell = (d) => doc.querySelector(`[data-effort-day="2025-03-${pad(d)}"]`);
   check('切到全员：请求了全员工时', state.reqs.some(r => r.u === '/api/efforts/team?month=2025-03'));
+  check('全员视角下今天同样高亮', !!tcell(20).querySelector('.report-today-tag'));
   check('全员格子：团队总工时 + 几个人填报', /团队 16h/.test(tcell(17).textContent) && /2\/3 人填报/.test(tcell(17).textContent), tcell(17).textContent);
   check('全员格子：所有人都填满才标绿；有人没填满标琥珀；没人填的过去工作日标红', tcell(18).classList.contains('is-partial') && !tcell(17).classList.contains('is-full') && tcell(19).classList.contains('is-missing') && /没人填工时/.test(tcell(19).textContent));
   check('全员页头：团队累计 27.5h、已填报 2/3 人', /27\.5h/.test(doc.getElementById('reportStats').textContent) && /2\/3 人/.test(doc.getElementById('reportStats').textContent), doc.getElementById('reportStats').textContent);
