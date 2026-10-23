@@ -99,7 +99,7 @@ function setup(state) {
     const showTaskDetail = () => { window.__s.detailOpened = true; };
     ${extract(['escapeHtml', 'resetListenerScope', 'Confirm'])}
     ${ATT}
-    ${extract(['fetchBackendWithRetry', 'openInZentao', 'ExecutionPicker', 'createTaskCard'])}
+    ${extract(['fetchBackendWithRetry', 'openInZentao', 'ExecutionPicker', 'originChipsHTML', 'createTaskCard'])}
     ${extractStatement('[data-exec-task]')}
     window.__api = { fetchBackendWithRetry, openInZentao, ExecutionPicker, createTaskCard, Confirm, AttachmentQuickView, AttachmentPreview, attachmentBadgeHTML };
   `);

@@ -72,7 +72,7 @@ try {
   config.ai.reportModel = '';
   const src = (f) => readFileSync(join(ROOT, 'src', 'ai', f), 'utf8');
   check('调用处按用途取模型：新建任务解析、执行匹配、Bug 分析用任务模型；报告用报告模型',
-    /model: aiModelFor\('task'\)/.test(src('unifiedAnalyzer.js')) && (src('openai.js').match(/aiModelFor\('task'\)/g) || []).length === 2 &&
+    /model: aiModelFor\('task'\)/.test(src('unifiedAnalyzer.js')) && (src('openai.js').match(/aiModelFor\('task'\)/g) || []).length === 1 && /model: aiModelFor\(purpose\)/.test(src('openai.js')) && /purpose = 'task'/.test(src('openai.js')) &&
     /model: aiModelFor\('report'\)/.test(src('openai.js')) && /model: aiModelFor\('report'\)/.test(src('reportAI.js')) && !/config\.ai\.model/.test(src('openai.js') + src('reportAI.js') + src('unifiedAnalyzer.js')));
   check('不再在模块加载时固定 AI 客户端（改设置后无需重启）', !/^const client = createOpenAIClient\(\);/m.test(src('openai.js')));
 
