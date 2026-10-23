@@ -3527,3 +3527,9 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
 @media (max-width: 720px) { .tl-row { grid-template-columns: 1fr 1fr; } .tl-grid-head { display: none; } .tl-grid-row { grid-template-columns: 1fr 1fr; } }
 .effort-task-id { color: var(--primary); font-size: 12px; text-decoration: none; margin-right: 2px; }
 .effort-task-id:hover { text-decoration: underline; }
+
+.task-origin { display: inline-block; margin: 4px 0 0 6px; padding: 0 6px; border-radius: 9px; font-size: 11px; line-height: 17px; color: var(--primary); background: rgba(59, 130, 246, .1); text-decoration: none; }
+.task-origin:hover { background: rgba(59, 130, 246, .2); }
+
+.tl-ai { display: flex; align-items: center; gap: 10px; }
+.tl-warn { margin: 0; font-size: 12.5px; color: #92400e; background: rgba(245, 158, 11, .1); border: 1px solid rgba(245, 158, 11, .35); border-radius: var(--radius); padding: 6px 10px; }

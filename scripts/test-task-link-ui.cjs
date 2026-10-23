@@ -31,7 +31,8 @@ function setup(state) {
     if (u === '/api/executions') return reply({ success: true, data: [{ id: '61', name: '真机拨测看板', isFavorite: true }, { id: '180', name: '工作日志', isDefault: true }] });
     if (/\/api\/bugs\/\d+\/task-link$/.test(u)) return reply({ success: true, data: state.bugLink || { exists: true, toTask: '' } });
     if (/\/api\/bugs\/\d+\/to-task$/.test(u)) return reply(state.bugResult || { success: true, taskId: '900', linked: true, message: '任务已创建（#900）' });
-    if (/\/api\/stories\/\d+\/tasks$/.test(u) && method === 'GET') return reply({ success: true, data: state.existing || [] });
+    if (/\/api\/stories\/\d+\/tasks$/.test(u) && method === 'GET') return reply({ success: true, data: { tasks: state.existing || [], executionIds: state.linkedExecs || [] } });
+    if (/\/api\/stories\/\d+\/tasks\/suggest$/.test(u)) return reply(state.suggest || { success: true, data: { aiUsed: false, reason: '还没有配置 AI', tasks: [{ name: '方案设计', type: 'design', estimate: '' }] } });
     if (/\/api\/stories\/\d+\/tasks$/.test(u) && method === 'POST') return reply({ success: true, data: state.splitResult(body) });
     return reply({ success: false, message: 'nf' });
   };
@@ -100,6 +101,30 @@ const $$ = (win, sel) => [...win.document.querySelectorAll(sel)];
     check('需求：结果区列出 3 成功 1 失败 + 警告提示', $$(win, '.tl-results .is-ok').length === 3 && $$(win, '.tl-results .is-fail').length === 1 && st.toasts.some(t => t[0] === 'warn'));
     check('需求：创建后刷新任务看板', st.reloaded === 1);
     check('需求：按钮文案随剩余行数变化', /创建 1 个任务/.test($(win, '[data-tl="submit"]').textContent));
+
+    // ---- AI 拆分建议 / 关联提示 ----
+    st = { linkedExecs: ['61'] };
+    st.suggest = { success: true, data: { aiUsed: true, tasks: [{ name: '设计匹配规则', type: 'design', estimate: 2 }, { name: '实现正则匹配', type: 'devel', estimate: 6 }] } };
+    st.splitResult = () => ({ results: [], created: 0, failed: 0 });
+    win = setup(st);
+    await win.__TL.openForStory({ id: '120', title: 't' }); await tick(20);
+    check('关联提示：默认执行(180)未关联该需求 → 黄色提醒', !!$(win, '.tl-warn') && /还没有关联/.test($(win, '.tl-warn').textContent));
+    const exSel = $(win, '[data-f="executionId"]'); exSel.value = '61'; exSel.dispatchEvent(new win.Event('change', { bubbles: true })); await tick(10);
+    check('关联提示：换到已关联的执行(61) → 提醒消失，显示已关联', !$(win, '.tl-warn') && /已关联到这个执行/.test($(win, '[data-tl-body]').textContent) && $(win, '[data-f="executionId"]').value === '61');
+    $(win, '[data-tl="suggest"]').click(); await tick(30);
+    check('AI 建议：任务行被替换为 AI 给的 2 行（含类型 / 工时），执行选择保留', $$(win, '.tl-grid-row').length === 2 && $$(win, '[data-r="name"]')[1].value === '实现正则匹配' && $$(win, '[data-r="estimate"]')[1].value === '6' && $$(win, '[data-r="type"]')[0].value === 'design' && $(win, '[data-f="executionId"]').value === '61');
+    check('AI 建议：请求了 /suggest，提示"AI 给出 2 个任务"', st.reqs.some(r => r.u === '/api/stories/120/tasks/suggest' && r.method === 'POST') && /AI 给出 2 个任务/.test($(win, '[data-tl-ai-msg]').textContent));
+    st.suggest = { success: true, data: { aiUsed: false, reason: '还没有配置 AI，先用通用模板', tasks: [{ name: '方案设计', type: 'design', estimate: '' }, { name: '开发实现', type: 'devel', estimate: '' }] } };
+    $$(win, '[data-r="name"]')[0].value = '我自己写的任务';
+    win.Confirm = { show: async () => false };
+    $(win, '[data-tl="suggest"]').click(); await tick(30);
+    check('AI 建议：表格里有手写任务时先确认，选取消则保持不变', $$(win, '[data-r="name"]')[0].value === '我自己写的任务');
+    win.Confirm = { show: async () => true };
+    $(win, '[data-tl="suggest"]').click(); await tick(30);
+    check('没配 AI：确认替换后得到模板，并显示原因（不报错）', $$(win, '[data-r="name"]')[0].value === '方案设计' && /还没有配置 AI/.test($(win, '[data-tl-ai-msg]').textContent));
+    st.suggest = { success: false, message: '服务异常' };
+    $(win, '[data-tl="suggest"]').click(); await tick(30);
+    check('建议接口失败：给出提示，表格保持原样，可继续手填', /获取建议失败/.test($(win, '[data-tl-ai-msg]').textContent) && $$(win, '.tl-grid-row').length === 2);
   } catch (e) {
     check(`异常：${e.stack}`, false);
   }

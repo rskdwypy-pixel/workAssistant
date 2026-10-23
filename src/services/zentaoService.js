@@ -661,7 +661,10 @@ function toMyTask(t) {
     openedBy: t.openedBy,
     executionName: decodeZentaoText(t.executionName),
     projectName: decodeZentaoText(t.projectName),
-    progress: t.progress
+    progress: t.progress,
+    story: t.story,
+    storyTitle: decodeZentaoText(t.storyTitle),
+    fromBug: t.fromBug
   };
 }
 
@@ -897,6 +900,9 @@ async function syncMyTasks() {
     t.status === 'wait' || t.status === 'doing' || localTaskIds.has(String(t.id)) || worked.has(String(t.id)));
   const mapped = picked.map((t) => ({
     touchedAt: worked.get(String(t.id)) || '',
+    storyId: t.story && t.story !== '0' ? String(t.story) : '',
+    storyTitle: t.storyTitle || '',
+    fromBug: t.fromBug && t.fromBug !== '0' ? String(t.fromBug) : '',
     zentaoId: t.id,
     title: t.name,
     status: TASK_STATUS_TO_LOCAL[t.status] || 'todo',

@@ -596,7 +596,7 @@ function dedupeZentaoRecords(tasks) {
 /** 禅道同步会覆盖的字段 */
 const ZENTAO_TASK_FIELDS = [
   'title', 'status', 'priority', 'executionId', 'executionName',
-  'projectName', 'projectId', 'progress', 'totalConsumedTime'
+  'projectName', 'projectId', 'progress', 'totalConsumedTime', 'storyId', 'storyTitle', 'fromBug'
 ];
 /**
  * 其中只有这些字段变化才刷新 updatedAt：
@@ -638,7 +638,10 @@ async function importZentaoTasks(zentaoTasks) {
           title: zentaoTask.title,
           status: zentaoTask.status,
           priority: zentaoTask.priority,
-          totalConsumedTime: zentaoTask.consumed || 0
+          totalConsumedTime: zentaoTask.consumed || 0,
+          storyId: zentaoTask.storyId ? String(zentaoTask.storyId) : '',
+          storyTitle: zentaoTask.storyId ? (zentaoTask.storyTitle || '') : '',
+          fromBug: zentaoTask.fromBug ? String(zentaoTask.fromBug) : ''
         };
         // 禅道给不出进度（未填预计工时）时传 null，此时保留本地进度
         if (zentaoTask.progress !== null && zentaoTask.progress !== undefined) {

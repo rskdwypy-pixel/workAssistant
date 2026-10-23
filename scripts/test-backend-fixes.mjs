@@ -383,6 +383,21 @@ try {
     check('同步：它的日期落在最后一次填工时那天，不是"今天"', t804 && t804.createdAt.slice(0, 10) === dayStr && t804.updatedAt.slice(0, 10) === dayStr, t804 && t804.createdAt);
     check('同步：没填过工时的历史已完成任务仍不收', !all.some(t => String(t.zentaoId) === '805'));
     const view = await getAllTasks({ date: dayStr });
+    seed([]);
+    mock.handler = (url, init) => {
+      const lr = loginHandler(url, init);
+      if (lr) return lr;
+      if (url.includes('/zentao/my-task-')) return zentaoJson({ tasks: [
+        { id: 810, name: '需求拆出的任务', status: 'wait', pri: 3, story: '165', storyTitle: '某需求', fromBug: '0' },
+        { id: 811, name: 'Bug 转来的任务', status: 'doing', pri: 3, story: '0', fromBug: '88' },
+        { id: 812, name: '普通任务', status: 'wait', pri: 3, story: '0', fromBug: '0' }
+      ], pager: { pageTotal: 1 } });
+      return zentaoJson({ bugs: [], pager: { pageTotal: 1 } });
+    };
+    await zs.syncMyTasks();
+    all = await read();
+    const o810 = all.find(t => String(t.zentaoId) === '810'), o811 = all.find(t => String(t.zentaoId) === '811'), o812 = all.find(t => String(t.zentaoId) === '812');
+    check('同步：任务带回来源需求（storyId / storyTitle）和来源 Bug（fromBug），没有来源的为空', o810.storyId === '165' && o810.storyTitle === '某需求' && !o810.fromBug && o811.fromBug === '88' && !o811.storyId && !o812.storyId && !o812.fromBug, JSON.stringify([o810.storyId, o811.fromBug, o812.storyId]));
     check('同步后：任务页按那天看，能看到这个任务', view.some(t => String(t.zentaoId) === '804'));
   }
 

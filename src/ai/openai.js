@@ -906,10 +906,10 @@ ${learningHint}
  * @param {number} maxTokens - 最大 token 数，默认 500
  * @returns {Promise<string>} AI 响应内容
  */
-async function generateResponse(prompt, maxTokens = 500) {
+async function generateResponse(prompt, maxTokens = 500, purpose = 'task') {
   try {
     const response = await currentClient().chat.completions.create({
-      model: aiModelFor('task'),
+      model: aiModelFor(purpose),
       messages: [
         { role: 'system', content: '你是专业的助手，擅长分析和处理各种任务。' },
         { role: 'user', content: prompt }

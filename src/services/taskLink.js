@@ -80,14 +80,22 @@ export async function getBugLink(bugId, CH) {
   return { exists: !!b.id, toTask: toTask === '0' ? '' : toTask, status: b.status || '', title: b.title || '' };
 }
 
-/** 需求下已有的任务（来自需求详情的 tasks 字段，时有时无） */
+/**
+ * 需求下已有的任务 + 需求已关联到哪些执行。
+ * 任务列表来自需求详情的 tasks 字段（时有时无）；拿不到就空——不影响创建。
+ */
 export async function getStoryTasks(storyId, CH) {
   const d = await getZentaoJson(`story-view-${storyId}.json?onlybody=yes`, CH);
-  const tasks = (d && d.story && d.tasks) || (d && d.tasks) || {};
-  return Object.values(tasks).flat().map((t) => ({
-    id: String(t.id), name: t.name, assignedTo: t.assignedTo, status: t.status,
-    execution: String(t.execution), consumed: t.consumed, left: t.left
-  }));
+  const tasks = (d && d.tasks) || {};
+  const execs = (d && d.executions) || {};
+  const idsOf = (v) => (Array.isArray(v) ? v.map((x) => (x && typeof x === 'object' ? x.id : x)) : Object.keys(v || {}));
+  return {
+    tasks: Object.values(tasks).flat().map((t) => ({
+      id: String(t.id), name: t.name, assignedTo: t.assignedTo, status: t.status,
+      execution: String(t.execution), consumed: t.consumed, left: t.left
+    })),
+    executionIds: idsOf(execs).map(String)
+  };
 }
 
 /**
@@ -140,4 +148,70 @@ export async function createLinkedTask(link, draft) {
   } catch (err) {
     return { success: false, message: err.message };
   }
+}
+
+/* ───────────────────────── AI 拆分建议 ───────────────────────── */
+
+// 没配 AI（或 AI 出错）时用的通用拆法：不带工时，用户自己填
+export const TEMPLATE_TASKS = [
+  { name: '方案设计', type: 'design', estimate: '' },
+  { name: '开发实现', type: 'devel', estimate: '' },
+  { name: '联调与自测', type: 'devel', estimate: '' },
+  { name: '测试验证', type: 'test', estimate: '' }
+];
+
+const plain = (h) => String(h || '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|li|div)>/gi, '\n').replace(/<[^>]+>/g, ' ')
+  .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
+
+/** 从 AI 的回答里取出任务数组；容忍代码块、前后废话；逐条校验，不合格的丢掉 */
+export function parseSuggestions(text) {
+  const m = String(text || '').match(/\[[\s\S]*\]/);
+  if (!m) return [];
+  let arr;
+  try { arr = JSON.parse(m[0]); } catch { return []; }
+  if (!Array.isArray(arr)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const x of arr) {
+    const name = String((x && (x.name || x.title)) || '').trim().slice(0, 60);
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    const type = TASK_TYPES.includes(x.type) ? x.type : 'devel';
+    const est = Number(x.estimate ?? x.hours);
+    out.push({ name, type, estimate: Number.isFinite(est) && est > 0 && est <= 40 ? Math.round(est * 2) / 2 : '' });
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
+/**
+ * 拆分建议。永远给得出结果：AI 没配置 / 出错 / 返回不合格，都退回通用模板（aiUsed=false，并说明原因）——不影响拆任务本身。
+ * @param {{title:string, spec?:string, verify?:string}} story  spec / verify 可以是 HTML
+ * @param {{ai?:Function|null}} deps  ai(prompt, maxTokens) → 文本；null 表示没配置
+ */
+export async function suggestTasks(story, deps = {}) {
+  const template = { aiUsed: false, tasks: TEMPLATE_TASKS.map((t) => ({ ...t })) };
+  if (!deps.ai) return { ...template, reason: '还没有配置 AI，先用通用模板；去设置里配置后可以让 AI 结合需求内容拆分' };
+  const redact = (t) => String(t || '').replace(/https?:\/\/\S+/gi, '').replace(/(账号|账户|密码|口令|password|passwd|token)\s*[:：=]?\s*\S+/gi, '');
+  const spec = redact(plain(story.spec)).slice(0, 2500);
+  const verify = redact(plain(story.verify)).slice(0, 1200);
+  const prompt = `你在帮软件团队成员把一个需求拆成开发任务。
+
+要求：
+- 只拆需求里明确要做的事，不要编造需求之外的功能；
+- 3~6 个任务，每个任务标题 6~20 个字，动宾结构，具体到这个需求（不要"开发实现"这种空泛的标题）；
+- type 只能取：design（设计）、devel（开发）、test（测试）、study（研究）、discuss（讨论）、ui（界面）；
+- estimate 是预计小时数，0.5 的倍数，一个任务不超过 16；拿不准就给 2~4；
+- 只输出一个 JSON 数组，不要任何解释，形如：[{"name":"…","type":"devel","estimate":4}]
+
+需求标题：${String(story.title || '').slice(0, 120)}
+需求描述：
+${spec || '（无）'}
+验收标准：
+${verify || '（无）'}`;
+  let text;
+  try { text = await deps.ai(prompt, 900); } catch (err) { return { ...template, reason: `AI 暂时不可用（${err.message || '出错'}），先用通用模板` }; }
+  const tasks = parseSuggestions(text);
+  if (tasks.length < 2) return { ...template, reason: 'AI 没有给出可用的拆分，先用通用模板' };
+  return { aiUsed: true, tasks };
 }

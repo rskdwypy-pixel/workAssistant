@@ -27,7 +27,7 @@ globalThis.fetch = async (input, init = {}) => {
   if ((m = url.match(/execution-view-(\d+)\.json/))) return wrap({ execution: { id: m[1], name: '真机拨测看板', project: '39', type: 'sprint' } });
   if ((m = url.match(/bug-view-(\d+)\.json/))) return wrap({ bug: zt.bugs[m[1]] || {} });
   if ((m = url.match(/task-view-(\d+)\.json/))) { const t = zt.tasks.find(x => x.id === m[1]); return wrap({ task: t ? { id: t.id, story: zt.noLink ? '0' : t.story, fromBug: zt.noLink ? '0' : t.fromBug } : {} }); }
-  if ((m = url.match(/story-view-(\d+)\.json/))) return wrap({ story: { id: m[1] }, tasks: { 61: zt.tasks.map(t => ({ id: t.id, name: t.name, assignedTo: 'lijc', status: 'wait', execution: '61', consumed: '0', left: '1' })) } });
+  if ((m = url.match(/story-view-(\d+)\.json/))) return wrap({ story: { id: m[1], title: '需求标题', spec: '<p>支持正则匹配</p>', verify: '<p>验收点</p>' }, executions: { 61: { id: '61' } }, tasks: { 61: zt.tasks.map(t => ({ id: t.id, name: t.name, assignedTo: 'lijc', status: 'wait', execution: '61', consumed: '0', left: '1' })) } });
   if (url.includes('task-ajaxGetTasks')) return new Response(zt.tasks.map(t => `<tr data-id='t${t.id}' data-status='wait' data-assignedTo='lijc'><td><a href='task-view-${t.id}.json'>${t.name}</a></td></tr>`).join(''));
   if ((m = url.match(/task-create-(\d+)-(.*)\.html$/)) && method === 'POST') {
     const h = new Headers(init.headers);
@@ -90,6 +90,21 @@ try {
   const r2d = await tl.createLinkedTask({ executionId: '61', bugId: '404' }, { name: 'x' });
   check('Bug：不存在 → NOT_FOUND', r2d.code === 'NOT_FOUND');
 
+  // ---- AI 拆分建议 ----
+  let seenPrompt = '';
+  const goodAi = async (prompt) => { seenPrompt = prompt; return '好的：\n```json\n[{"name":"设计匹配规则","type":"design","estimate":2},{"name":"实现正则匹配","type":"devel","estimate":6},{"name":"联调验证","type":"test","estimate":"3"}]\n```'; };
+  const sg = await tl.suggestTasks({ title: '需求标题', spec: '<p>支持正则匹配 账号：abc123 密码：xyz 见 http://a.b/c</p>', verify: '<p>验收点</p>' }, { ai: goodAi });
+  check('建议：AI 返回被解析成任务（标题 / 类型 / 工时）', sg.aiUsed && sg.tasks.length === 3 && sg.tasks[1].type === 'devel' && sg.tasks[1].estimate === 6 && sg.tasks[2].estimate === 3, JSON.stringify(sg));
+  check('建议：提示词里去掉了 HTML、链接和账号密码，带上需求标题', !/<p>|http:\/\/|abc123|xyz/.test(seenPrompt) && /需求标题/.test(seenPrompt) && /支持正则匹配/.test(seenPrompt));
+  const noAi = await tl.suggestTasks({ title: 't' }, { ai: null });
+  check('建议：没配置 AI → 通用模板，说明原因，不抛错', !noAi.aiUsed && noAi.tasks.length === 4 && /还没有配置 AI/.test(noAi.reason));
+  const errAi = await tl.suggestTasks({ title: 't' }, { ai: async () => { throw new Error('401'); } });
+  check('建议：AI 报错 → 退回模板并说明，不抛错', !errAi.aiUsed && errAi.tasks.length === 4 && /暂时不可用/.test(errAi.reason));
+  const junk = await tl.suggestTasks({ title: 't' }, { ai: async () => '我没法拆分' });
+  check('建议：AI 回了废话 → 退回模板', !junk.aiUsed && junk.tasks.length === 4);
+  const dup = tl.parseSuggestions('[{"name":"a"},{"name":"a"},{"name":""},{"name":"b","type":"zzz","estimate":99}]');
+  check('解析：去重、丢空标题、非法类型 → devel、工时超限置空', dup.length === 2 && dup[1].type === 'devel' && dup[1].estimate === '');
+
   // ---- 失败形态 ----
   reset();
   zt.rejectAs = '『任务类型』不能为空。';
@@ -113,7 +128,8 @@ try {
   reset();
   const s1 = await call('POST', '/stories/120/tasks', { executionId: '61', tasks: [{ name: '设计', type: 'design' }, { name: '开发' }, { name: '' }] });
   check('接口：需求拆任务逐个创建，空标题那条失败不影响前面', s1.success && s1.data.created === 2 && s1.data.failed === 1 && s1.data.results[2].code === 'INVALID', JSON.stringify(s1.data && s1.data.results.map(r => r.success)));
-  check('接口：需求下任务列表', (await call('GET', '/stories/120/tasks')).data.length === 2);
+  const lst = await call('GET', '/stories/120/tasks');
+  check('接口：需求下任务列表 + 已关联的执行', lst.data.tasks.length === 2 && Array.isArray(lst.data.executionIds));
   const d1 = await call('POST', '/stories/120/tasks', { executionId: '61', tasks: [{ name: '同名' }, { name: '同名' }] });
   check('接口：同一次标题重复 → 400，什么都没建', d1.status === 400 && zt.tasks.length === 2);
   check('接口：空列表 / 超过 20 条 → 400', (await call('POST', '/stories/120/tasks', { executionId: '61', tasks: [] })).status === 400 && (await call('POST', '/stories/120/tasks', { executionId: '61', tasks: Array.from({ length: 21 }, (_, i) => ({ name: 't' + i })) })).status === 400);

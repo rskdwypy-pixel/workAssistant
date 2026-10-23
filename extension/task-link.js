@@ -18,6 +18,7 @@ const TaskLinkApi = {
   bugLink(zid) { return this.request(`/api/bugs/${encodeURIComponent(zid)}/task-link`); },
   bugToTask(zid, body) { return this.post(`/api/bugs/${encodeURIComponent(zid)}/to-task`, body); },
   storyTasks(id) { return this.request(`/api/stories/${encodeURIComponent(id)}/tasks`); },
+  storySuggest(id) { return this.post(`/api/stories/${encodeURIComponent(id)}/tasks/suggest`, {}); },
   storySplit(id, body) { return this.post(`/api/stories/${encodeURIComponent(id)}/tasks`, body); },
   executions() { return this.request('/api/executions'); }
 };
@@ -55,9 +56,14 @@ const TaskLinkDialog = {
       const act = t.dataset.tl;
       if (act === 'close') { if (!this.busy) this.close(); }
       else if (act === 'submit') this.submit();
+      else if (act === 'suggest') this.suggest();
       else if (act === 'add-row') { this.collectRows(); this.ctx.rows.push(this.blankRow()); this.renderStory(); }
       else if (act === 'del-row') { this.collectRows(); this.ctx.rows.splice(Number(t.dataset.i), 1); this.renderStory(); }
       else if (act === 'open-task') { if (typeof openInZentao === 'function') openInZentao('task', t.dataset.id); }
+    });
+    // 换执行：重画提示"需求有没有关联到这个执行"（只在需求拆任务里）
+    el.addEventListener('change', (e) => {
+      if (this.ctx && this.ctx.kind === 'story' && e.target.matches('[data-f="executionId"]')) { this.collectRows(); this.renderStory(); }
     });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && this.isOpen() && !this.busy) this.close(); });
     this.el = el;
@@ -144,6 +150,10 @@ const TaskLinkDialog = {
 
   blankRow(over = {}) { return { name: '', type: 'devel', assignedTo: this.me, estimate: '', deadline: '', ...over }; },
 
+  templateRows() {
+    return [this.blankRow({ name: '方案设计', type: 'design' }), this.blankRow({ name: '开发实现' }), this.blankRow({ name: '联调与自测' }), this.blankRow({ name: '测试验证', type: 'test' })];
+  },
+
   /** @param {{id:string|number,title:string}} story */
   async openForStory(story) {
     this.ensureDom();
@@ -154,9 +164,10 @@ const TaskLinkDialog = {
     this.q('[data-tl-foot]').innerHTML = '';
     this.el.hidden = false;
     const [ex] = await Promise.all([TaskLinkApi.storyTasks(story.id).catch(() => null), this.loadCommon()]);
-    this.ctx.existing = (ex && ex.success && Array.isArray(ex.data)) ? ex.data : [];
+    this.ctx.existing = (ex && ex.success && ex.data && Array.isArray(ex.data.tasks)) ? ex.data.tasks : [];
+    this.ctx.linkedExecs = (ex && ex.success && ex.data && Array.isArray(ex.data.executionIds)) ? ex.data.executionIds : null;   // null：没拿到，不提示
     this.ctx.executionId = this.defaultExec();
-    this.ctx.rows = [this.blankRow({ name: '方案设计', type: 'design' }), this.blankRow({ name: '开发实现' }), this.blankRow({ name: '联调与自测', }), this.blankRow({ name: '测试验证', type: 'test' })];
+    this.ctx.rows = this.templateRows();
     this.renderStory();
   },
 
@@ -178,7 +189,8 @@ const TaskLinkDialog = {
       <div class="tl-form">
         ${existing}
         <label>创建到执行<select data-f="executionId">${this.execOptions(c.executionId)}</select></label>
-        <p class="tl-muted">需求要先在禅道里关联到这个执行（激活状态），任务才会挂在需求下。</p>
+        ${this.linkWarn()}
+        <div class="tl-ai"><button type="button" class="btn-secondary" data-tl="suggest">✨ AI 拆分建议</button><span class="tl-muted" data-tl-ai-msg>${tlEsc(c.aiMsg || '根据需求内容给出拆分，填进下面的表格，你可以随意改')}</span></div>
         <div class="tl-grid-head"><span>标题</span><span>类型</span><span>指派给</span><span>预计</span><span>截止</span><span></span></div>
         ${rows || '<p class="tl-muted">没有任务行，点下面「添加一行」。</p>'}
         <button type="button" class="btn-secondary tl-add" data-tl="add-row">＋ 添加一行</button>
@@ -187,6 +199,36 @@ const TaskLinkDialog = {
       </div>`;
     const total = c.rows.reduce((n, r) => n + (Number(r.estimate) || 0), 0);
     this.q('[data-tl-foot]').innerHTML = `<span class="tl-muted">${c.rows.length} 个任务 · 合计 ${Math.round(total * 10) / 10}h</span><span class="af-spacer"></span><button type="button" class="btn-secondary" data-tl="close">${c.results.some(r => r.success) && !c.rows.length ? '完成' : '取消'}</button>${c.rows.length ? `<button type="button" class="btn-primary" data-tl="submit">创建 ${c.rows.length} 个任务</button>` : ''}`;
+  },
+
+  /** 所选执行没关联这个需求时的提示（任务能建，但不会挂在需求下） */
+  linkWarn() {
+    const c = this.ctx;
+    if (!c.linkedExecs || !c.executionId) return '<p class="tl-muted">需求要先在禅道里关联到这个执行（激活状态），任务才会挂在需求下。</p>';
+    return c.linkedExecs.includes(String(c.executionId))
+      ? '<p class="tl-muted">✓ 需求已关联到这个执行。</p>'
+      : '<p class="tl-warn">这个需求还没有关联到所选执行：任务能建，但不会挂在需求下。请先在禅道的执行里「关联需求」，或换一个已关联的执行。</p>';
+  },
+
+  /** AI 拆分建议：填进表格（保留手填的执行和已输入的内容不丢——只替换任务行）。没配 AI / 出错会得到通用模板，不影响使用 */
+  async suggest() {
+    if (this.busy) return;
+    this.collectRows();
+    const c = this.ctx;
+    const edited = c.rows.some(r => r.name.trim() && !this.templateRows().some(t => t.name === r.name.trim()));
+    if (edited && typeof Confirm !== 'undefined') {
+      const ok = await Confirm.show('替换任务行', '表格里已有你填写的任务，AI 拆分建议会把它们替换掉。继续吗？', '替换', '取消');
+      if (!ok) return;
+    }
+    this.setBusy(true);
+    const msgEl = this.q('[data-tl-ai-msg]'); if (msgEl) msgEl.textContent = 'AI 正在拆分…';
+    let r;
+    try { r = await TaskLinkApi.storySuggest(c.story.id); } catch (e) { r = { success: false, message: e.message || '网络错误' }; }
+    this.setBusy(false);
+    if (!r.success) { c.aiMsg = `获取建议失败：${r.message || ''}`; return this.renderStory(); }
+    c.rows = r.data.tasks.map(t => this.blankRow({ name: t.name, type: t.type, estimate: t.estimate === '' ? '' : String(t.estimate) }));
+    c.aiMsg = r.data.aiUsed ? `AI 给出 ${c.rows.length} 个任务，请检查后再创建` : (r.data.reason || '用了通用模板');
+    this.renderStory();
   },
 
   collectRows() {

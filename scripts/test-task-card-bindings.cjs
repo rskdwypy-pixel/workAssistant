@@ -46,7 +46,8 @@ function setup() {
     const onTitleClick = () => {};
     const showTaskDetail = () => {};
     const syncTaskToZentao = () => {};
-    ${extract(['escapeHtml', 'resetListenerScope', 'createTaskCard', 'initTaskMultiSelect', 'updateTaskMultiSelectDisplay'])}
+    const openInZentao = (t, id) => { (window.__calls.opened = window.__calls.opened || []).push([t, id]); };
+    ${extract(['escapeHtml', 'originChipsHTML', 'resetListenerScope', 'createTaskCard', 'initTaskMultiSelect', 'updateTaskMultiSelectDisplay'])}
     ${fs.readFileSync(path.join(EXT, 'attachments.js'), 'utf8')}
     window.__api = { createTaskCard, initTaskMultiSelect };
   `);
@@ -83,6 +84,21 @@ function main() {
     list.appendChild(card);
     const opts = [...doc.querySelectorAll('.priority-menu-t952 .priority-option')].map(o => o.dataset.priority).join(',');
     check('重新渲染后菜单选项反映新优先级（不再停留在第一次）', opts === '1,3,4', opts);
+  }
+
+  // ============ 来源标签：需求 / Bug ============
+  {
+    const win = setup();
+    const doc = win.document;
+    const mk = (extra) => win.__api.createTaskCard({ id: 'tx', title: 't', status: 'todo', priority: 3, progress: 0, createdAt: new Date().toISOString(), ...extra });
+    check('没有来源的任务不显示来源标签', mk({}).querySelectorAll('.task-origin').length === 0);
+    const card = mk({ storyId: '165', storyTitle: '某需求', fromBug: '88' });
+    doc.body.appendChild(card);
+    const chips = [...card.querySelectorAll('.task-origin')];
+    check('有来源需求 / Bug：显示「需求 #165」「Bug #88」', chips.map(c => c.textContent).join('|') === '需求 #165|Bug #88');
+    chips[0].dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+    chips[1].dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+    check('点标签在禅道打开对应的需求 / Bug（不触发卡片的其它点击）', JSON.stringify(win.__calls.opened) === JSON.stringify([['story', '165'], ['bug', '88']]));
   }
 
   // ============ 指派人下拉：弹窗反复打开后仍能正常展开 ============

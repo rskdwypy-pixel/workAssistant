@@ -2497,6 +2497,14 @@ function renderTasks() {
   document.getElementById('doneColumnCount').textContent = doneTasks.length;
 }
 
+// 任务卡片上的「来源」标签：这个任务是从哪个需求拆出来的 / 从哪个 Bug 转来的（数据来自禅道，同步时带下来）
+function originChipsHTML(task) {
+  const chips = [];
+  if (task.storyId) chips.push(`<a href="#" class="task-origin" data-origin="story" data-id="${escapeHtml(task.storyId)}" title="${escapeHtml(task.storyTitle || '来源需求')}（点击在禅道打开）">需求 #${escapeHtml(task.storyId)}</a>`);
+  if (task.fromBug) chips.push(`<a href="#" class="task-origin" data-origin="bug" data-id="${escapeHtml(task.fromBug)}" title="来源 Bug（点击在禅道打开）">Bug #${escapeHtml(task.fromBug)}</a>`);
+  return chips.join('');
+}
+
 // 创建任务卡片
 function createTaskCard(task) {
   const card = document.createElement('div');
@@ -2602,6 +2610,7 @@ function createTaskCard(task) {
           ${attachmentBadgeHTML(task)}
         </div>
         <button type="button" class="execution-tag execution-tag-btn${task.executionName ? '' : ' is-empty'}" data-exec-task="${escapeHtml(task.id)}" title="点击修改所属执行" style="margin-top: 4px;">${task.executionName ? escapeHtml(task.executionName) : '＋ 设置执行'}</button>
+        ${originChipsHTML(task)}
       </div>
       ${priorityHTML}
     </div>
@@ -2787,6 +2796,15 @@ function createTaskCard(task) {
       openInZentao('task', task.zentaoId);
     });
   }
+
+  // 来源标签（需求 / Bug）：在禅道里打开
+  card.querySelectorAll('.task-origin').forEach((chip) => {
+    chip.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openInZentao(chip.dataset.origin, chip.dataset.id);
+    });
+  });
 
   // 同步到禅道按钮点击事件
   const syncBtn = card.querySelector('.sync-to-zentao-btn');

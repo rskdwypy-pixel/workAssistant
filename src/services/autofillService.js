@@ -382,6 +382,12 @@ async function writeWorks({ date, entries, history, CH, ai, rng }) {
   });
 }
 
+/** 补填写内容用「生成报告」选的那个模型（没单独选就退回默认模型） */
+async function reportModelAI() {
+  const { generateResponse } = await import('../ai/openai.js');
+  return (prompt, maxTokens) => generateResponse(prompt, maxTokens, 'report');
+}
+
 const aiAvailable = () => !!(config.ai.apiKey && config.ai.apiKey.trim());
 
 /* ───────────────────────── 方案（预览） ───────────────────────── */
@@ -450,7 +456,7 @@ async function buildPlan(opts = {}, deps = {}) {
     history: historyDates, maxDaysPerTask: deps.maxDaysPerTask
   });
 
-  const ai = deps.ai !== undefined ? deps.ai : (aiAvailable() ? (await import('../ai/openai.js')).generateResponse : null);
+  const ai = deps.ai !== undefined ? deps.ai : (aiAvailable() ? await reportModelAI() : null);
   let aiUsed = false;
   const queue = [...days];
   await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
@@ -484,7 +490,7 @@ async function rewriteWorks({ planId, date, entries, seed } = {}, deps = {}) {
   const tasks = await fetchPoolTasks(CH);
   const byId = new Map(tasks.map(t => [t.id, t]));
   const history = deps.history || myEffortsByTask();
-  const ai = deps.ai !== undefined ? deps.ai : (aiAvailable() ? (await import('../ai/openai.js')).generateResponse : null);
+  const ai = deps.ai !== undefined ? deps.ai : (aiAvailable() ? await reportModelAI() : null);
   const es = list.map(e => ({ taskId: String(e.taskId), taskName: (byId.get(String(e.taskId)) || {}).name || '', execName: (byId.get(String(e.taskId)) || {}).execName || '', hours: Number(e.hours) || 0 }));
   return writeWorks({ date, entries: es, history, CH, ai, rng: mulberry32(seedFrom(`rewrite|${date}|${seed || Date.now()}`)) });
 }

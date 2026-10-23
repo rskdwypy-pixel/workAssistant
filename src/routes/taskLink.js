@@ -4,12 +4,15 @@
  *   GET  /api/bugs/:zid/task-link      Bug 是否已转过任务 {toTask, status}
  *   POST /api/bugs/:zid/to-task        Bug 转任务 {executionId, name, type, pri, assignedTo, estimate, deadline, desc}
  *   GET  /api/stories/:id/tasks        需求下已有的任务
+ *   POST /api/stories/:id/tasks/suggest 拆分建议（AI 用「生成报告」选的模型；没配 AI 或出错退回通用模板，永远有结果）
  *   POST /api/stories/:id/tasks        需求拆任务 {executionId, tasks:[{name,…}]}，逐个创建，返回每一条的结果（成功的不回滚）
  *
  * :zid 是禅道里的 Bug 编号（不是本地 ID）。创建成功后顺带刷新本地任务缓存，看板马上能看到。
  */
 import express from 'express';
 import * as taskLink from '../services/taskLink.js';
+import { config } from '../config.js';
+import * as storyService from '../services/storyService.js';
 import { getZentaoCookies, cookiesToString, syncMyTasks } from '../services/zentaoService.js';
 
 const router = express.Router();
@@ -42,6 +45,18 @@ router.get('/stories/:id/tasks', async (req, res) => {
   try {
     const CH = cookiesToString(await getZentaoCookies());
     res.json({ success: true, data: await taskLink.getStoryTasks(req.params.id, CH) });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/stories/:id/tasks/suggest', async (req, res) => {
+  if (!idOk(req.params.id)) return res.status(400).json({ success: false, message: '需求编号不正确' });
+  try {
+    const story = await storyService.getStory(req.params.id);
+    const hasAi = !!(config.ai.apiKey && config.ai.apiKey.trim());
+    const ai = hasAi ? async (prompt, maxTokens) => (await import('../ai/openai.js')).generateResponse(prompt, maxTokens, 'report') : null;
+    res.json({ success: true, data: await taskLink.suggestTasks({ title: story.title, spec: story.specHtml || story.specRaw, verify: story.verifyHtml || story.verifyRaw }, { ai }) });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
