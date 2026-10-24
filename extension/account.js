@@ -72,12 +72,17 @@ const Account = {
     const s = this.state;
     // 连不上后台 / 后台不认这个插件：明确提示（以前静默停在默认界面，看起来像旧版插件）
     if (!s) return this.showBackendNotice();
+    // 首次安装引导 / 更新说明：先按真实状态定好走到哪一步（登录卡片要知道自己是不是第 1 步）
+    if (typeof Onboarding !== 'undefined') await Onboarding.init(s);
     // 报告页可能在状态读回来之前就按已登录渲染了
     if (s.state === 'unconfigured' && typeof TabSwitcher !== 'undefined' && TabSwitcher.currentMode === 'report' && typeof ReportPage !== 'undefined') ReportPage.show();
     if (s.state === 'unconfigured' && storageGet(ACCOUNT_SKIP_KEY) !== '1') this.showLogin({ mode: 'first' });
     else if (s.state === 'invalid') this.showLogin({ mode: 'relogin' });
-    if (s.state === 'ok' && !s.aiConfigured && storageGet(ACCOUNT_AI_HINT_KEY) === '1') this.showAiHint();
+    // 引导里有「配置 AI」这一步，不再重复弹这条小提示
+    const guiding = typeof Onboarding !== 'undefined' && Onboarding.active;
+    if (s.state === 'ok' && !s.aiConfigured && !guiding && storageGet(ACCOUNT_AI_HINT_KEY) === '1') this.showAiHint();
     storageDel(ACCOUNT_AI_HINT_KEY);
+    if (typeof Onboarding !== 'undefined') Onboarding.show();
     // 定期与回到页面时刷新状态（密码失效、VPN 断开能及时反映到头像上）
     setInterval(() => this.refresh(), 5 * 60 * 1000);
     let lastFocus = Date.now();
@@ -277,6 +282,7 @@ const Account = {
       <div class="login-card" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
         <div class="login-view" data-view="form">
           <div class="login-brand" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
+          ${mode === 'first' && typeof Onboarding !== 'undefined' ? Onboarding.stepBarHtml() : ''}
           <h2 id="loginTitle">${titles[mode]}</h2>
           <p class="login-sub">禅道助手的任务、Bug、报告都来自禅道</p>
           ${notice ? `<div class="login-notice ${mode === 'relogin' ? 'is-warn' : ''}">${accountEsc(notice)}</div>` : ''}
@@ -332,10 +338,12 @@ const Account = {
       storageSet(ACCOUNT_SKIP_KEY, '1');
       this.closeLogin();
       if (typeof Toast !== 'undefined') Toast.info('已进入本地模式：任务只保存在本机，随时可点右上角「登录禅道」');
+      if (typeof Onboarding !== 'undefined') Onboarding.onLoginSkipped();
     } else if (act === 'cancel') {
       this.closeLogin();
     } else if (act === 'import') {
       this.closeLogin();
+      if (typeof Onboarding !== 'undefined') Onboarding.onImport();
       if (typeof openSettingsModal === 'function') openSettingsModal('p-data');
     }
   },
@@ -513,6 +521,7 @@ const Account = {
         return;
       }
       ACCOUNT_RESET_STORAGE.forEach(storageDel);
+      if (typeof Onboarding !== 'undefined') await Onboarding.reset();   // 重置后当新用户，再走一遍引导
       this.reload();
     });
     setTimeout(() => word.focus(), 50);

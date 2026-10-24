@@ -745,6 +745,14 @@ router.post('/config', async (req, res) => {
         if (bad.length) return res.status(400).json({ success: false, message: `${label}的格式不对：${bad.slice(0, 3).join('、')}（写法：2026-10-01~2026-10-07, 2026-12-25）` });
       }
     }
+    // 早间提醒 / 日报时间：0~23 的整数（以前写成 25 或空会让定时表达式失效）
+    for (const [label, v] of [['早间提醒时间', morningHour], ['日报时间', eveningHour]]) {
+      if (v === undefined) continue;
+      const n = Number(v);
+      if (String(v).trim() === '' || !Number.isInteger(n) || n < 0 || n > 23) {
+        return res.status(400).json({ success: false, message: `${label}应是 0~23 之间的整数` });
+      }
+    }
     if (workHours !== undefined && !(parseFloat(workHours) > 0 && parseFloat(workHours) <= 24)) {
       return res.status(400).json({ success: false, message: '每日标准工时应大于 0 且不超过 24 小时' });
     }
@@ -778,6 +786,10 @@ router.post('/config', async (req, res) => {
     }
     if (aiModel !== undefined) configModule.config.ai.model = String(aiModel).trim();
     if (aiReportModel !== undefined) configModule.config.ai.reportModel = String(aiReportModel || '').trim();
+    const hourChanged = {
+      morning: morningHour !== undefined && parseInt(morningHour) !== configModule.config.schedule.morningHour,
+      evening: eveningHour !== undefined && parseInt(eveningHour) !== configModule.config.schedule.eveningHour
+    };
     if (morningHour !== undefined) configModule.config.schedule.morningHour = parseInt(morningHour);
     if (eveningHour !== undefined) configModule.config.schedule.eveningHour = parseInt(eveningHour);
     if (af) Object.assign(configModule.config.autofill, af);
@@ -815,6 +827,9 @@ router.post('/config', async (req, res) => {
     if (webhookType !== undefined) envUpdates.WEBHOOK_TYPE = webhookType;
 
     configModule.updateEnvFile(envUpdates);
+    // 时间改了就按新时间重建定时（以前要重启后端才生效）
+    if (hourChanged.morning) reminderService.rescheduleReminder();
+    if (hourChanged.evening) summaryService.rescheduleSummary();
     // 各服务商记住的地址与模型（真身在后端）
     if (client && typeof client === 'object') {
       const { saveClientSettings } = await import('../services/clientSettings.js');

@@ -55,6 +55,8 @@ const SUITES = [
   'test-config-store-ui',
   'test-account.mjs',
   'test-account-ui',
+  'test-onboarding.mjs',
+  'test-onboarding-ui',
   'test-bug-board-ui',
   'test-installer',
   'test-updater.mjs',

@@ -65,6 +65,8 @@ function dayKind(s) {
 /** 这天不用上班吗（周末 / 节假日；调休上班的周末不算） */
 const isRestDay = (s) => { const k = dayKind(s); return k === 'weekend' || k === 'holiday'; };
 const isWorkday = (s) => !isRestDay(s);
+/** 今天（本地时间）是休息日吗 */
+const isRestToday = (now = new Date()) => isRestDay(ymd(now));
 const restReason = (s) => (dayKind(s) === 'holiday' ? '节假日' : '周末');
 
-export { parseDateList, dayKind, isRestDay, isWorkday, restReason };
+export { parseDateList, dayKind, isRestDay, isRestToday, isWorkday, restReason };

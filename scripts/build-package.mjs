@@ -52,6 +52,7 @@ cpSync(join(ROOT, 'extension'), join(stage, 'extension'), { recursive: true, fil
 for (const f of SCRIPTS) cpSync(join(ROOT, 'scripts', f), join(stage, 'scripts', f));
 cpSync(join(ROOT, 'scripts', 'bin'), join(stage, 'scripts', 'bin'), { recursive: true });
 cpSync(join(ROOT, 'package.json'), join(stage, 'package.json'));
+cpSync(join(ROOT, 'CHANGELOG.md'), join(stage, 'CHANGELOG.md'));   // 更新后插件展示「更新内容」用
 cpSync(join(ROOT, 'package-lock.json'), join(stage, 'package-lock.json'));
 writeFileSync(join(stage, '.wa-package'), JSON.stringify({ app: 'workassistant', version, node: NODE_VERSION, builtAt: new Date().toISOString() }, null, 2) + '\n');
 

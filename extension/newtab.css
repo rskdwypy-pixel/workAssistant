@@ -3545,3 +3545,38 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
 .doc-attach-size { color: var(--text-muted); }
 .doc-attach-list button { border: 0; background: transparent; cursor: pointer; color: var(--text-muted); }
 .doc-attach-list button:hover { color: var(--danger); }
+
+/* ==================== 首次安装引导 / 更新说明 ==================== */
+.ob-steps { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; }
+.ob-dots { display: inline-flex; gap: 6px; }
+.ob-dots i { width: 22px; height: 4px; border-radius: 2px; background: var(--border, rgba(0,0,0,.12)); }
+.ob-dots i.is-done { background: var(--primary); opacity: .45; }
+.ob-dots i.is-current { background: var(--primary); }
+.ob-card .login-field input, .ob-card .login-field textarea, .ob-select {
+  width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--border, rgba(0,0,0,.15)); border-radius: 10px;
+  background: var(--bg-surface, #fff); color: var(--text-primary); font: inherit; font-weight: 400;
+}
+.ob-card .login-field textarea { resize: vertical; }
+.ob-card .login-field input:focus, .ob-card .login-field textarea:focus, .ob-select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(99, 102, 241, .15); }
+.ob-keylink { margin-left: 8px; font-weight: 400; color: var(--primary); }
+.ob-test { display: flex; align-items: center; gap: 10px; min-height: 32px; }
+.ob-test-btn { border: 1px solid var(--primary); background: none; color: var(--primary); border-radius: 8px; padding: 5px 12px; cursor: pointer; font-size: 13px; }
+.ob-test-btn:disabled { opacity: .6; cursor: wait; }
+.ob-test-result { font-size: 13px; color: var(--text-secondary); }
+.ob-test-result.is-ok { color: #15803d; }
+.ob-test-result.is-bad { color: #dc2626; }
+.ob-hour { display: inline-flex; align-items: center; gap: 8px; font-weight: 400; }
+.ob-hour input { width: 80px !important; }
+.ob-note { margin: 0; font-size: 12px; line-height: 1.6; color: var(--text-secondary); }
+.ob-primary { width: auto; padding-left: 20px; padding-right: 20px; }
+.ob-primary:disabled { opacity: .5; cursor: not-allowed; }
+.ob-card .login-foot { margin-top: 4px; }
+.ob-notes { max-height: min(56vh, 420px); overflow-y: auto; margin: 12px 0; padding-right: 4px; font-size: 13px; line-height: 1.65; }
+.ob-ver h3 { margin: 14px 0 4px; font-size: 15px; }
+.ob-ver:first-child h3 { margin-top: 0; }
+.ob-ver h3 small { margin-left: 8px; font-weight: 400; color: var(--text-muted); font-size: 12px; }
+.ob-ver h4 { margin: 8px 0 2px; font-size: 13px; color: var(--primary); }
+.ob-ver ul { margin: 0; padding-left: 18px; }
+.ob-ver li { margin: 3px 0; color: var(--text-primary); }
+.ob-ver code { font-size: 12px; background: var(--bg-base); padding: 1px 4px; border-radius: 4px; }
+.ob-card:has(.ob-notes) { width: min(480px, 100%); }

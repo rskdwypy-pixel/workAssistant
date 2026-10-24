@@ -19,6 +19,7 @@ const ALLOWED = {
   taskDraft: '未提交的表单草稿（任务）',
   bug_draft: '未提交的表单草稿（Bug）',
   waLoginSkipped: '界面偏好：点过「稍后再说」',
+  waOnboarding: '界面偏好：新手引导进度 / 已看过的更新说明版本（正式环境存 chrome.storage.local，这里只是无扩展环境的退路）',
   waAiHintPending: '界面偏好：登录后提示配置 AI 一次',
   // 设置：真身在后端，浏览器里只留缓存 + 后端地址（见 extension/config-store.js）
   waSettingsCache: '设置的缓存（以后端为准，静默校对）',

@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { config } from '../config.js';
 import { getTodayTasks, getAllTasks, updateTask } from './taskManager.js';
+import { isRestToday } from '../utils/workCalendar.js';
 import { sendMorningReminder, sendTaskReminder } from '../utils/webhook.js';
 
 /** Webhook 推送失败不能挡住「已提醒」标记：否则每次检查都会再弹一遍系统通知、再推一遍 */
@@ -12,16 +13,16 @@ async function safeTaskReminder(task, triggerType) {
   }
 }
 
+
 let reminderTask = null;
 let customReminderInterval = null;
 
 async function checkTaskReminders() {
   try {
     const now = new Date();
-    const dayOfWeek = now.getDay(); // 0=周日, 6=周六
 
-    // 周末不检查任务提醒
-    if (dayOfWeek === 0 || dayOfWeek === 6) {
+    // 周末 / 节假日不检查任务提醒（调休上班的周末照常）
+    if (isRestToday(now)) {
       return;
     }
 
@@ -117,11 +118,10 @@ async function morningReminder(skipWeekendCheck = false) {
     console.log('🌅 执行早间提醒...');
 
     const now = new Date();
-    const dayOfWeek = now.getDay(); // 0=周日, 6=周六
 
-    // 周末不提醒（除非是手动测试）
-    if (!skipWeekendCheck && (dayOfWeek === 0 || dayOfWeek === 6)) {
-      console.log('🛌 周末跳过早间提醒');
+    // 周末 / 节假日不提醒（除非是手动测试）
+    if (!skipWeekendCheck && isRestToday(now)) {
+      console.log('🛌 休息日跳过早间提醒');
       return;
     }
 
@@ -170,6 +170,19 @@ function startReminder() {
 }
 
 /**
+ * 早间提醒时间改了：按新的时间重建定时（保存设置时调用，不用重启后端）。
+ * 只重建早间提醒；每分钟一次的任务提醒检查不受影响。没启动过就什么都不做。
+ */
+function rescheduleReminder() {
+  if (!reminderTask) return;
+  reminderTask.stop();
+  reminderTask = null;
+  const { morningHour } = config.schedule;
+  reminderTask = cron.schedule(`0 ${morningHour} * * *`, morningReminder, { scheduled: true, timezone: 'Asia/Shanghai' });
+  console.log(`⏰ 早间提醒时间已更新: 每天 ${morningHour}:00`);
+}
+
+/**
  * 停止定时提醒
  */
 function stopReminder() {
@@ -194,6 +207,7 @@ async function triggerMorningReminder() {
 export {
   startReminder,
   stopReminder,
+  rescheduleReminder,
   triggerMorningReminder,
   sendSystemNotification
 };

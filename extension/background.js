@@ -862,8 +862,24 @@ async function checkSelfUpdate() {
   return { updated: true, version: onDisk };
 }
 
+/**
+ * 记下「首次安装」，供新标签页决定要不要显示新手引导（见 onboarding.js）：
+ *   install                          全新安装 → 要引导
+ *   update 且还没有记录（老用户升级）→ 不引导，只记下当前版本
+ * 已经有记录就不动：更新说明由新标签页比对 seenVersion 决定。
+ */
+async function recordOnboarding(reason) {
+  const KEY = 'waOnboarding';
+  const version = chrome.runtime.getManifest().version;
+  const { [KEY]: cur } = await chrome.storage.local.get(KEY);
+  if (cur) return;
+  if (reason === 'install') await chrome.storage.local.set({ [KEY]: { introDone: false, step: 'zentao', seenVersion: version } });
+  else if (reason === 'update') await chrome.storage.local.set({ [KEY]: { introDone: true, seenVersion: version } });
+}
+
 chrome.runtime.onInstalled.addListener(async (details) => {
   chrome.alarms.create(SELF_UPDATE_ALARM, { periodInMinutes: 5 });
+  await recordOnboarding(details.reason).catch(() => { /* 记不上就当没有：新标签页会按登录 / AI 状态判断 */ });
   if (details.reason !== 'update') return;
   const { [RELOAD_TABS_KEY]: tabs } = await chrome.storage.local.get(RELOAD_TABS_KEY);
   await chrome.storage.local.remove(RELOAD_TABS_KEY);

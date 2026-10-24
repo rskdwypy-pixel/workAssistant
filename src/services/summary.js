@@ -8,6 +8,8 @@ import { sendSystemNotification } from './reminder.js';
 import { v4 as uuidv4 } from 'uuid';
 import { getAllTasks } from './taskManager.js';
 import { getBugs } from './bugManager.js';
+import { isRestToday } from '../utils/workCalendar.js';
+
 
 let summaryTask = null;
 let weeklyTask = null;
@@ -18,11 +20,9 @@ let weeklyTask = null;
 async function fridayWeeklySummary() {
   try {
     const now = new Date();
-    const dayOfWeek = now.getDay(); // 0=周日, 1=周一, ..., 5=周五
-
-    // 只在周五执行
-    if (dayOfWeek !== 5) {
-      console.log('📅 今天不是周五，跳过周报生成');
+    // 只在周五执行；周五是节假日就不发
+    if (now.getDay() !== 5 || isRestToday(now)) {
+      console.log('📅 今天不是工作日周五，跳过周报生成');
       return;
     }
 
@@ -56,22 +56,21 @@ async function fridayWeeklySummary() {
 async function eveningSummary() {
   try {
     const now = new Date();
-    const dayOfWeek = now.getDay(); // 0=周日, 6=周六
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+    const restDay = isRestToday(now);   // 周末 / 节假日（调休上班的周末不算）：报告照常生成，但不弹通知
 
-    console.log('🌙 执行晚间日报...', `isWeekend=${isWeekend}`);
+    console.log('🌙 执行晚间日报...', `restDay=${restDay}`);
 
     // 启用禅道：生成报告页的日报（周末仅在有人有工作记录时；当月最后一个工作日顺带生成月报）
     if (config.zentao.enabled) {
       const { runEveningReports } = await import('./reportCenter.js');
       const r = await runEveningReports(now);
-      if (r) await sendSystemNotification('🌙 日报已生成', `今日工时 ${r.mine.hours}h，全员 ${r.team.totalHours}h（${r.team.activeCount}/${r.team.members.length} 人）`);
+      if (r && !restDay) await sendSystemNotification('🌙 日报已生成', `今日工时 ${r.mine.hours}h，全员 ${r.team.totalHours}h（${r.team.activeCount}/${r.team.members.length} 人）`);
       console.log('✅ 晚间日报完成（报告页）');
       return;
     }
 
     // 如果是周末，检查今天是否有任务更新
-    if (isWeekend) {
+    if (restDay) {
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
       const allTasks = await getAllTasks();
 
@@ -180,10 +179,10 @@ async function eveningSummary() {
 
     // 发送系统通知
     const message = `今日完成 ${doneTasks.length} 项任务${summary.tomorrowFocus?.length > 0 ? `，明日重点: ${summary.tomorrowFocus.length} 项` : ''}`;
-    await sendSystemNotification('🌙 晚安！工作日报', message);
-
-    // 发送Webhook
-    await sendEveningSummary(summary);
+    if (!restDay) {
+      await sendSystemNotification('🌙 晚安！工作日报', message);
+      await sendEveningSummary(summary);
+    }
 
     console.log('✅ 晚间日报完成');
   } catch (err) {
@@ -223,6 +222,18 @@ function startSummary() {
   } else {
     console.log('⚠️  定时周报已在运行');
   }
+}
+
+/**
+ * 日报时间改了：按新的时间重建晚间日报定时（保存设置时调用，不用重启后端）。没启动过就什么都不做。
+ */
+function rescheduleSummary() {
+  if (!summaryTask) return;
+  summaryTask.stop();
+  summaryTask = null;
+  const { eveningHour } = config.schedule;
+  summaryTask = cron.schedule(`0 ${eveningHour} * * *`, eveningSummary, { scheduled: true, timezone: 'Asia/Shanghai' });
+  console.log(`⏰ 日报时间已更新: 每天 ${eveningHour}:00`);
 }
 
 /**
@@ -504,6 +515,7 @@ async function deleteReport(id) {
 
 export {
   startSummary,
+  rescheduleSummary,
   stopSummary,
   triggerEveningSummary,
   getHistoryList,
