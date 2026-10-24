@@ -3585,3 +3585,6 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
 .ob-kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0 0 14px; font-size: 13px; }
 .ob-kv dt { color: var(--text-secondary); }
 .ob-kv dd { margin: 0; color: var(--text-primary); word-break: break-all; }
+.ob-card { position: relative; }
+.ob-x { position: absolute; top: 10px; right: 12px; width: 28px; height: 28px; border: none; border-radius: 50%; background: none; color: var(--text-muted); font-size: 20px; line-height: 1; cursor: pointer; }
+.ob-x:hover { background: var(--bg-base); color: var(--text-primary); }

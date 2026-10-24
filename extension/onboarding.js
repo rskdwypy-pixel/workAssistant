@@ -79,6 +79,14 @@ const Onboarding = {
       rec = fresh ? { introDone: false, step: 'zentao', seenVersion: ver } : { introDone: true, seenVersion: ver };
       await ObStore.set(rec);
     }
+    // 记录写着「要引导」，但这个环境其实早就配好了（重新加载 / 重装插件时 Chrome 也会报 install）：不是新用户，不引导。
+    // 判断只在引导还没展示过的时候做——引导中途登录后页面刷新回来，不能被当成老用户。
+    if (!rec.introDone && !rec.shown && !rec.review) {
+      const st = accountState || {};
+      if (st.state !== 'unconfigured' || st.aiConfigured) rec = { ...rec, introDone: true };
+      else rec = { ...rec, shown: true };
+      await ObStore.set(rec);
+    }
     this.rec = rec;
     this.active = !rec.introDone;
     this.step = OB_STEPS.includes(rec.step) ? rec.step : 'zentao';
@@ -165,14 +173,21 @@ const Onboarding = {
     document.getElementById('obOverlay')?.remove();
   },
 
-  mount(html, onKey) {
+  /** 右上角 × 和 Esc：关闭整个引导（不是跳过这一步）。已保存的步骤保留，之后可在 设置 → 关于 重新查看 */
+  async close() {
+    await this.finish();
+    if (typeof Toast !== 'undefined') Toast.info('已关闭新手引导，之后可在 设置 → 关于 里重新查看');
+  },
+
+  mount(html, onClose) {
     this.closeCard();
     const overlay = document.createElement('div');
     overlay.id = 'obOverlay';
     overlay.className = 'login-overlay ob-overlay';
-    overlay.innerHTML = `<div class="login-card ob-card" role="dialog" aria-modal="true" aria-labelledby="obTitle">${html}</div>`;
+    overlay.innerHTML = `<div class="login-card ob-card" role="dialog" aria-modal="true" aria-labelledby="obTitle"><button type="button" class="ob-x" data-ob="x" aria-label="关闭">×</button>${html}</div>`;
     document.body.appendChild(overlay);
-    if (onKey) overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') onKey(e); });
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') onClose(); });
+    overlay.querySelector('[data-ob="x"]').addEventListener('click', () => onClose());
     return overlay;
   },
 
@@ -245,7 +260,7 @@ const Onboarding = {
       <div class="login-foot">
         <button type="button" class="login-link" data-ob="login">${loggedIn ? (s.state === 'ok' ? '切换账号' : '重新登录') : '登录禅道'}</button>
         <button type="button" class="login-submit ob-primary" data-ob="next">下一步</button>
-      </div>`, () => this.next('zentao'));
+      </div>`, () => this.close());
     overlay.addEventListener('click', (e) => {
       const act = e.target.closest('[data-ob]') && e.target.closest('[data-ob]').dataset.ob;
       if (act === 'next') this.next('zentao');
@@ -279,7 +294,7 @@ const Onboarding = {
         <div class="ob-test"><button type="button" class="ob-test-btn" data-ob="test">测试连接</button><span class="ob-test-result" role="status"></span></div>
         <div class="login-error" role="alert"></div>
         ${this.footHtml('ai', '以后再说', '保存并继续')}
-      </form>`, () => this.next('ai'));
+      </form>`, () => this.close());
     const form = overlay.querySelector('form');
     const f = (n) => form.elements[n];
     const save = form.querySelector('[data-ob="save"]');
@@ -391,7 +406,7 @@ const Onboarding = {
         <p class="ob-note">周报固定在每周五 17:00 生成。推送到企业微信 / 钉钉 / 飞书的地址，可在 设置 → 通知推送 里配置。</p>
         <div class="login-error" role="alert"></div>
         ${this.footHtml('schedule', '使用默认', '保存并继续')}
-      </form>`, () => this.next('schedule'));
+      </form>`, () => this.close());
     const form = overlay.querySelector('form');
     this.bindNav(overlay, 'schedule');
     form.addEventListener('submit', (e) => { e.preventDefault(); this.saveSchedule(form); });
@@ -434,7 +449,7 @@ const Onboarding = {
         <p class="ob-note">单个日期或「起~止」范围，多项用逗号分隔。</p>
         <div class="login-error" role="alert"></div>
         ${this.footHtml('holidays', '先不配置，完成', '保存并完成')}
-      </form>`, () => this.next('holidays'));
+      </form>`, () => this.close());
     const form = overlay.querySelector('form');
     this.bindNav(overlay, 'holidays');
     form.addEventListener('submit', (e) => { e.preventDefault(); this.saveHolidays(form); });

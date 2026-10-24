@@ -151,21 +151,21 @@ const type = (win, el, v) => { el.value = v; el.dispatchEvent(new win.Event('inp
 
   // ============ 登录后页面刷新：进度接上 ============
   s = { state: stateOf('ok'), version: '1.6.0' };
-  ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: false, step: 'zentao', seenVersion: '1.6.0' }) }));
+  ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: false, shown: true, step: 'zentao', seenVersion: '1.6.0' }) }));
   await win.Account.init();
   await tick(10);
   check('登录成功刷新后：直接是第 2 步 AI，不再弹登录卡片', !$('loginOverlay') && bar(doc) === '第 2 步 / 共 4 步' && obRec(win).step === 'ai');
   check('引导中不重复弹「AI 未配置」小提示', !doc.querySelector('.account-hint'));
 
   s = { state: stateOf('ok', { aiConfigured: true }), version: '1.6.0' };
-  ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: false, step: 'ai', seenVersion: '1.6.0' }) }));
+  ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: false, shown: true, step: 'ai', seenVersion: '1.6.0' }) }));
   await win.Account.init();
   await tick(10);
   check('AI 已经配好（自己去设置里配的 / 导入的）：跳过 AI 步，直接第 3 步', bar(doc) === '第 3 步 / 共 4 步' && obRec(win).step === 'schedule');
 
   // AI 步「以后再说」
   s = { state: stateOf('ok'), version: '1.6.0' };
-  ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: false, step: 'ai', seenVersion: '1.6.0' }) }));
+  ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: false, shown: true, step: 'ai', seenVersion: '1.6.0' }) }));
   await win.Account.init();
   await tick(10);
   $('obOverlay').querySelector('[data-ob="skip"]').click();
@@ -179,14 +179,45 @@ const type = (win, el, v) => { el.value = v; el.dispatchEvent(new win.Event('inp
   check('节假日先不配置：直接完成', !$('obOverlay') && obRec(win).introDone === true);
   s.settingsOpened = '';
 
-  // Esc 等同跳过
+  // 右上角 × / Esc：关闭整个引导
   s = { state: stateOf('ok'), version: '1.6.0' };
-  ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: false, step: 'schedule', seenVersion: '1.6.0' }) }));
+  ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: false, shown: true, step: 'schedule', seenVersion: '1.6.0' }) }));
   await win.Account.init();
   await tick(10);
+  check('每张引导卡片右上角有 ×', !!$('obOverlay').querySelector('.ob-x'));
   $('obOverlay').dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   await tick(10);
-  check('按 Esc 等同跳过当前步', bar(doc) === '第 4 步 / 共 4 步');
+  check('按 Esc：关闭整个引导（不是跳到下一步），记为已看过', !$('obOverlay') && !win.Onboarding.active && obRec(win).introDone === true);
+  ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: false, shown: true, step: 'ai', seenVersion: '1.6.0' }) }));
+  await win.Account.init();
+  await tick(10);
+  $('obOverlay').querySelector('.ob-x').click();
+  await tick(10);
+  check('点 ×：关闭引导，之后不再出现', !$('obOverlay') && obRec(win).introDone === true && s.toasts.some(t => /重新查看/.test(t)));
+  ({ win, doc, $ } = setup(s, { waOnboarding: win.localStorage.getItem('waOnboarding') }));
+  await win.Account.init();
+  await tick(10);
+  check('关闭后再打开：不再弹', !$('obOverlay'));
+
+  // 已经配置过的环境（重新加载插件被当成 install）：不引导
+  s = { state: stateOf('ok', { aiConfigured: true }), version: '1.6.0' };
+  ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: false, step: 'zentao', seenVersion: '1.6.0' }) }));
+  await win.Account.init();
+  await tick(10);
+  check('记录写着要引导，但已登录且配了 AI：不弹引导，记为已完成', !$('obOverlay') && !$('loginOverlay') && !win.Onboarding.active && obRec(win).introDone === true);
+  s = { state: stateOf('ok'), version: '1.6.0' };
+  ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: false, step: 'zentao', seenVersion: '1.6.0' }) }));
+  await win.Account.init();
+  await tick(10);
+  check('已登录（还没配 AI）的环境重新加载插件：同样不当新用户', !$('obOverlay') && obRec(win).introDone === true);
+  s = { state: stateOf('unconfigured'), version: '1.6.0' };
+  ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: false, step: 'zentao', seenVersion: '1.6.0' }) }));
+  await win.Account.init();
+  check('真正的新环境（没登录、没配 AI）：引导，并记下「已展示」', $('loginOverlay') && obRec(win).shown === true && obRec(win).introDone === false);
+  ({ win, doc, $ } = setup({ ...s, state: stateOf('ok') }, { waOnboarding: win.localStorage.getItem('waOnboarding') }));
+  await win.Account.init();
+  await tick(10);
+  check('引导中途登录、页面刷新回来：继续引导（第 2 步），不被当成老用户', win.Onboarding.active && bar(doc) === '第 2 步 / 共 4 步');
 
   // ============ 老用户 / 导入 / 重置 / 重新查看 ============
   s = { state: stateOf('ok', { aiConfigured: true }), version: '1.6.0' };
@@ -329,7 +360,7 @@ const type = (win, el, v) => { el.value = v; el.dispatchEvent(new win.Event('inp
 
   // 引导进行中不弹更新说明
   s = { state: stateOf('ok', { aiConfigured: true }), version: '1.6.0', changelog: { current: '1.6.0', versions: [ver('1.6.0', 'd', ['x'])] } };
-  ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: false, step: 'schedule', seenVersion: '1.5.2' }) }));
+  ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: false, shown: true, step: 'schedule', seenVersion: '1.5.2' }) }));
   await win.Account.init();
   await tick(20);
   check('引导进行中：只显示引导，不弹更新说明', bar(doc) === '第 3 步 / 共 4 步' && !s.requests.some(r => r.url.startsWith('/api/changelog')));
