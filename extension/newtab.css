@@ -3549,9 +3549,11 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
 /* ==================== 首次安装引导 / 更新说明 ==================== */
 .ob-steps { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; }
 .ob-dots { display: inline-flex; gap: 6px; }
-.ob-dots i { width: 22px; height: 4px; border-radius: 2px; background: var(--border, rgba(0,0,0,.12)); }
-.ob-dots i.is-done { background: var(--primary); opacity: .45; }
-.ob-dots i.is-current { background: var(--primary); }
+.ob-dot { width: 34px; height: 14px; padding: 5px 0; border: none; background: none; cursor: pointer; position: relative; }
+.ob-dot::after { content: ''; position: absolute; left: 0; right: 0; top: 5px; height: 4px; border-radius: 2px; background: var(--border, rgba(0,0,0,.12)); transition: background .15s; }
+.ob-dot.is-done::after { background: var(--primary); opacity: .45; }
+.ob-dot.is-current::after { background: var(--primary); }
+.ob-dot:hover::after { background: var(--primary); opacity: .8; }
 .ob-card .login-field input, .ob-card .login-field textarea, .ob-select {
   width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--border, rgba(0,0,0,.15)); border-radius: 10px;
   background: var(--bg-surface, #fff); color: var(--text-primary); font: inherit; font-weight: 400;
@@ -3588,3 +3590,5 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
 .ob-card { position: relative; }
 .ob-x { position: absolute; top: 10px; right: 12px; width: 28px; height: 28px; border: none; border-radius: 50%; background: none; color: var(--text-muted); font-size: 20px; line-height: 1; cursor: pointer; }
 .ob-x:hover { background: var(--bg-base); color: var(--text-primary); }
+.ob-saved { margin: 0; font-size: 12px; color: #15803d; line-height: 1.5; word-break: break-all; }
+.ob-steps { padding-right: 28px; }

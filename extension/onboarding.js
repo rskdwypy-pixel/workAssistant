@@ -17,6 +17,7 @@
 
 const OB_KEY = 'waOnboarding';
 const OB_STEPS = ['zentao', 'ai', 'schedule', 'holidays'];
+const OB_NAMES = { zentao: '连接禅道', ai: '配置 AI', schedule: '报告与推送时间', holidays: '节假日' };
 const OB_WHATS_NEW_MAX = 3;   // 一次最多展示几个版本，更早的折叠
 
 const obEsc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -143,7 +144,7 @@ const Onboarding = {
   barHtml(step) {
     const i = OB_STEPS.indexOf(step);
     return `<div class="ob-steps" aria-label="第 ${i + 1} 步，共 ${OB_STEPS.length} 步"><span>第 ${i + 1} 步 / 共 ${OB_STEPS.length} 步</span>`
-      + `<span class="ob-dots">${OB_STEPS.map((_, k) => `<i class="${k < i ? 'is-done' : k === i ? 'is-current' : ''}"></i>`).join('')}</span></div>`;
+      + `<span class="ob-dots">${OB_STEPS.map((st, k) => `<button type="button" class="ob-dot ${k < i ? 'is-done' : k === i ? 'is-current' : ''}" data-ob-goto="${st}" title="第 ${k + 1} 步：${OB_NAMES[st]}" aria-label="跳到第 ${k + 1} 步：${OB_NAMES[st]}"${k === i ? ' aria-current="step"' : ''}></button>`).join('')}</span></div>`;
   },
 
   /** 页面里该显示什么：引导的当前步骤，或更新说明。登录卡片在时让位 */
@@ -193,9 +194,24 @@ const Onboarding = {
 
   /** 取最新的设置快照（上一步刚保存的也要读到）。后端不通就用缓存 */
   async freshFlat() {
-    if (typeof ConfigStore === 'undefined') return { flat: {}, snap: null };
-    try { await ConfigStore.sync(); } catch { /* 用缓存 */ }
-    return { flat: ConfigStore.flat(), snap: ConfigStore.get() };
+    const hasStore = typeof ConfigStore !== 'undefined';
+    if (hasStore) { try { await ConfigStore.sync(); } catch { /* 用缓存 */ } }
+    let snap = hasStore ? ConfigStore.get() : null;
+    if (hasStore && snap) return { flat: ConfigStore.flat(), snap };
+    // 缓存还没有（页面刚打开、后端慢）：直接向后端要一份，不能让界面空着
+    try {
+      const r = await this.api('/api/config');
+      if (r && r.success && r.data) {
+        snap = r.data;
+        const ai = snap.ai || {}, sc = snap.schedule || {}, c = snap.client || {};
+        return { snap, flat: {
+          apiBaseUrl: ai.apiBaseUrl || '', aiModel: ai.aiModel || '', aiProvider: c.aiProvider || '',
+          morningHour: sc.morningHour !== undefined ? String(sc.morningHour) : '', eveningHour: sc.eveningHour !== undefined ? String(sc.eveningHour) : '',
+          workHolidays: sc.holidays || '', workMakeup: sc.makeup || ''
+        } };
+      }
+    } catch { /* 后端不通：用默认值 */ }
+    return { flat: hasStore ? ConfigStore.flat() : {}, snap };
   },
 
   async renderStep(step) {
@@ -215,6 +231,14 @@ const Onboarding = {
     }
     await this.goto(OB_STEPS[i + 1]);
     this.renderStep(OB_STEPS[i + 1]);
+  },
+
+  /** 点顶部步骤条：直接跳到那一步（登录卡片上的步骤条也一样） */
+  async jump(step) {
+    if (!this.active || !OB_STEPS.includes(step) || step === this.step) return;
+    document.getElementById('loginOverlay')?.remove();
+    await this.goto(step);
+    this.renderStep(step);
   },
 
   /** 回上一步（第 2 步起可用） */
@@ -291,6 +315,7 @@ const Onboarding = {
         <label class="login-field"><span>API Key <a class="ob-keylink" data-ob="keyurl" href="#" hidden target="_blank" rel="noopener">去获取</a></span>
           <input name="apiKey" type="password" placeholder="${hasKey ? '已保存（不改就留空）' : '粘贴你的 API Key'}" autocomplete="off" spellcheck="false"></label>
         <label class="login-field"><span>模型</span><input name="model" type="text" spellcheck="false" autocomplete="off"></label>
+        ${flat.apiBaseUrl && (hasKey || flat.aiModel) ? `<p class="ob-saved">✓ 已配置：${obEsc(flat.apiBaseUrl)}${hasKey ? '，API Key 已保存（不改就留空）' : '，但还没有 API Key'}</p>` : ''}
         <div class="ob-test"><button type="button" class="ob-test-btn" data-ob="test">测试连接</button><span class="ob-test-result" role="status"></span></div>
         <div class="login-error" role="alert"></div>
         ${this.footHtml('ai', '以后再说', '保存并继续')}
@@ -300,7 +325,7 @@ const Onboarding = {
     const save = form.querySelector('[data-ob="save"]');
     const norm = (u) => String(u || '').trim().replace(/\/+$/, '').toLowerCase();
     // 已有配置：带出来给用户看（Key 不回显，只提示已保存）；服务商以保存的为准，没有就按地址匹配预设
-    const configured = !!(flat.apiBaseUrl && hasKey);
+    const configured = !!(flat.apiBaseUrl && (hasKey || flat.aiModel));
     const keyUrlLink = form.querySelector('[data-ob="keyurl"]');
     const showKeyUrl = () => {
       const p = providers[f('provider').value] || providers[first];
@@ -535,6 +560,10 @@ const Onboarding = {
   },
 
   bindSettings() {
+    document.addEventListener('click', (e) => {
+      const b = e.target.closest && e.target.closest('[data-ob-goto]');
+      if (b) this.jump(b.dataset.obGoto);
+    });
     document.getElementById('obRestartBtn')?.addEventListener('click', () => this.restart());
     document.getElementById('obChangelogBtn')?.addEventListener('click', () => this.showAllChangelog());
   }

@@ -46,6 +46,7 @@ function setup(s, storage) {
     const reply = (b, status = 200) => ({ ok: status < 400, status, json: async () => b });
     if (u.startsWith('/api/account')) return reply({ success: true, data: s.state });
     if (u === '/api/ai/test') return reply(s.aiTest ? s.aiTest(body) : { success: true, message: '连接成功' });
+    if (u === '/api/config' && method === 'GET') return reply(s.snapshot ? { success: true, data: s.snapshot } : { success: false });
     if (u === '/api/config' && method === 'POST') return reply(s.config ? s.config(body) : { success: true });
     if (u.startsWith('/api/changelog')) {
       if (s.changelogDown) throw new TypeError('Failed to fetch');
@@ -170,10 +171,10 @@ const type = (win, el, v) => { el.value = v; el.dispatchEvent(new win.Event('inp
   await tick(10);
   $('obOverlay').querySelector('[data-ob="skip"]').click();
   await tick(10);
-  check('AI 以后再说：不发保存请求，进入第 3 步', bar(doc) === '第 3 步 / 共 4 步' && !s.requests.some(r => r.url === '/api/config'));
+  check('AI 以后再说：不发保存请求，进入第 3 步', bar(doc) === '第 3 步 / 共 4 步' && !s.requests.some(r => r.url === '/api/config' && r.method === 'POST'));
   $('obOverlay').querySelector('[data-ob="skip"]').click();
   await tick(10);
-  check('推送时间使用默认：不发请求，进入第 4 步', bar(doc) === '第 4 步 / 共 4 步' && !s.requests.some(r => r.url === '/api/config'));
+  check('推送时间使用默认：不发请求，进入第 4 步', bar(doc) === '第 4 步 / 共 4 步' && !s.requests.some(r => r.url === '/api/config' && r.method === 'POST'));
   $('obOverlay').querySelector('[data-ob="skip"]').click();
   await tick(10);
   check('节假日先不配置：直接完成', !$('obOverlay') && obRec(win).introDone === true);
@@ -276,7 +277,7 @@ const type = (win, el, v) => { el.value = v; el.dispatchEvent(new win.Event('inp
   s.requests.length = 0;
   ov.querySelector('[data-ob="skip"]').click();
   await tick(20);
-  check('重新查看走完（全部「不修改」）：不发保存请求，引导结束，下次不再是重看状态', !$('obOverlay') && obRec(win).introDone === true && !obRec(win).review && !s.requests.some(r => r.url === '/api/config'));
+  check('重新查看走完（全部「不修改」）：不发保存请求，引导结束，下次不再是重看状态', !$('obOverlay') && obRec(win).introDone === true && !obRec(win).review && !s.requests.some(r => r.url === '/api/config' && r.method === 'POST'));
 
   // 重新查看时未登录（本地模式）
   s = { state: stateOf('unconfigured'), version: '1.6.0' };
@@ -291,6 +292,41 @@ const type = (win, el, v) => { el.value = v; el.dispatchEvent(new win.Event('inp
   $('loginOverlay').querySelector('[data-login="cancel"]').click();
   await tick(10);
   check('登录卡片取消：回到引导第 1 步，不会什么都不剩', !$('loginOverlay') && $('obOverlay') && bar(doc) === '第 1 步 / 共 4 步');
+
+  // 顶部步骤条可点击：直接跳到那一步
+  s = { state: stateOf('ok', { aiConfigured: true }), version: '1.6.0' };
+  ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: false, shown: true, step: 'holidays', seenVersion: '1.6.0' }) }));
+  win.__flat = { apiBaseUrl: 'https://api.deepseek.com/v1', aiModel: 'deepseek-chat', aiProvider: 'deepseek', morningHour: '8', eveningHour: '20' };
+  win.__snap = { ai: { apiKey: '***已设置***' } };
+  await win.Account.init();
+  await tick(10);
+  check('顶部有 4 个可点击的步骤横条，当前步标出', $('obOverlay').querySelectorAll('.ob-dot').length === 4 && $('obOverlay').querySelector('.ob-dot.is-current').dataset.obGoto === 'holidays' && /第 1 步：连接禅道/.test($('obOverlay').querySelector('.ob-dot').title));
+  $('obOverlay').querySelector('[data-ob-goto="ai"]').click();
+  await tick(20);
+  check('点第 2 个横条：直接跳到 AI 步，且显示已配置的服务商 / 地址 / 模型', bar(doc) === '第 2 步 / 共 4 步' && obRec(win).step === 'ai' && $('obOverlay').querySelector('form').elements.provider.value === 'deepseek' && $('obOverlay').querySelector('form').elements.model.value === 'deepseek-chat');
+  check('AI 步：明确写出「已配置」和 Key 已保存', /✓ 已配置：https:\/\/api\.deepseek\.com\/v1，API Key 已保存/.test($('obOverlay').textContent));
+  $('obOverlay').querySelector('[data-ob-goto="zentao"]').click();
+  await tick(20);
+  check('点第 1 个横条：回到连接禅道', bar(doc) === '第 1 步 / 共 4 步' && /连接禅道/.test($('obOverlay').querySelector('h2').textContent));
+  $('obOverlay').querySelector('[data-ob-goto="schedule"]').click();
+  await tick(20);
+  check('点第 3 个横条：跳到推送时间，显示已有的时间', bar(doc) === '第 3 步 / 共 4 步' && $('obOverlay').querySelector('form').elements.morningHour.value === '8');
+
+  // 登录卡片上的步骤条也能点
+  s = { state: stateOf('unconfigured'), version: '1.6.0' };
+  ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: false, step: 'zentao', seenVersion: '1.6.0' }) }));
+  await win.Account.init();
+  $('loginOverlay').querySelector('[data-ob-goto="schedule"]').click();
+  await tick(20);
+  check('第 1 步的登录卡片上点步骤条：登录卡片收起，跳到对应步骤', !$('loginOverlay') && bar(doc) === '第 3 步 / 共 4 步');
+
+  // 缓存里还没有设置：直接向后端要，也能回显
+  s = { state: stateOf('ok'), version: '1.6.0', snapshot: { ai: { apiKey: '***已设置***', apiBaseUrl: 'https://api.moonshot.cn/v1', aiModel: 'moonshot-v1-8k' }, schedule: { morningHour: 7, eveningHour: 19, holidays: '', makeup: '' }, client: { aiProvider: '' } } };
+  ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: false, shown: true, step: 'ai', seenVersion: '1.6.0' }) }));
+  win.__snap = null;
+  await win.Account.init();
+  await tick(20);
+  check('本地缓存还没有设置：向后端取，AI 步照样回显（没存服务商时按地址 / 自定义归类）', s.requests.some(r => r.method === 'GET' && r.url === '/api/config') && $('obOverlay').querySelector('form').elements.baseUrl.value === 'https://api.moonshot.cn/v1' && $('obOverlay').querySelector('form').elements.model.value === 'moonshot-v1-8k');
 
   // 重置为首次使用
   await win.Onboarding.reset();
