@@ -341,6 +341,7 @@ const Account = {
       if (typeof Onboarding !== 'undefined') Onboarding.onLoginSkipped();
     } else if (act === 'cancel') {
       this.closeLogin();
+      if (typeof Onboarding !== 'undefined' && Onboarding.active) Onboarding.show();   // 引导里点了「登录」又取消：回到引导卡片
     } else if (act === 'import') {
       this.closeLogin();
       if (typeof Onboarding !== 'undefined') Onboarding.onImport();

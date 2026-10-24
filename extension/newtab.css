@@ -3580,3 +3580,8 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
 .ob-ver li { margin: 3px 0; color: var(--text-primary); }
 .ob-ver code { font-size: 12px; background: var(--bg-base); padding: 1px 4px; border-radius: 4px; }
 .ob-card:has(.ob-notes) { width: min(480px, 100%); }
+
+.ob-foot-left { display: inline-flex; align-items: center; gap: 14px; }
+.ob-kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0 0 14px; font-size: 13px; }
+.ob-kv dt { color: var(--text-secondary); }
+.ob-kv dd { margin: 0; color: var(--text-primary); word-break: break-all; }

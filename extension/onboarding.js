@@ -85,8 +85,11 @@ const Onboarding = {
     if (!this.active) return;
     // 用真实状态跳过已经完成的步骤（用户自己在别处配好了、或登录后页面刷新回来）
     const s = accountState || {};
-    if (this.step === 'zentao' && (s.state !== 'unconfigured' || this.loginSkipped())) await this.goto('ai');
-    if (this.step === 'ai' && s.aiConfigured) await this.goto('schedule');
+    // 「重新查看」时（review）每一步都要让用户看到、可以改，不能因为已配好就跳过
+    if (!rec.review) {
+      if (this.step === 'zentao' && (s.state !== 'unconfigured' || this.loginSkipped())) await this.goto('ai');
+      if (this.step === 'ai' && s.aiConfigured) await this.goto('schedule');
+    }
   },
 
   loginSkipped() {
@@ -102,22 +105,17 @@ const Onboarding = {
   async finish() {
     this.active = false;
     this.closeCard();
-    this.rec = { ...(this.rec || {}), introDone: true, step: 'zentao', seenVersion: (this.rec && this.rec.seenVersion) || this.version() };
+    this.rec = { ...(this.rec || {}), introDone: true, review: false, step: 'zentao', seenVersion: (this.rec && this.rec.seenVersion) || this.version() };
     await ObStore.set(this.rec);
   },
 
-  /** 设置里「重新查看新手引导」 */
+  /** 设置里「重新查看新手引导」：从第 1 步开始，每一步都显示当前已有的配置 */
   async restart() {
     document.getElementById('settingsModal')?.classList.remove('active');
-    const s = this.accountState || {};
     this.active = true;
-    await this.goto(s.state && s.state !== 'unconfigured' ? 'ai' : 'zentao');
-    if (this.step === 'zentao' && typeof Account !== 'undefined') {
-      try { localStorage.removeItem('waLoginSkipped'); } catch { /* ignore */ }
-      Account.showLogin({ mode: 'first' });
-    } else {
-      this.show();
-    }
+    this.rec = { ...(this.rec || {}), review: true };
+    await this.goto('zentao');
+    this.show();
   },
 
   /** 「调试 → 重置为首次使用」：清掉引导记录，下次打开当新用户 */
@@ -144,7 +142,8 @@ const Onboarding = {
   async show() {
     if (document.getElementById('loginOverlay') || document.getElementById('obOverlay')) return;
     if (this.active) {
-      if (this.step === 'zentao') return;   // 登录卡片负责（未登录会自动弹出）
+      // 第一次安装、还没登录：由登录卡片负责（自动弹出）。其余情况（已登录 / 重新查看）显示第 1 步的状态卡片
+      if (this.step === 'zentao' && !(this.rec && this.rec.review) && (this.accountState || {}).state === 'unconfigured') return;
       return this.renderStep(this.step);
     }
     return this.maybeWhatsNew();
@@ -177,7 +176,15 @@ const Onboarding = {
     return overlay;
   },
 
-  renderStep(step) {
+  /** 取最新的设置快照（上一步刚保存的也要读到）。后端不通就用缓存 */
+  async freshFlat() {
+    if (typeof ConfigStore === 'undefined') return { flat: {}, snap: null };
+    try { await ConfigStore.sync(); } catch { /* 用缓存 */ }
+    return { flat: ConfigStore.flat(), snap: ConfigStore.get() };
+  },
+
+  async renderStep(step) {
+    if (step === 'zentao') return this.renderZentao();
     if (step === 'ai') return this.renderAi();
     if (step === 'schedule') return this.renderSchedule();
     return this.renderHolidays();
@@ -195,14 +202,66 @@ const Onboarding = {
     this.renderStep(OB_STEPS[i + 1]);
   },
 
-  footHtml(skipText, primaryText) {
-    return `<div class="login-foot"><button type="button" class="login-link" data-ob="skip">${skipText}</button>`
+  /** 回上一步（第 2 步起可用） */
+  async prev(from) {
+    const i = OB_STEPS.indexOf(from);
+    if (i <= 0) return;
+    await this.goto(OB_STEPS[i - 1]);
+    this.renderStep(OB_STEPS[i - 1]);
+  },
+
+  skipText(text) {
+    return this.rec && this.rec.review ? '不修改，下一步' : text;
+  },
+
+  footHtml(step, skipText, primaryText) {
+    const back = OB_STEPS.indexOf(step) > 0 ? '<button type="button" class="login-link ob-back" data-ob="back">← 上一步</button>' : '';
+    return `<div class="login-foot"><span class="ob-foot-left">${back}<button type="button" class="login-link" data-ob="skip">${this.skipText(skipText)}</button></span>`
       + `<button type="submit" class="login-submit ob-primary" data-ob="save">${primaryText}</button></div>`;
+  },
+
+  /** 三张表单卡片共用的点击处理：上一步 / 跳过 */
+  bindNav(overlay, step) {
+    overlay.addEventListener('click', (e) => {
+      const act = e.target.closest('[data-ob]') && e.target.closest('[data-ob]').dataset.ob;
+      if (act === 'back') { e.preventDefault(); this.prev(step); }
+      if (act === 'skip') { e.preventDefault(); this.next(step); }
+    });
+  },
+
+  // ----- 第 1 步：禅道（已登录 / 本地模式 / 重新查看时的状态卡片；第一次安装未登录时是登录卡片） -----
+
+  renderZentao() {
+    const s = this.accountState || {};
+    const loggedIn = s.state && s.state !== 'unconfigured';
+    const p = s.profile || {};
+    const status = { ok: '已连接', invalid: '登录已失效，请重新登录', offline: '暂时连不上禅道（可能没连公司网络 / VPN）' }[s.state] || '';
+    const overlay = this.mount(`
+      ${this.barHtml('zentao')}
+      <h2 id="obTitle">连接禅道</h2>
+      ${loggedIn ? `<p class="login-sub">${obEsc(status)}</p>
+        <dl class="ob-kv"><dt>禅道地址</dt><dd>${obEsc(s.zentaoUrl || '')}</dd><dt>账号</dt><dd>${obEsc(s.username || '')}${p.realname ? `（${obEsc(p.realname)}）` : ''}</dd></dl>`
+        : '<p class="login-sub">还没有登录禅道，现在是本地模式：任务只保存在本机。</p>'}
+      <div class="login-foot">
+        <button type="button" class="login-link" data-ob="login">${loggedIn ? (s.state === 'ok' ? '切换账号' : '重新登录') : '登录禅道'}</button>
+        <button type="button" class="login-submit ob-primary" data-ob="next">下一步</button>
+      </div>`, () => this.next('zentao'));
+    overlay.addEventListener('click', (e) => {
+      const act = e.target.closest('[data-ob]') && e.target.closest('[data-ob]').dataset.ob;
+      if (act === 'next') this.next('zentao');
+      if (act === 'login' && typeof Account !== 'undefined') {
+        this.closeCard();
+        Account.showLogin({ mode: !loggedIn ? 'first' : s.state === 'ok' ? 'switch' : 'relogin', fromButton: true });
+      }
+    });
+    overlay.querySelector('[data-ob="next"]').focus();
   },
 
   // ----- 第 2 步：AI -----
 
-  renderAi() {
+  async renderAi() {
+    const { flat, snap } = await this.freshFlat();
+    const hasKey = !!(snap && snap.ai && snap.ai.apiKey);
     const providers = typeof AI_PROVIDERS !== 'undefined' ? AI_PROVIDERS : { zhipu: { label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4/', model: 'glm-4-flash', keyUrl: '', hint: '' } };
     const first = Object.keys(providers)[0];
     const overlay = this.mount(`
@@ -215,16 +274,24 @@ const Onboarding = {
         </label>
         <label class="login-field"><span>接口地址</span><input name="baseUrl" type="text" spellcheck="false" autocomplete="off"></label>
         <label class="login-field"><span>API Key <a class="ob-keylink" data-ob="keyurl" href="#" hidden target="_blank" rel="noopener">去获取</a></span>
-          <input name="apiKey" type="password" placeholder="粘贴你的 API Key" autocomplete="off" spellcheck="false"></label>
+          <input name="apiKey" type="password" placeholder="${hasKey ? '已保存（不改就留空）' : '粘贴你的 API Key'}" autocomplete="off" spellcheck="false"></label>
         <label class="login-field"><span>模型</span><input name="model" type="text" spellcheck="false" autocomplete="off"></label>
         <div class="ob-test"><button type="button" class="ob-test-btn" data-ob="test">测试连接</button><span class="ob-test-result" role="status"></span></div>
         <div class="login-error" role="alert"></div>
-        ${this.footHtml('以后再说', '保存并继续')}
+        ${this.footHtml('ai', '以后再说', '保存并继续')}
       </form>`, () => this.next('ai'));
     const form = overlay.querySelector('form');
     const f = (n) => form.elements[n];
     const save = form.querySelector('[data-ob="save"]');
-    save.disabled = true;
+    const norm = (u) => String(u || '').trim().replace(/\/+$/, '').toLowerCase();
+    // 已有配置：带出来给用户看（Key 不回显，只提示已保存）；服务商以保存的为准，没有就按地址匹配预设
+    const configured = !!(flat.apiBaseUrl && hasKey);
+    const keyUrlLink = form.querySelector('[data-ob="keyurl"]');
+    const showKeyUrl = () => {
+      const p = providers[f('provider').value] || providers[first];
+      keyUrlLink.hidden = !p.keyUrl;
+      if (p.keyUrl) keyUrlLink.href = p.keyUrl;
+    };
     const applyPreset = () => {
       const p = providers[f('provider').value] || providers[first];
       f('baseUrl').value = p.baseUrl || '';
@@ -241,12 +308,23 @@ const Onboarding = {
     };
     f('provider').addEventListener('change', applyPreset);
     ['baseUrl', 'apiKey', 'model'].forEach(n => f(n).addEventListener('input', invalidate));
-    applyPreset();
+    if (configured) {
+      const matched = Object.keys(providers).find(k => providers[k].baseUrl && norm(providers[k].baseUrl) === norm(flat.apiBaseUrl));
+      const pick = providers[flat.aiProvider] ? flat.aiProvider : (matched || (providers.custom ? 'custom' : first));
+      f('provider').value = pick;
+      f('baseUrl').value = flat.apiBaseUrl;
+      f('model').value = flat.aiModel || '';
+      showKeyUrl();
+      save.disabled = !f('model').value;   // 原样保存没有意义但无害；改了任何一项就要重新测试
+    } else {
+      save.disabled = true;
+      applyPreset();
+    }
+    this._aiHasKey = hasKey;
 
+    this.bindNav(overlay, 'ai');
     overlay.addEventListener('click', async (e) => {
-      const act = e.target.closest('[data-ob]') && e.target.closest('[data-ob]').dataset.ob;
-      if (act === 'skip') { e.preventDefault(); this.next('ai'); }
-      if (act === 'test') await this.testAi(form);
+      if (e.target.closest('[data-ob="test"]')) await this.testAi(form);
     });
     form.addEventListener('submit', (e) => { e.preventDefault(); this.saveAi(form); });
     setTimeout(() => f('apiKey').focus(), 50);
@@ -258,7 +336,7 @@ const Onboarding = {
     const err = form.querySelector('.login-error');
     err.textContent = '';
     const body = { baseUrl: f('baseUrl').value.trim(), apiKey: f('apiKey').value.trim(), model: f('model').value.trim(), purpose: 'task' };
-    if (!body.baseUrl || !body.apiKey || !body.model) { err.textContent = '请填写接口地址、API Key 和模型'; return; }
+    if (!body.baseUrl || !body.model || (!body.apiKey && !this._aiHasKey)) { err.textContent = '请填写接口地址、API Key 和模型'; return; }
     const btn = form.querySelector('[data-ob="test"]');
     btn.disabled = true;
     out.className = 'ob-test-result';
@@ -287,7 +365,7 @@ const Onboarding = {
         client: { aiProvider: f('provider').value }
       });
       if (!r.success) { err.textContent = r.message || r.error || '保存失败'; return; }
-      if (typeof ConfigStore !== 'undefined') ConfigStore.sync({ force: true });
+      if (typeof ConfigStore !== 'undefined') await ConfigStore.sync({ force: true });
       if (typeof Toast !== 'undefined') Toast.success('AI 已配置，可在 设置 → AI 配置 修改');
       await this.next('ai');
     } catch (e) {
@@ -299,8 +377,8 @@ const Onboarding = {
 
   // ----- 第 3 步：报告与推送时间 -----
 
-  renderSchedule() {
-    const flat = typeof ConfigStore !== 'undefined' ? ConfigStore.flat() : {};
+  async renderSchedule() {
+    const { flat } = await this.freshFlat();
     const overlay = this.mount(`
       ${this.barHtml('schedule')}
       <h2 id="obTitle">报告与推送时间</h2>
@@ -312,12 +390,10 @@ const Onboarding = {
           <span class="ob-hour"><input name="eveningHour" type="number" min="0" max="23" step="1" value="${obEsc(flat.eveningHour || 21)}"> 点</span></label>
         <p class="ob-note">周报固定在每周五 17:00 生成。推送到企业微信 / 钉钉 / 飞书的地址，可在 设置 → 通知推送 里配置。</p>
         <div class="login-error" role="alert"></div>
-        ${this.footHtml('使用默认', '保存并继续')}
+        ${this.footHtml('schedule', '使用默认', '保存并继续')}
       </form>`, () => this.next('schedule'));
     const form = overlay.querySelector('form');
-    overlay.addEventListener('click', (e) => {
-      if (e.target.closest('[data-ob="skip"]')) { e.preventDefault(); this.next('schedule'); }
-    });
+    this.bindNav(overlay, 'schedule');
     form.addEventListener('submit', (e) => { e.preventDefault(); this.saveSchedule(form); });
     setTimeout(() => form.elements.morningHour.focus(), 50);
   },
@@ -333,7 +409,7 @@ const Onboarding = {
     try {
       const r = await this.api('/api/config', { morningHour, eveningHour });
       if (!r.success) { err.textContent = r.message || r.error || '保存失败'; return; }
-      if (typeof ConfigStore !== 'undefined') ConfigStore.sync({ force: true });
+      if (typeof ConfigStore !== 'undefined') await ConfigStore.sync({ force: true });
       await this.next('schedule');
     } catch (e) {
       err.textContent = `保存失败：${e.message}`;
@@ -344,8 +420,8 @@ const Onboarding = {
 
   // ----- 第 4 步：节假日 -----
 
-  renderHolidays() {
-    const flat = typeof ConfigStore !== 'undefined' ? ConfigStore.flat() : {};
+  async renderHolidays() {
+    const { flat } = await this.freshFlat();
     const overlay = this.mount(`
       ${this.barHtml('holidays')}
       <h2 id="obTitle">节假日</h2>
@@ -357,12 +433,10 @@ const Onboarding = {
           <textarea name="makeup" rows="2" placeholder="2026-09-20, 2026-10-10">${obEsc(flat.workMakeup || '')}</textarea></label>
         <p class="ob-note">单个日期或「起~止」范围，多项用逗号分隔。</p>
         <div class="login-error" role="alert"></div>
-        ${this.footHtml('先不配置，完成', '保存并完成')}
+        ${this.footHtml('holidays', '先不配置，完成', '保存并完成')}
       </form>`, () => this.next('holidays'));
     const form = overlay.querySelector('form');
-    overlay.addEventListener('click', (e) => {
-      if (e.target.closest('[data-ob="skip"]')) { e.preventDefault(); this.next('holidays'); }
-    });
+    this.bindNav(overlay, 'holidays');
     form.addEventListener('submit', (e) => { e.preventDefault(); this.saveHolidays(form); });
     setTimeout(() => form.elements.holidays.focus(), 50);
   },
@@ -374,7 +448,7 @@ const Onboarding = {
     try {
       const r = await this.api('/api/config', { workHolidays: form.elements.holidays.value.trim(), workMakeup: form.elements.makeup.value.trim() });
       if (!r.success) { err.textContent = r.message || r.error || '保存失败'; return; }
-      if (typeof ConfigStore !== 'undefined') ConfigStore.sync({ force: true });
+      if (typeof ConfigStore !== 'undefined') await ConfigStore.sync({ force: true });
       await this.next('holidays');
     } catch (e) {
       err.textContent = `保存失败：${e.message}`;

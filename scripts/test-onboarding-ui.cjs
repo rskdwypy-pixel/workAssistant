@@ -57,8 +57,8 @@ function setup(s, storage) {
   win.Confirm = { show: async () => true };
   win.openSettingsModal = (g) => { s.settingsOpened = g || 'default'; };
   win.eval(`var API_BASE_URL = 'http://127.0.0.1:3721'; var WA_EXT_VERSION = ${JSON.stringify(s.version)};
-    var AI_PROVIDERS = { zhipu: { label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4/', model: 'glm-4-flash', keyUrl: 'https://open.bigmodel.cn/usercenter/apikeys' }, custom: { label: '自定义', baseUrl: '', model: '', keyUrl: null } };
-    var ConfigStore = { sync() {}, flat() { return window.__flat || {}; } };
+    var AI_PROVIDERS = { zhipu: { label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4/', model: 'glm-4-flash', keyUrl: 'https://open.bigmodel.cn/usercenter/apikeys' }, deepseek: { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', keyUrl: 'https://platform.deepseek.com/api_keys' }, custom: { label: '自定义', baseUrl: '', model: '', keyUrl: null } };
+    var ConfigStore = { async sync() {}, flat() { return window.__flat || {}; }, get() { return window.__snap || null; } };
     ${REP}\n${ONB}\n${ACC.replace(/if \(typeof document !== 'undefined'\) \{[\s\S]*?\n\}\n?$/, '')}\nwindow.Account = Account; Account.reload = () => { window.__s.reloads++; };`);
   win.__s = s;
   return { win, doc: win.document, $: (id) => win.document.getElementById(id), storage: () => ({ ...win.localStorage }) };
@@ -204,13 +204,62 @@ const type = (win, el, v) => { el.value = v; el.dispatchEvent(new win.Event('inp
   await tick(10);
   check('导入旧配置：引导结束，打开设置的数据迁移', !win.Onboarding.active && obRec(win).introDone === true && s.settingsOpened === 'p-data');
 
-  // 重新查看
+  // 重新查看：永远从第 1 步开始，每一步带出已有配置，可以回上一步
   s = { state: stateOf('ok', { aiConfigured: true }), version: '1.6.0' };
   ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: true, seenVersion: '1.6.0' }) }));
+  win.__flat = { apiBaseUrl: 'https://api.deepseek.com/v1', aiModel: 'deepseek-chat', aiProvider: 'deepseek', morningHour: '8', eveningHour: '20', workHolidays: '2026-12-25', workMakeup: '2026-10-10' };
+  win.__snap = { ai: { apiKey: '***已设置***' } };
   await win.Account.init();
   $('obRestartBtn').click();
   await tick(20);
-  check('设置里「重新查看」：已登录从第 2 步开始（AI 已配则从第 3 步）', $('obOverlay') && obRec(win).introDone === false && /第 [23] 步/.test(bar(doc)));
+  check('设置里「重新查看」：已登录也从第 1 步开始，显示当前连接的地址和账号', bar(doc) === '第 1 步 / 共 4 步' && /已连接/.test($('obOverlay').textContent) && /10\.0\.0\.1:8088/.test($('obOverlay').textContent) && /zhangs/.test($('obOverlay').textContent) && obRec(win).step === 'zentao');
+  check('第 1 步没有「上一步」', !$('obOverlay').querySelector('[data-ob="back"]'));
+  $('obOverlay').querySelector('[data-ob="next"]').click();
+  await tick(20);
+  ov = $('obOverlay'); form = ov.querySelector('form');
+  check('第 2 步（AI 已配置）：没有跳过，显示已有的服务商、地址、模型', bar(doc) === '第 2 步 / 共 4 步' && form.elements.provider.value === 'deepseek' && form.elements.baseUrl.value === 'https://api.deepseek.com/v1' && form.elements.model.value === 'deepseek-chat');
+  check('第 2 步：Key 不回显，提示「已保存」；跳过按钮写「不修改，下一步」', form.elements.apiKey.value === '' && /已保存/.test(form.elements.apiKey.placeholder) && /不修改，下一步/.test(ov.querySelector('[data-ob="skip"]').textContent));
+  check('第 2 步：原样保存可点；改了任何一项就要重新测试', !ov.querySelector('[data-ob="save"]').disabled && (type(win, form.elements.model, 'deepseek-reasoner'), ov.querySelector('[data-ob="save"]').disabled));
+  ov.querySelector('[data-ob="test"]').click();
+  await tick(10);
+  const t2 = s.requests.filter(r => r.url === '/api/ai/test').pop();
+  check('第 2 步：Key 留空也能测试（用已保存的），请求里 Key 为空', t2 && t2.body.apiKey === '' && t2.body.model === 'deepseek-reasoner' && !/请填写/.test(ov.querySelector('.login-error').textContent));
+  ov.querySelector('[data-ob="back"]').click();
+  await tick(20);
+  check('第 2 步「上一步」：回到第 1 步', bar(doc) === '第 1 步 / 共 4 步' && /连接禅道/.test($('obOverlay').querySelector('h2').textContent) && obRec(win).step === 'zentao');
+  $('obOverlay').querySelector('[data-ob="next"]').click();
+  await tick(20);
+  $('obOverlay').querySelector('[data-ob="skip"]').click();
+  await tick(20);
+  ov = $('obOverlay'); form = ov.querySelector('form');
+  check('第 3 步：显示已有的 8 点 / 20 点，不是默认值', bar(doc) === '第 3 步 / 共 4 步' && form.elements.morningHour.value === '8' && form.elements.eveningHour.value === '20');
+  ov.querySelector('[data-ob="back"]').click();
+  await tick(20);
+  check('第 3 步「上一步」：回到第 2 步，且仍是已有配置', bar(doc) === '第 2 步 / 共 4 步' && $('obOverlay').querySelector('form').elements.model.value === 'deepseek-chat');
+  $('obOverlay').querySelector('[data-ob="skip"]').click();
+  await tick(20);
+  $('obOverlay').querySelector('[data-ob="skip"]').click();
+  await tick(20);
+  ov = $('obOverlay'); form = ov.querySelector('form');
+  check('第 4 步：显示已有的节假日和调休日；「上一步」可用', bar(doc) === '第 4 步 / 共 4 步' && form.elements.holidays.value === '2026-12-25' && form.elements.makeup.value === '2026-10-10' && ov.querySelector('[data-ob="back"]'));
+  s.requests.length = 0;
+  ov.querySelector('[data-ob="skip"]').click();
+  await tick(20);
+  check('重新查看走完（全部「不修改」）：不发保存请求，引导结束，下次不再是重看状态', !$('obOverlay') && obRec(win).introDone === true && !obRec(win).review && !s.requests.some(r => r.url === '/api/config'));
+
+  // 重新查看时未登录（本地模式）
+  s = { state: stateOf('unconfigured'), version: '1.6.0' };
+  ({ win, doc, $ } = setup(s, { waOnboarding: JSON.stringify({ introDone: true, seenVersion: '1.6.0' }), waLoginSkipped: '1' }));
+  await win.Account.init();
+  $('obRestartBtn').click();
+  await tick(20);
+  check('重新查看（本地模式）：第 1 步提示未登录，给「登录禅道」入口', bar(doc) === '第 1 步 / 共 4 步' && /本地模式/.test($('obOverlay').textContent) && /登录禅道/.test($('obOverlay').querySelector('[data-ob="login"]').textContent));
+  $('obOverlay').querySelector('[data-ob="login"]').click();
+  await tick(10);
+  check('点「登录禅道」：打开登录卡片（带步骤条）', $('loginOverlay') && !$('obOverlay') && bar(doc) === '第 1 步 / 共 4 步');
+  $('loginOverlay').querySelector('[data-login="cancel"]').click();
+  await tick(10);
+  check('登录卡片取消：回到引导第 1 步，不会什么都不剩', !$('loginOverlay') && $('obOverlay') && bar(doc) === '第 1 步 / 共 4 步');
 
   // 重置为首次使用
   await win.Onboarding.reset();
