@@ -243,6 +243,7 @@
         <div class="account-area" id="accountArea">
           <span id="accountLoading" class="account-loading" role="status"><span class="account-spinner" aria-hidden="true"></span>正在读取禅道账号…</span>
           <button id="accountLoginBtn" class="tab-login-btn" type="button" hidden>登录禅道</button>
+          <button id="workloadBtn" class="account-settings-btn" type="button" title="工作负载（未来两周）" aria-label="工作负载（未来两周）"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11"/><path d="M12 20V5"/><path d="M19 20v-6"/></svg></button>
           <button id="quickSearchBtn" class="account-settings-btn" type="button" title="搜索（⌘K）" aria-label="搜索（⌘K）"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></button>
           <button id="notifyBellBtn" class="account-settings-btn notify-bell" type="button" title="提醒" aria-label="提醒" aria-haspopup="true" aria-expanded="false" hidden><svg aria-hidden="true"><use href="#si-bell"/></svg><span class="notify-count" id="notifyCount" hidden></span></button>
           <button id="accountSettingsBtn" class="account-settings-btn" type="button" title="设置" aria-label="设置" hidden><svg aria-hidden="true"><use href="#si-sliders"/></svg></button>
@@ -1364,6 +1365,7 @@
   <script src="update-ui.js"></script>
   <script src="notify-ui.js"></script>
   <script src="quick-search.js"></script>
+  <script src="workload.js"></script>
   <!-- 按钮状态管理器 -->
   <script src="buttonStateManager.js"></script>
   <!-- 乐观 UI：禅道操作先改界面，失败再回退 -->
