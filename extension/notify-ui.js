@@ -13,6 +13,20 @@ const NotifyUI = {
   open: false,
   pollMs: 60 * 1000,
   kindMeta: { task: ['📋', '任务'], bug: ['🐞', 'Bug'], story: ['📝', '需求'] },
+  typeIcon: { review: '🔎', confirm: '🔄', deadline: '⏰', cc: '📨' },
+
+  /** 一条提醒的一句话描述（和后端 assignNotify.describe 保持一致） */
+  describe(n) {
+    const label = (this.kindMeta[n.kind] || ['', ''])[1];
+    const who = n.actorName || '有人';
+    switch (n.type) {
+      case 'review': return `${who} 请你评审${label} #${n.objectId}`;
+      case 'cc': return `${who} 抄送了${label} #${n.objectId} 给你`;
+      case 'confirm': return `${label} #${n.objectId} 关联的需求变更了，请确认`;
+      case 'deadline': return n.days === 0 ? `${label} #${n.objectId} 今天截止` : n.days === 1 ? `${label} #${n.objectId} 明天截止` : `${label} #${n.objectId} 已逾期 ${Math.abs(n.days)} 天`;
+      default: return `${who} 指派了${label} #${n.objectId}`;
+    }
+  },
 
   base() {
     return typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : 'http://127.0.0.1:3721';
@@ -36,6 +50,7 @@ const NotifyUI = {
     document.getElementById('notifyEnabled')?.addEventListener('change', () => this.saveSettings());
     document.getElementById('notifySystem')?.addEventListener('change', () => this.saveSettings());
     document.getElementById('notifyWebhook')?.addEventListener('change', () => this.saveSettings());
+    document.querySelectorAll('[data-notify-type]').forEach(b => b.addEventListener('change', () => this.saveSettings()));
     document.getElementById('notifyTestBtn')?.addEventListener('click', () => this.sendTest());
     document.getElementById('notifyCheckBtn')?.addEventListener('click', () => this.checkNow());
     document.querySelector('[data-panel="p-notify"]')?.addEventListener('click', () => this.loadSettings());
@@ -79,7 +94,7 @@ const NotifyUI = {
     bell.hidden = !this.loggedIn();
     count.hidden = this.unread === 0;
     count.textContent = this.unread > 99 ? '99+' : String(this.unread);
-    bell.title = this.unread ? `${this.unread} 条新指派` : '新指派提醒';
+    bell.title = this.unread ? `${this.unread} 条提醒` : '提醒';
     bell.setAttribute('aria-label', bell.title);
   },
 
@@ -128,26 +143,25 @@ const NotifyUI = {
     const panel = document.querySelector('.notify-panel');
     if (!panel) return;
     const rows = this.items.map((n) => {
-      const [icon, label] = this.kindMeta[n.kind] || ['📌', ''];
-      const who = n.actorName || '有人';
+      const icon = this.typeIcon[n.type] || (this.kindMeta[n.kind] || ['📌'])[0];
       return `<div class="np-item ${n.read ? '' : 'is-unread'}" role="button" tabindex="0" data-np-open="${this.esc(n.id)}">
           <span class="np-icon" aria-hidden="true">${icon}</span>
           <span class="np-body">
-            <div class="np-title" title="${this.esc(n.title)}">${this.esc(who)} 指派了${this.esc(label)} #${this.esc(n.objectId)}</div>
+            <div class="np-title" title="${this.esc(this.describe(n))}">${this.esc(this.describe(n))}</div>
             <div class="np-title" style="font-weight:400" title="${this.esc(n.title)}">${this.esc(n.title)}</div>
-            <div class="np-meta">${this.esc(this.rel(n.at))}${n.deadline ? ` · 截止 ${this.esc(n.deadline)}` : ''}${n.pri ? ` · P${this.esc(n.pri)}` : ''}</div>
+            <div class="np-meta">${this.esc(this.rel(n.at))}${n.deadline && n.type !== 'deadline' ? ` · 截止 ${this.esc(n.deadline)}` : ''}${n.pri ? ` · P${this.esc(n.pri)}` : ''}</div>
           </span>
           ${n.read ? '' : '<span class="np-dot" aria-label="未读"></span>'}
         </div>`;
     }).join('');
     panel.innerHTML = `
-      <div class="np-head"><span>新指派给我${this.unread ? `（${this.unread} 条未读）` : ''}</span>
+      <div class="np-head"><span>提醒${this.unread ? `（${this.unread} 条未读）` : ''}</span>
         <span class="np-head-actions">
           <button type="button" class="np-link" data-np="check">立即检查</button>
           ${this.unread ? '<button type="button" class="np-link" data-np="readall">全部已读</button>' : ''}
         </span></div>
-      <div class="np-list">${rows || '<div class="np-empty">暂时没有新指派。<br>别人把任务、Bug、需求指派给你时，会在这里提醒你（每 5 分钟检查一次）。</div>'}</div>
-      <div class="np-foot"><span class="np-meta">只提醒别人指派给你的</span><button type="button" class="np-link" data-np="settings">提醒设置</button></div>`;
+      <div class="np-list">${rows || '<div class="np-empty">暂时没有提醒。<br>别人把任务、Bug、需求指派给你，或有待评审、临近截止的事项时，会在这里提醒你（每 5 分钟检查一次）。</div>'}</div>
+      <div class="np-foot"><span class="np-meta">新指派、待评审、截止日等</span><button type="button" class="np-link" data-np="settings">提醒设置</button></div>`;
   },
 
   async onPanelClick(e) {
@@ -233,6 +247,10 @@ const NotifyUI = {
         ? '每 5 分钟检查一次「指派给我」的列表。浏览器关着时系统通知和 Webhook 也会发。'
         : '每 5 分钟检查一次「指派给我」的列表。想推到群里，先在下面填好 Webhook 地址并保存。';
     }
+    document.querySelectorAll('[data-notify-type]').forEach((box) => {
+      box.checked = !!(s.types && s.types[box.dataset.notifyType]);
+      box.disabled = !s.enabled;
+    });
     this.settings = s;
   },
 
@@ -240,7 +258,8 @@ const NotifyUI = {
     const body = {
       enabled: document.getElementById('notifyEnabled').checked,
       system: document.getElementById('notifySystem').checked,
-      webhook: document.getElementById('notifyWebhook').checked
+      webhook: document.getElementById('notifyWebhook').checked,
+      types: Object.fromEntries([...document.querySelectorAll('[data-notify-type]')].map(b => [b.dataset.notifyType, b.checked]))
     };
     try {
       const res = await this.request('/api/notify/settings', body);

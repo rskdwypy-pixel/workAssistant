@@ -243,7 +243,7 @@
         <div class="account-area" id="accountArea">
           <span id="accountLoading" class="account-loading" role="status"><span class="account-spinner" aria-hidden="true"></span>正在读取禅道账号…</span>
           <button id="accountLoginBtn" class="tab-login-btn" type="button" hidden>登录禅道</button>
-          <button id="notifyBellBtn" class="account-settings-btn notify-bell" type="button" title="新指派提醒" aria-label="新指派提醒" aria-haspopup="true" aria-expanded="false" hidden><svg aria-hidden="true"><use href="#si-bell"/></svg><span class="notify-count" id="notifyCount" hidden></span></button>
+          <button id="notifyBellBtn" class="account-settings-btn notify-bell" type="button" title="提醒" aria-label="提醒" aria-haspopup="true" aria-expanded="false" hidden><svg aria-hidden="true"><use href="#si-bell"/></svg><span class="notify-count" id="notifyCount" hidden></span></button>
           <button id="accountSettingsBtn" class="account-settings-btn" type="button" title="设置" aria-label="设置" hidden><svg aria-hidden="true"><use href="#si-sliders"/></svg></button>
           <button id="accountAvatarBtn" class="account-avatar" type="button" aria-haspopup="true" aria-expanded="false" hidden></button>
         </div>
@@ -976,10 +976,17 @@
             <div class="set-row" id="assignNotifyRow">
               <div class="sr-label">新指派提醒<small>修改后立即生效</small></div>
               <div class="sr-control">
-                <label class="set-check"><input type="checkbox" id="notifyEnabled"> 别人把任务 / Bug / 需求指派给我时提醒</label>
+                <label class="set-check"><input type="checkbox" id="notifyEnabled"> 别人把任务 / Bug / 需求指派给我、待我评审、临近截止等时提醒</label>
                 <div class="row notify-channels">
                   <label class="set-check"><input type="checkbox" id="notifySystem"> 系统通知</label>
                   <label class="set-check"><input type="checkbox" id="notifyWebhook"> Webhook 推送</label>
+                </div>
+                <div class="notify-types" id="notifyTypes">
+                  <label class="set-check"><input type="checkbox" data-notify-type="assigned"> 新指派给我</label>
+                  <label class="set-check"><input type="checkbox" data-notify-type="review"> 待我评审的需求</label>
+                  <label class="set-check"><input type="checkbox" data-notify-type="confirm"> 需求变更待确认</label>
+                  <label class="set-check"><input type="checkbox" data-notify-type="deadline"> 截止日提醒（明天 / 今天 / 逾期）</label>
+                  <label class="set-check"><input type="checkbox" data-notify-type="cc"> 抄送给我的 Bug / 需求</label>
                 </div>
                 <span class="input-hint" id="notifyHint">每 5 分钟检查一次「指派给我」的列表。浏览器关着时系统通知和 Webhook 也会发。</span>
                 <div class="row">

@@ -3011,6 +3011,7 @@ a.am-v:hover { text-decoration: underline; }
 .np-empty { padding: 28px 18px; text-align: center; color: var(--text-muted); line-height: 1.7; }
 .np-foot { border-top: 1px solid var(--border); padding: 8px 14px; display: flex; justify-content: space-between; }
 .notify-channels { gap: 16px; }
+.notify-types { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 2px; }
 .set-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
 .set-check input:disabled + * , .set-check:has(input:disabled) { opacity: .55; cursor: not-allowed; }
 

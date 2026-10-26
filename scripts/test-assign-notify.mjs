@@ -20,7 +20,7 @@ const check = (name, pass, extra = '') => results.push({ name, pass: !!pass, ext
 
 // ---------- 模拟禅道 ----------
 const zt = {
-  tasks: [], bugs: [], stories: [],
+  tasks: [], bugs: [], stories: [], reviewStories: [], ccBugs: [], ccStories: [],
   failKind: '',           // 'bug' = 读 Bug 列表失败
   actions: {}             // `${kind}:${id}` → [{actor, action, date}]
 };
@@ -33,11 +33,12 @@ globalThis.fetch = async (input, init = {}) => {
   if (url.includes('user-refreshRandom')) return new Response('1234');
   if (url.includes('user-login') && (init.method || 'GET') === 'GET') return new Response('<html></html>', { headers: { 'Set-Cookie': 'zentaosid=s1; path=/' } });
   if (url.includes('user-login')) return json({ result: 'success' }, { 'Set-Cookie': 'za=u; path=/' });
-  const m = url.match(/my-(task|bug|story)-assignedTo/);
+  const m = url.match(/my-(task|bug|story)-(assignedTo|reviewedBy|mailto)/);
   if (m) {
     if (zt.failKind === m[1]) return new Response('boom', { status: 500 });
     const key = { task: 'tasks', bug: 'bugs', story: 'stories' }[m[1]];
-    return zj({ [key]: zt[key], pager: { pageTotal: 1 }, users: {} });
+    const src = m[2] === 'assignedTo' ? zt[key] : m[2] === 'reviewedBy' ? zt.reviewStories : (m[1] === 'bug' ? zt.ccBugs : zt.ccStories);
+    return zj({ [key]: src, pager: { pageTotal: 1 }, users: {} });
   }
   const v = url.match(/(task|bug|story)-view-(\d+)\.json/);
   if (v) {
@@ -84,7 +85,7 @@ try {
   const n1 = list.items[0];
   check('记录里有对象、标题、操作人姓名、截止日、链接', n1.kind === 'task' && n1.objectId === '3' && n1.title === '任务3' && n1.actor === 'yangkai' && n1.actorName === '杨凯' && n1.deadline === '2026-11-05' && n1.url === 'http://z.test/zentao/task-view-3.html', JSON.stringify(n1));
   check('操作人取「指派时间」附近那条，不会被我之后的备注顶掉', n1.actor === 'yangkai');
-  check('系统通知：标题写明谁、指派了什么', sent.system.length === 1 && /杨凯 指派给你一个任务/.test(sent.system[0].t) && /任务 #3「任务3」/.test(sent.system[0].b), JSON.stringify(sent.system));
+  check('系统通知：标题写明谁、指派了什么', sent.system.length === 1 && /杨凯 指派了任务 #3/.test(sent.system[0].t) && /任务「任务3」/.test(sent.system[0].b), JSON.stringify(sent.system));
   check('Webhook 没配置：不推送', sent.webhook.length === 0);
 
   // ---------- 自己指派给自己 ----------
@@ -119,7 +120,7 @@ try {
   zt.actions['task:7'] = [act('yangkai', 'assigned', '2026-10-26 10:00:00')];
   r = await nt.pollOnce();
   // 需求这一类是第一次看到 → 只建基线（story 列表此前一直是空的 []，不是 undefined，所以应当被识别为新指派）
-  check('同一轮多条（任务 + Bug + 需求）：合并成一条系统通知', r.notified === 3 && sent.system.length === 1 && /3 项新指派给你/.test(sent.system[0].t) && /需求 #20/.test(sent.system[0].b), JSON.stringify([r, sent.system]));
+  check('同一轮多条（任务 + Bug + 需求）：合并成一条系统通知', r.notified === 3 && sent.system.length === 1 && /有 3 项提醒/.test(sent.system[0].t) && /需求 #20/.test(sent.system[0].b), JSON.stringify([r, sent.system]));
   check('未读列表里有 3 条，类型齐全', nt.listNotifications().items.filter(n => n.id && !n.read).length >= 3 && new Set(nt.listNotifications().items.map(n => n.kind)).size === 3);
 
   // ---------- 两个出口分别可关 / Webhook ----------
@@ -168,6 +169,76 @@ try {
   reset();
   const t = await nt.sendTest();
   check('发送测试：系统通知和 Webhook 都发出，内容标明是测试', t.system && t.webhook && /测试/.test(sent.system[0].b));
+
+  // ---------- 待我评审 ----------
+  reset();
+  zt.reviewStories = [{ id: 30, title: '待评审需求', status: 'reviewing', openedBy: 'wangrui', pri: 2 }];
+  r = await nt.pollOnce();
+  check('待我评审：新出现的“评审中”需求提醒，写明提交人', r.notified === 1 && nt.listNotifications().items[0].type === 'review' && nt.listNotifications().items[0].objectId === '30' && /王锐 请你评审需求 #30/.test(sent.system[0].t), JSON.stringify([r, sent.system]));
+  reset();
+  zt.reviewStories.push({ id: 32, title: '已评审通过的', status: 'active', openedBy: 'wangrui' }, { id: 33, title: '我自己提的', status: 'reviewing', openedBy: 'me' });
+  r = await nt.pollOnce();
+  check('待我评审：已通过的、自己提的不提醒', r.notified === 0 && r.selfAssigned === 1 && sent.system.length === 0, JSON.stringify(r));
+
+  // ---------- 需求变更待确认 ----------
+  reset();
+  zt.tasks.find(t => t.id === 1).needConfirm = '1';
+  r = await nt.pollOnce();
+  const cf = nt.listNotifications().items[0];
+  check('需求变更待确认：任务的 needConfirm 新变成 1 时提醒', r.notified === 1 && cf.type === 'confirm' && cf.objectId === '1' && /任务 #1 关联的需求变更了/.test(sent.system[0].t), JSON.stringify([r, sent.system]));
+  r = await nt.pollOnce();
+  check('需求变更待确认：同一个任务不重复提醒', r.notified === 0);
+
+  // ---------- 抄送给我（默认关）----------
+  reset();
+  zt.ccBugs = [mkBug(40)];
+  r = await nt.pollOnce();
+  check('抄送默认关：不读也不提醒', r.notified === 0 && sent.system.length === 0);
+  nt.saveSettings({ types: { cc: true } });
+  r = await nt.pollOnce();
+  check('刚打开抄送：当前已有的只建基线，不提醒', r.notified === 0 && sent.system.length === 0);
+  zt.ccBugs.push(mkBug(41, { openedBy: 'yangkai' }));
+  r = await nt.pollOnce();
+  check('抄送：新抄送给我的 Bug 提醒', r.notified === 1 && /杨凯 抄送了Bug #41 给你/.test(sent.system[0].t), JSON.stringify([r, sent.system]));
+  nt.saveSettings({ types: { cc: false } });
+
+  // ---------- 截止日 ----------
+  reset();
+  const D = (s) => new Date(`${s}T10:00:00`);
+  zt.tasks.forEach(t => { t.deadline = '2026-12-31'; });
+  zt.bugs.forEach(b => { b.deadline = ''; });
+  const monday = D('2026-10-26');
+  r = await nt.pollOnce({ now: monday });
+  check('截止日：第一次建基线，已有的临近截止不提醒', r.notified === 0 && sent.system.length === 0);
+  zt.tasks.find(t => t.id === 2).deadline = '2026-10-27';        // 明天
+  zt.tasks.find(t => t.id === 9).deadline = '2026-10-25';        // 昨天，逾期 1 天
+  zt.tasks.find(t => t.id === 8).deadline = '2026-10-10';        // 逾期太久，不提醒
+  zt.bugs.find(b => b.id === 10).deadline = '2026-10-26';        // 今天
+  r = await nt.pollOnce({ now: monday });
+  const dl = nt.listNotifications().items.filter(n => n.type === 'deadline');
+  check('截止日：明天截止 / 今天截止 / 刚逾期 各提醒一次，逾期太久的不提醒', r.notified === 3 && dl.length === 3 && dl.some(n => n.objectId === '2' && n.days === 1) && dl.some(n => n.objectId === '10' && n.kind === 'bug' && n.days === 0) && dl.some(n => n.objectId === '9' && n.days === -1) && !dl.some(n => n.objectId === '8'), JSON.stringify(dl.map(n => [n.kind, n.objectId, n.days])));
+  check('截止日：文案', /任务 #2 明天截止/.test(sent.system[0].b + sent.system[0].t) || sent.system[0].b.includes('明天截止'), JSON.stringify(sent.system));
+  reset();
+  r = await nt.pollOnce({ now: monday });
+  check('截止日：同一档不重复提醒', r.notified === 0);
+  r = await nt.pollOnce({ now: D('2026-10-27') });
+  check('截止日：第二天“明天截止”升级成“今天截止”，再提醒一次', r.notified >= 1 && nt.listNotifications().items.some(n => n.type === 'deadline' && n.objectId === '2' && n.days === 0), JSON.stringify(r));
+  zt.tasks.find(t => t.id === 2).deadline = '2026-11-10';       // 延期
+  r = await nt.pollOnce({ now: D('2026-10-27') });
+  check('截止日：延期后档位回退，不提醒', !nt.listNotifications().items.slice(0, r.notified).some(n => n.objectId === '2'));
+  reset();
+  zt.tasks.find(t => t.id === 7).deadline = '2026-11-01';       // 周日是“明天”... 先在周六检查
+  const saturday = D('2026-10-31');
+  r = await nt.pollOnce({ now: saturday });
+  check('休息日（周六）：不处理截止日，不提醒', !nt.listNotifications().items.slice(0, r.notified).some(n => n.type === 'deadline') && sent.system.length === 0, JSON.stringify([r, sent.system]));
+  r = await nt.pollOnce({ now: D('2026-11-02') });
+  check('回到上班日：这时才提醒（周一看到的是已逾期 1 天）', nt.listNotifications().items.some(n => n.objectId === '7' && n.type === 'deadline'), JSON.stringify(r));
+  nt.saveSettings({ types: { deadline: false } });
+  zt.tasks.find(t => t.id === 6).deadline = '2026-11-03';
+  reset();
+  r = await nt.pollOnce({ now: D('2026-11-02') });
+  check('截止日提醒可关', r.notified === 0 && sent.system.length === 0);
+  nt.saveSettings({ types: { deadline: true } });
 
   // ---------- 换了禅道 / 账号：重新建基线，清旧记录 ----------
   reset();
