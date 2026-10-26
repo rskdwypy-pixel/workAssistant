@@ -2465,6 +2465,120 @@ function assignBug({ bugId, assignedTo, comment }) {
   }, (b) => b.assignedTo === String(assignedTo), 'Bug 已指派');
 }
 
+// ============================================================================
+// 协作：在任务 / Bug / 需求下评论、转交任务、读操作历史
+// ============================================================================
+
+const COLLAB_TYPES = ['task', 'bug', 'story'];
+
+/** 对象详情里的操作历史（原始），旧的在前 */
+async function readObjectActions(type, id) {
+  const CH = cookiesToString(await getZentaoCookies());
+  const inner = type === 'task' ? await getTaskView(id, CH) : await getZentaoJson(`${type}-view-${id}.json?onlybody=yes`, CH);
+  const raw = inner && inner.actions;
+  const list = (Array.isArray(raw) ? raw : Object.values(raw || {})).filter(a => a && a.action);
+  list.sort((a, b) => (new Date(String(a.date || '').replace(' ', 'T')).getTime() || 0) - (new Date(String(b.date || '').replace(' ', 'T')).getTime() || 0) || Number(a.id) - Number(b.id));
+  return { list, users: (inner && inner.users) || {}, obj: inner && inner[type] };
+}
+
+/** 评论 HTML → 纯文本（段落、<br> 变成换行，去标签，解实体） */
+function commentToText(html) {
+  return decodeZentaoText(String(html || '')
+    .replace(/<\s*br\s*\/?>/gi, '\n').replace(/<\/(p|div|li)>/gi, '\n').replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')).replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * 任务 / Bug / 需求的操作历史（给界面展示：谁、做了什么、备注内容）。最近 limit 条，新的在前。
+ */
+async function getObjectHistory(type, id, { limit = 30 } = {}) {
+  if (!COLLAB_TYPES.includes(type)) throw new Error('不支持的类型');
+  if (!/^\d+$/.test(String(id))) throw new Error('非法的编号');
+  const { list } = await readObjectActions(type, id);
+  const names = config.zentao.users || {};
+  return list.slice(-limit).reverse().map(a => ({
+    id: String(a.id || ''),
+    actor: String(a.actor),
+    actorName: names[a.actor] || String(a.actor),
+    action: String(a.action),
+    date: String(a.date || ''),
+    extra: typeof a.extra === 'string' ? decodeZentaoText(a.extra).slice(0, 80) : '',
+    comment: commentToText(a.comment)
+  }));
+}
+
+/**
+ * 给任务 / Bug / 需求加一条备注（禅道的「备注」，不改状态）。
+ * 提交后回读操作历史，确认真的多了一条带备注的记录——禅道对失败也经常回 200，只看响应不可靠。
+ */
+async function addComment(type, id, text) {
+  if (!COLLAB_TYPES.includes(type)) return { success: false, message: '不支持的类型' };
+  if (!/^\d+$/.test(String(id))) return { success: false, message: '非法的编号' };
+  const plain = String(text || '').trim();
+  if (!plain) return { success: false, message: '请写点内容' };
+  if (plain.length > 5000) return { success: false, message: '备注太长了（最多 5000 字）' };
+  try {
+    const CH = cookiesToString(await getZentaoCookies());
+    const before = (await readObjectActions(type, id)).list.length;
+    // 备注框是富文本：纯文本转成 HTML（转义 + 换行变 <br>）
+    const html = plain.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br />');
+    const modern = await isModernZentao();
+    const resp = await fetch(`${zentaoBase()}/zentao/action-comment-${type}-${id}.${modern ? 'json' : 'html'}?onlybody=yes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json', 'Cookie': CH },
+      body: new URLSearchParams({ comment: html, uid: genUid() }).toString(),
+      redirect: 'manual'
+    });
+    const body = await resp.text();
+    const after = (await readObjectActions(type, id)).list;
+    const last = after[after.length - 1];
+    if (after.length > before && last && last.action === 'commented') return { success: true, message: '备注已添加' };
+    return { success: false, message: extractZentaoError(body) || '禅道没有接受这条备注（可能没有权限）' };
+  } catch (err) {
+    return { success: false, message: describeZentaoTransportError(err) };
+  }
+}
+
+/**
+ * 转交任务（禅道「指派」动作）：task-assignTo-{执行}-{任务}。
+ * 新版必须带「预计剩余」，否则会失败，而且失败时还会把任务的指派人清空——所以一定带上当前值，并回读确认。
+ * 已完成 / 已关闭 / 已取消的任务不能转交。
+ */
+async function assignTask({ taskId, assignedTo, comment }) {
+  if (!/^\d+$/.test(String(taskId))) return { success: false, message: '非法的任务编号' };
+  if (!assignedTo) return { success: false, message: '请选择转交给谁' };
+  try {
+    const CH = cookiesToString(await getZentaoCookies());
+    const view = await getTaskView(taskId, CH);
+    const task = view && view.task;
+    if (!task || !task.id) return { success: false, message: '没有取到这个任务（可能已删除或无权限）' };
+    if (['done', 'closed', 'cancel'].includes(task.status)) return { success: false, message: '已完成 / 已关闭 / 已取消的任务不能转交，请先激活' };
+    const modern = await isModernZentao();
+    const left = Number(task.left);
+    const resp = await fetch(`${zentaoBase()}/zentao/task-assignTo-${task.execution}-${taskId}.${modern ? 'json' : 'html'}?onlybody=yes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json', 'Cookie': CH },
+      body: new URLSearchParams({
+        assignedTo: String(assignedTo),
+        comment: String(comment || ''),
+        left: String(Number.isFinite(left) ? left : 0),
+        uid: genUid()
+      }).toString(),
+      redirect: 'manual'
+    });
+    const body = await resp.text();
+    const now = (await getTaskView(taskId, CH)).task;
+    if (now && now.assignedTo === String(assignedTo)) {
+      import('./effortService.js').then(m => m.invalidateTask(taskId)).catch(() => {});
+      return { success: true, message: '任务已转交' };
+    }
+    return { success: false, message: extractZentaoError(body) || '禅道没有接受这次转交' };
+  } catch (err) {
+    return { success: false, message: describeZentaoTransportError(err) };
+  }
+}
+
+
 /** 激活（重新打开）已解决的 Bug；与「确认」（bug-confirmBug）不是一回事 */
 function reactivateBug({ bugId, assignedTo, comment }) {
   return submitBugForm(bugId, 'activate', (f) => {
@@ -3157,6 +3271,10 @@ export {
   searchZentao,
   editBug,
   assignBug,
+  assignTask,
+  addComment,
+  getObjectHistory,
+  commentToText,
   reactivateBug,
   getBugBrief,
   listExecutionTasks,

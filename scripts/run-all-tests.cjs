@@ -22,6 +22,8 @@ const SUITES = [
   'test-login-storm.mjs',
   'test-assign-notify.mjs',
   'test-notify-ui',
+  'test-collab.mjs',
+  'test-collab-ui',
   'test-task-intake.mjs',
   'test-task-modal-flow',
   'test-task-card-bindings',

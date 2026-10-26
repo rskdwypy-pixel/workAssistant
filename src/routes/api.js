@@ -2023,6 +2023,35 @@ router.post('/zentao/bug/assign', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+/** POST /api/zentao/task/assign - { taskId, assignedTo, comment? } 转交任务 */
+router.post('/zentao/task/assign', async (req, res) => {
+  try {
+    if (!(await loadZentaoConfigOrError(res))) return;
+    const { assignTask } = await import('../services/zentaoService.js');
+    const b = req.body || {};
+    res.json(await assignTask({ taskId: b.taskId, assignedTo: b.assignedTo, comment: b.comment }));
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+/** POST /api/zentao/comment - { type: task|bug|story, id, comment } 在禅道对象下加一条备注 */
+router.post('/zentao/comment', async (req, res) => {
+  try {
+    if (!(await loadZentaoConfigOrError(res))) return;
+    const { addComment } = await import('../services/zentaoService.js');
+    const b = req.body || {};
+    res.json(await addComment(String(b.type || ''), b.id, b.comment));
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+/** GET /api/zentao/history?type=task&id=1 - 操作历史（谁、做了什么、备注），新的在前 */
+router.get('/zentao/history', async (req, res) => {
+  try {
+    if (!(await loadZentaoConfigOrError(res))) return;
+    const { getObjectHistory } = await import('../services/zentaoService.js');
+    res.json({ success: true, data: await getObjectHistory(String(req.query.type || ''), req.query.id, { limit: Math.min(Number(req.query.limit) || 30, 100) }) });
+  } catch (err) { res.status(400).json({ success: false, message: err.message }); }
+});
+
 /** POST /api/zentao/bug/reactivate - { bugId, assignedTo?, comment? } 激活（重新打开）已解决的 Bug */
 router.post('/zentao/bug/reactivate', async (req, res) => {
   try {

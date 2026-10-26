@@ -5353,6 +5353,7 @@ function showTaskDetail(task) {
     </div>
     ${progressUpdatesHtml}
     <div class="att-section" style="margin: 16px 0;"></div>
+    <div class="collab-section" style="margin: 16px 0;"></div>
     <div style="display: flex; gap: 8px;">
       ${task.status !== 'done' ? `<button class="btn-primary detail-action-btn" data-action="done">标记完成</button>` : ''}
       <button class="btn-secondary detail-action-btn" style="border-color: #e74c3c; color: #e74c3c;" data-action="delete">删除</button>
@@ -5432,6 +5433,10 @@ function showTaskDetail(task) {
   // 附件区：预览、下载、追加（可直接粘贴截图）、删除、重试
   if (typeof AttachmentPanel !== 'undefined') {
     AttachmentPanel.mount(body.querySelector('.att-section'), task, { onChanged: () => loadTasks().catch(() => { }) });
+  }
+  // 协作区：直接评论、转交（记在禅道里）
+  if (typeof CollabPanel !== 'undefined') {
+    CollabPanel.mount(body.querySelector('.collab-section'), task, { type: 'task', onChanged: () => loadTasks().catch(() => { }) });
   }
 
   modal.classList.add('active');
@@ -9943,6 +9948,7 @@ const BugManager = {
           </div>
         ` : ''}
         <div class="att-section" style="margin-top: 12px;"></div>
+        <div class="collab-section" style="margin-top: 12px;"></div>
         ${bug.history && bug.history.length > 0 ? `
           <div style="margin-top: 12px;">
             <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 500;">历史记录:</p>
@@ -9999,6 +10005,10 @@ const BugManager = {
     // 附件区：截图 / 录屏预览、下载、追加（可直接粘贴截图）、删除、重试
     if (typeof AttachmentPanel !== 'undefined') {
       AttachmentPanel.mount(content.querySelector('.att-section'), bug, { onChanged: () => this.loadBugs() });
+    }
+    // 协作区：直接评论（记在禅道里）和最近动态
+    if (typeof CollabPanel !== 'undefined') {
+      CollabPanel.mount(content.querySelector('.collab-section'), bug, { type: 'bug', onChanged: () => this.loadBugs() });
     }
 
     actions.innerHTML = '';
