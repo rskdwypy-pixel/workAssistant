@@ -327,7 +327,17 @@ async function getStoryForm({ product } = {}) {
 }
 
 /** 在某产品下按标题回查最新的需求 ID（新建响应不带 ID） */
-async function findStoryIdByTitle(product, title) {
+async function findStoryIdByTitle(product, title, { retries = 3, delayMs = 500 } = {}) {
+  // 刚创建的需求偶尔还没出现在列表里（实测新版禅道有这种延迟）：没找到就隔一会儿再找，最多几次
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const id = await findStoryIdOnce(product, title);
+    if (id) return id;
+    if (attempt < retries) await new Promise(r => setTimeout(r, delayMs));
+  }
+  return null;
+}
+
+async function findStoryIdOnce(product, title) {
   const want = decodeZentaoText(String(title || '')).trim();
   // product-browse 默认按 ID 倒序、最新的在前，新旧两个版本都有；story-browse 新版已去掉，旧版实测也读不到，仅作兜底
   const paths = [

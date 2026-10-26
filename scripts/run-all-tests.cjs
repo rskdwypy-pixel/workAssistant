@@ -24,6 +24,8 @@ const SUITES = [
   'test-notify-ui',
   'test-collab.mjs',
   'test-collab-ui',
+  'test-quick-search.mjs',
+  'test-quick-search-ui',
   'test-task-intake.mjs',
   'test-task-modal-flow',
   'test-task-card-bindings',
