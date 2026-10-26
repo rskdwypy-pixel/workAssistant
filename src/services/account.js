@@ -329,7 +329,7 @@ async function clearLocalData() {
   const { updateTasks } = await import('../utils/storage.js');
   await updateTasks((data) => ({ ...data, tasks: [] }));
   const dir = config.paths.data;
-  for (const f of ['reports.json', 'history.json', 'executions.json', 'projects.json', 'executionLearning.json', 'zentao-users.json', 'tasks.json.backup', 'autofill-log.json', 'data-scope.json', 'notify-state.json', 'notifications.json']) {
+  for (const f of ['reports.json', 'history.json', 'executions.json', 'projects.json', 'executionLearning.json', 'zentao-users.json', 'tasks.json.backup', 'autofill-log.json', 'data-scope.json', 'notify-state.json', 'notifications.json', 'timer.json']) {
     rmSync(join(dir, f), { force: true });
   }
   // 需求 / 文档 / 工时等缓存（本来按地址隔离，这里一并清掉，免得留着占地方）

@@ -137,7 +137,7 @@ function fetchModernSpaces() {
         try { absorb(await ajaxJson(spaceDataPath(space, id))); } catch { /* 无权限的空间跳过 */ }
       }
     };
-    await Promise.all(Array.from({ length: Math.min(6, queue.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(2, queue.length) }, worker));
     const data = { libs: [...libs.values()], docs: [...docs.values()] };
     modernSnapshot = { at: Date.now(), data };
     return data;

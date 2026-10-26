@@ -28,6 +28,8 @@ const SUITES = [
   'test-quick-search-ui',
   'test-workload.mjs',
   'test-workload-ui',
+  'test-timer.mjs',
+  'test-timer-ui',
   'test-task-intake.mjs',
   'test-task-modal-flow',
   'test-task-card-bindings',

@@ -5356,6 +5356,7 @@ function showTaskDetail(task) {
     <div class="collab-section" style="margin: 16px 0;"></div>
     <div style="display: flex; gap: 8px;">
       ${task.status !== 'done' ? `<button class="btn-primary detail-action-btn" data-action="done">标记完成</button>` : ''}
+      ${task.status !== 'done' && task.zentaoId && typeof WorkTimer !== 'undefined' && !WorkTimer.current() ? `<button class="btn-secondary detail-timer-btn" type="button">⏱ 开始计时</button>` : ''}
       <button class="btn-secondary detail-action-btn" style="border-color: #e74c3c; color: #e74c3c;" data-action="delete">删除</button>
     </div>
   `;
@@ -5413,6 +5414,11 @@ function showTaskDetail(task) {
       handleTaskAction(task.id, btn.dataset.action);
       document.getElementById('taskModal').classList.remove('active');
     });
+  });
+
+  // 开始计时（工时计时器）：只对已同步到禅道的任务
+  body.querySelector('.detail-timer-btn')?.addEventListener('click', async () => {
+    if (await WorkTimer.start({ id: task.zentaoId, name: task.title })) document.getElementById('taskModal').classList.remove('active');
   });
 
   // 绑定标题点击编辑事件

@@ -15,7 +15,9 @@ const LOGIN_WINDOW_MAX = 2;
 const loginsInWindow = () => (recentLogins = recentLogins.filter(t => Date.now() - t < LOGIN_WINDOW_MS)).length;
 
 // 同时发往禅道的请求上限（新版禅道在并发 6 以上时实测会开始返回异常）。登录请求不占名额，避免登录排在队尾造成死锁。
-const MAX_INFLIGHT = 4;
+const MAX_INFLIGHT = 2;
+/** 被判「会话失效」后，先用同一个会话再试几次的间隔（毫秒），都不行才重新登录 */
+const TRANSIENT_RETRY_WAITS = [150, 500];
 let inflight = 0;
 const waiters = [];
 async function acquireSlot() {
@@ -105,6 +107,16 @@ async function zentaoFetch(input, init = {}) {
 
   const text = await resp.clone().text();
   if (!looksLikeSessionExpired(resp, text)) return resp;
+
+  // 先别急着重登：新版禅道在并发请求时会偶发地把有效会话误报成「登录已超时」（会话读写竞争；实测串行请求 89 个空间全部正常，
+  // 并发就有一部分被误报）。用同一个会话稍等片刻再试，试成功了就说明只是误报；连试几次都失效才是真的过期。
+  // 以前直接重登，一轮文档扫描就刷出几十条「登录」动态。
+  for (const waitMs of TRANSIENT_RETRY_WAITS) {
+    await new Promise(r => setTimeout(r, waitMs + Math.floor(Math.random() * 120)));
+    const again = await send(headers);
+    const againText = await again.clone().text();
+    if (!looksLikeSessionExpired(again, againText)) return again;
+  }
 
   // 会话失效：如果缓存里已经是别人刷新过的新会话就直接用，否则作废后重新登录
   const sentSid = parseCookieHeader(sentCookie).zentaosid;
