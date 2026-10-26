@@ -60,6 +60,8 @@ globalThis.fetch = async (input, init = {}) => {
     const names = { zhangs: '张三', lisi: '李四' };
     return zj({ user: { account, realname: names[account], role: 'qa', email: 'x@y', join: '2023-05-15' }, deptPath: [{ name: '产研部' }] });
   }
+  const tv = url.match(/task-view-(\d+)\.json/);
+  if (tv) return zj({ task: { id: tv[1], name: `task-${tv[1]}` } });
   return new Response('not mocked: ' + url, { status: 404 });
 };
 
@@ -138,6 +140,41 @@ try {
   writeTasks([{ id: 't2', title: '李四的任务', zentaoId: '2' }]);
   r = await call('POST', '/account/login', { url: 'http://10.0.0.1:8088', username: 'lisi', password: 'pw-li' });
   check('同一账号重新登录：不确认、不清空', r.success && !r.data.switched && readTasksFile().length === 1);
+
+  // ---------- 同一账号换禅道地址（新旧禅道的任务 / Bug 编号会重叠，旧数据不能留）----------
+  r = await call('POST', '/account/login', { url: 'http://10.0.0.2:8088', username: 'lisi', password: 'pw-li' });
+  check('同账号只换地址且本地有数据：先确认，不保存', r.data.needConfirm && r.data.previous.urlChanged === true && r.data.previous.accountChanged === false && r.data.previous.url === 'http://10.0.0.1:8088' && /ZENTAO_URL=http:\/\/10\.0\.0\.1:8088\n/.test(env()) && readTasksFile().length === 1, JSON.stringify(r.data));
+  r = await call('POST', '/account/login', { url: 'http://10.0.0.2:8088', username: 'lisi', password: 'pw-li', confirmSwitch: true });
+  check('确认后：旧数据清空并先备份，地址换成新的', r.success && r.data.switched && readTasksFile().length === 0 && /ZENTAO_URL=http:\/\/10\.0\.0\.2:8088\n/.test(env()) && existsSync(join(tmp, 'backups')) && readdirSync(join(tmp, 'backups')).some(f => f.startsWith('tasks__switch-')), String(existsSync(join(tmp, 'backups')) && readdirSync(join(tmp, 'backups'))));
+  writeTasks([{ id: 't3', title: '新禅道里的任务', zentaoId: '3' }]);
+  r = await call('POST', '/account/login', { url: 'http://10.0.0.2:8088/zentao/', username: 'lisi', password: 'pw-li' });
+  check('同账号同地址（多写了 /zentao/）重新登录：不当成换地址', r.success && !r.data.switched && readTasksFile().length === 1);
+  // 设置页保存 / 配置导入不经登录弹窗，直接换地址：自动备份并清空，不再询问
+  let rc = await acct.reconcileBeforeChange('http://10.0.0.2:8088', 'lisi');
+  check('保存的地址和账号没变：不清', rc.cleared === false && readTasksFile().length === 1);
+  rc = await acct.reconcileBeforeChange('http://10.0.0.3:8088', 'lisi');
+  check('设置页换了地址：自动清空本地旧数据', rc.cleared === true && rc.previous.url === 'http://10.0.0.2:8088' && readTasksFile().length === 0);
+  writeTasks([{ id: 't4', title: 'x', zentaoId: '4' }]);
+  rc = await acct.reconcileBeforeChange('http://10.0.0.3:8088', 'wangw');
+  check('设置页换了账号：同样清空', rc.cleared === true && readTasksFile().length === 0);
+  rc = await acct.reconcileBeforeChange('', '');
+  check('清空 / 停用配置不算换禅道：不清', rc.cleared === false);
+  // 老版本留下的数据没有归属记录：按改动前的配置补记，再比较
+  writeTasks([{ id: 't5', title: 'y', zentaoId: '5' }]);
+  rmSync(join(tmp, 'data-scope.json'), { force: true });
+  rc = await acct.reconcileBeforeChange('http://10.0.0.9:8088', 'lisi');
+  check('没有归属记录的老数据：按改动前的地址补记，换了地址就清', rc.cleared === true && readTasksFile().length === 0, JSON.stringify(rc));
+  // 已经换过地址、旧数据还留着（没有记录）：抽查标题，对不上就是别的禅道的
+  writeTasks([{ id: 'a', type: 'task', title: 'task-1', zentaoId: '1' }, { id: 'b', type: 'task', title: 'task-2', zentaoId: '2' }, { id: 'c', type: 'task', title: 'task-3', zentaoId: '3' }]);
+  check('抽查：标题和当前禅道一致 → 不是别的禅道', (await acct.probeForeignData()) === false);
+  writeTasks([{ id: 'a', type: 'task', title: '旧禅道的任务甲', zentaoId: '1' }, { id: 'b', type: 'task', title: '旧禅道的任务乙', zentaoId: '2' }, { id: 'c', type: 'task', title: '旧禅道的任务丙', zentaoId: '3' }]);
+  check('抽查：标题对不上 → 判定为别的禅道的数据', (await acct.probeForeignData()) === true);
+  writeTasks([{ id: 'a', type: 'task', title: '只有一条', zentaoId: '1' }]);
+  check('抽查：数据太少不下结论（不清）', (await acct.probeForeignData()) === false);
+  rmSync(join(tmp, 'data-scope.json'), { force: true });
+  writeTasks([{ id: 'a', type: 'task', title: '旧禅道的任务甲', zentaoId: '1' }, { id: 'b', type: 'task', title: '旧禅道的任务乙', zentaoId: '2' }]);
+  r = await call('POST', '/account/login', { url: 'http://10.0.0.1:8088', username: 'lisi', password: 'pw-li', confirmSwitch: true });
+  writeTasks([{ id: 't2', title: '李四的任务', zentaoId: '2' }]);
 
   // ---------- 退出 ----------
   r = await call('POST', '/account/logout');

@@ -2087,6 +2087,11 @@ async function importAllConfig() {
         const result = await response.json();
         if (result.success) {
           console.log('[前端] 禅道配置已保存');
+          if (result.dataCleared) {
+            // 换了禅道地址 / 账号：后端已把旧数据备份并清空，刷新页面重新同步
+            Toast.info(result.message || '已切换禅道，本地旧数据已清空，正在重新同步');
+            setTimeout(() => location.reload(), 1800);
+          }
         } else {
           console.warn('[前端] 禅道配置保存失败:', result.error);
         }

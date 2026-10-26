@@ -375,7 +375,10 @@ const Account = {
     const data = res.data || {};
     if (data.needConfirm) {
       const prev = data.previous || {};
-      const ok = await this.confirm('切换账号', `当前本地数据属于 ${prev.realname}（${prev.account}）。用 ${body.username} 登录会清空本地任务、Bug、报告和附件，改为同步 ${body.username} 的数据。继续吗？`, '清空并切换', { danger: true });
+      // 换了禅道地址：新旧禅道里的任务 / Bug 编号会重叠，旧数据不能留
+      const from = prev.urlChanged && prev.url ? `禅道 ${prev.url} 的 ${prev.realname || prev.account}（${prev.account}）` : `${prev.realname}（${prev.account}）`;
+      const title = prev.urlChanged && !prev.accountChanged ? '切换禅道' : '切换账号';
+      const ok = await this.confirm(title, `当前本地数据属于 ${from}。登录这个${prev.urlChanged ? '禅道' : '账号'}会清空本地任务、Bug、报告和附件（会先备份任务数据），改为同步 ${body.username} 的数据。继续吗？`, '清空并切换', { danger: true });
       if (ok) return this.submitLogin(overlay, true);
       return;
     }

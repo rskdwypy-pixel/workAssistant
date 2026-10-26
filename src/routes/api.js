@@ -1020,6 +1020,10 @@ router.post('/zentao/config', async (req, res) => {
     const configModule = await import('../config.js');
     const next = configModule.mergeZentaoSettings({ enabled, url, username, password, createTaskUrl }, configModule.config.zentao);
 
+    // 换了禅道地址或账号：本地任务 / Bug 是旧禅道的，编号还可能和新禅道重叠，先备份再清空（校验通过之后、写配置之前）
+    const { reconcileBeforeChange } = await import('../services/account.js');
+    const switched = await reconcileBeforeChange(next.url, next.username);
+
     // 先持久化（含输入校验，失败时运行时配置保持不变）
     configModule.updateEnvFile({
       ZENTAO_ENABLED: next.enabled ? 'true' : 'false',
@@ -1037,8 +1041,12 @@ router.post('/zentao/config', async (req, res) => {
     clearCookies();
     (await import('../services/account.js')).invalidateState();
 
-    console.log('[API] 禅道配置已保存');
-    res.json({ success: true, message: '禅道配置已保存' });
+    console.log('[API] 禅道配置已保存', switched.cleared ? '（已切换禅道，本地旧数据已备份并清空）' : '');
+    res.json({
+      success: true,
+      dataCleared: switched.cleared,
+      message: switched.cleared ? '禅道配置已保存；因为换了禅道地址 / 账号，本地旧数据已备份并清空，正在重新同步' : '禅道配置已保存'
+    });
   } catch (err) {
     console.error('[API] 保存禅道配置失败:', err.message);
     res.status(500).json({ error: err.message });

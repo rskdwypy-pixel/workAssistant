@@ -166,6 +166,9 @@ async function applySettings(s) {
       password: str(z.password, 300),
       createTaskUrl: str(z.defaultExecution, 50).trim()
     };
+    // 导入的配置换了禅道地址 / 账号：本地旧数据先备份再清空
+    const { reconcileBeforeChange } = await import('./account.js');
+    await reconcileBeforeChange(next.url, next.username);
     Object.assign(env, {
       ZENTAO_ENABLED: next.enabled ? 'true' : 'false',
       ZENTAO_URL: next.url,

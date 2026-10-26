@@ -11,7 +11,7 @@
  * 同一个文件也记录本地数据属于哪个账号：换成别的账号登录时，本地任务 / Bug / 报告要清空重新同步。
  */
 import { join } from 'path';
-import { existsSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, rmSync, readdirSync, mkdirSync, copyFileSync } from 'fs';
 import { config, updateEnvFile } from '../config.js';
 
 const ROLE_LABEL = {
@@ -38,6 +38,146 @@ function writeAccount(data) {
 function dataOwner() {
   const saved = readAccount();
   return (saved && saved.account) || config.zentao.username || '';
+}
+
+// ==================== 本地数据属于哪个禅道 ====================
+// 本地任务 / Bug 里存的是禅道里的编号。换了禅道地址（哪怕账号没变），新旧两个禅道的编号会重叠
+// （都有 944 号任务，却不是同一个），留着旧数据既显示不对，还可能把新禅道里别的对象当成同一个。
+// 所以记下「本地数据来自哪个禅道地址 + 账号」，变了就清掉重新同步。
+
+const scopeFile = () => join(config.paths.data, 'data-scope.json');
+
+function readScope() {
+  try {
+    const v = existsSync(scopeFile()) ? JSON.parse(readFileSync(scopeFile(), 'utf-8')) : null;
+    return v && typeof v === 'object' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeScope(url, account) {
+  try {
+    writeFileSync(scopeFile(), JSON.stringify({ url: normalizeZentaoUrl(url), account: String(account || ''), at: new Date().toISOString() }, null, 2), 'utf-8');
+  } catch { /* 写不进去下次再记 */ }
+}
+
+const sameUrl = (a, b) => normalizeZentaoUrl(a).toLowerCase() === normalizeZentaoUrl(b).toLowerCase();
+
+/** 本地有没有任务 / Bug 数据（有才需要考虑清） */
+async function hasLocalData() {
+  const { readTasks } = await import('../utils/storage.js');
+  return (((await readTasks()).tasks) || []).length > 0;
+}
+
+/**
+ * 新的「禅道地址 + 账号」会不会让本地数据对不上。
+ * @returns {{changed:boolean, url:boolean, account:boolean, previous:{url:string, account:string}|null}}
+ *   没有记录（老版本留下的数据）时 previous 为 null、changed 为 false——是否属于别的禅道要另外抽查（见 probeForeignData）
+ */
+function scopeChange(nextUrl, nextAccount) {
+  const sc = readScope();
+  if (!sc) return { changed: false, url: false, account: false, previous: null };
+  const url = !!sc.url && !sameUrl(sc.url, nextUrl);
+  const account = !!sc.account && sc.account !== String(nextAccount || '');
+  return { changed: url || account, url, account, previous: { url: sc.url || '', account: sc.account || '' } };
+}
+
+/**
+ * 抽查本地任务 / Bug：拿几条带禅道编号的，到当前禅道读标题，对不上的占多数就说明这些数据来自别的禅道。
+ * 用于没有「来自哪个禅道」记录的老数据；只在能连上禅道时调用。
+ * @returns {Promise<boolean>} true = 判断为别的禅道的数据
+ */
+async function probeForeignData() {
+  try {
+    const z = await import('./zentaoService.js');
+    const { readTasks } = await import('../utils/storage.js');
+    const items = (((await readTasks()).tasks) || []).filter(t => t.zentaoId && (t.type === 'bug' || t.type === 'task' || !t.type));
+    if (items.length < 2) return false;
+    const picks = [];
+    const step = Math.max(1, Math.floor(items.length / 6));
+    for (let i = 0; i < items.length && picks.length < 6; i += step) picks.push(items[i]);
+    const norm = (v) => String(v || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    let checked = 0, matched = 0;
+    for (const t of picks) {
+      try {
+        const kind = t.type === 'bug' ? 'bug' : 'task';
+        const d = kind === 'bug' ? await z.getZentaoJson(`bug-view-${t.zentaoId}.json?onlybody=yes`) : await z.getTaskView(t.zentaoId);
+        const remote = d && d[kind];
+        checked++;
+        if (remote && norm(remote.title || remote.name) && norm(remote.title || remote.name) === norm(t.title || t.content || t.name)) matched++;
+      } catch {
+        checked++; // 读不到（编号在这个禅道里不存在 / 无权限）也算对不上
+      }
+    }
+    return checked >= 2 && matched * 2 < checked;
+  } catch {
+    return false; // 抽查本身出错不下结论，宁可不清
+  }
+}
+
+/**
+ * 切换到新的禅道地址 / 账号：先把 tasks.json 备份一份，再清掉本地数据，并记下新的归属。
+ * 备份放在 data/backups，可手动恢复。
+ */
+async function switchLocalData(nextUrl, nextAccount) {
+  try {
+    const tasksFile = join(config.paths.data, 'tasks.json');
+    if (existsSync(tasksFile)) {
+      const dir = join(config.paths.data, 'backups');
+      mkdirSync(dir, { recursive: true });
+      copyFileSync(tasksFile, join(dir, `tasks__switch-${new Date().toISOString().replace(/[:.]/g, '-')}.json`));
+    }
+  } catch { /* 备份失败不挡切换，但下面照常清 */ }
+  await clearLocalData();
+  writeScope(nextUrl, nextAccount);
+}
+
+/**
+ * 在改禅道地址 / 账号之前调用（设置页保存、配置导入）：变了且本地有数据就备份 + 清空。
+ * 没有「归属」记录的老数据，在这里按「改动前的配置」补记，下次再变才能识别。
+ * @returns {Promise<{cleared:boolean, previous:object|null}>}
+ */
+async function reconcileBeforeChange(nextUrl, nextAccount) {
+  const prevUrl = config.zentao.url || '';
+  const prevAccount = config.zentao.username || '';
+  if (!nextUrl || !nextAccount) return { cleared: false, previous: null }; // 停用 / 清空配置不算换禅道
+  let ch = scopeChange(nextUrl, nextAccount);
+  if (!readScope() && prevUrl) {
+    // 老数据没有记录：把改动前的配置当作归属，再和新的比
+    writeScope(prevUrl, dataOwner() || prevAccount);
+    ch = scopeChange(nextUrl, nextAccount);
+  }
+  if (ch.changed && await hasLocalData()) {
+    await switchLocalData(nextUrl, nextAccount);
+    return { cleared: true, previous: ch.previous };
+  }
+  if (ch.changed || !readScope()) writeScope(nextUrl, nextAccount);
+  return { cleared: false, previous: ch.previous };
+}
+
+/**
+ * 登录状态确认没问题时的兜底：本地数据归属和当前配置对得上才放心。
+ *  - 有归属记录但和当前配置不一致（比如手改了 .env）→ 清
+ *  - 没有归属记录（老版本留下的数据）→ 抽查，判断是别的禅道的就清；然后记下归属
+ */
+async function ensureDataScope() {
+  try {
+    const url = config.zentao.url || '';
+    const account = config.zentao.username || '';
+    if (!url || !account) return;
+    const ch = scopeChange(url, account);
+    if (ch.changed) {
+      if (await hasLocalData()) await switchLocalData(url, account);
+      else writeScope(url, account);
+      return;
+    }
+    if (readScope()) return;
+    if (await hasLocalData() && await probeForeignData()) await switchLocalData(url, account);
+    else writeScope(url, account);
+  } catch (err) {
+    console.warn('[Account] 核对本地数据归属失败:', err.message);
+  }
 }
 
 /**
@@ -130,6 +270,7 @@ async function getAccountState({ refresh = false } = {}) {
   try {
     const profile = await fetchProfile();
     writeAccount({ ...profile, zentaoUrl: z.url, updatedAt: new Date().toISOString() });
+    await ensureDataScope();
     value = { state: 'ok', profile, message: '' };
   } catch (err) {
     const c = classifyLoginError(err);
@@ -160,8 +301,13 @@ async function clearLocalData() {
   const { updateTasks } = await import('../utils/storage.js');
   await updateTasks((data) => ({ ...data, tasks: [] }));
   const dir = config.paths.data;
-  for (const f of ['reports.json', 'history.json', 'executions.json', 'projects.json', 'executionLearning.json', 'zentao-users.json', 'tasks.json.backup']) {
+  for (const f of ['reports.json', 'history.json', 'executions.json', 'projects.json', 'executionLearning.json', 'zentao-users.json', 'tasks.json.backup', 'autofill-log.json', 'data-scope.json']) {
     rmSync(join(dir, f), { force: true });
+  }
+  // 需求 / 文档 / 工时等缓存（本来按地址隔离，这里一并清掉，免得留着占地方）
+  const cacheDir = join(dir, 'cache');
+  if (existsSync(cacheDir)) {
+    for (const name of readdirSync(cacheDir)) rmSync(join(cacheDir, name), { recursive: true, force: true });
   }
   const att = join(dir, 'attachments');
   if (existsSync(att)) {
@@ -193,18 +339,27 @@ async function login({ url, username, password, confirmSwitch = false }) {
   }
 
   const owner = dataOwner();
-  const { readTasks } = await import('../utils/storage.js');
-  const hasData = ((await readTasks()).tasks || []).length > 0;
-  const switching = owner && owner !== account && hasData;
+  const hasData = await hasLocalData();
+  // 没有归属记录的老数据：按登录前的配置（地址 + 账号）补记，这样「账号没变、只换地址」也能识别
+  if (!readScope() && config.zentao.url) writeScope(config.zentao.url, owner || config.zentao.username);
+  const ch = scopeChange(zentaoUrl, account);
+  const switching = hasData && (ch.changed || (owner && owner !== account));
   if (switching && !confirmSwitch) {
     const saved = readAccount();
     return {
       ok: false,
       needConfirm: true,
-      previous: { account: owner, realname: (saved && saved.account === owner && saved.realname) || owner }
+      previous: {
+        account: owner || (ch.previous && ch.previous.account) || '',
+        realname: (saved && saved.account === owner && saved.realname) || owner,
+        url: (ch.previous && ch.previous.url) || '',
+        urlChanged: ch.url,
+        accountChanged: !!(owner && owner !== account) || ch.account
+      }
     };
   }
-  if (switching) await clearLocalData();
+  if (switching) await switchLocalData(zentaoUrl, account);
+  else writeScope(zentaoUrl, account);
 
   updateEnvFile({
     ZENTAO_ENABLED: 'true',
@@ -273,5 +428,6 @@ async function resetAll({ includeData = false } = {}) {
 
 export {
   getAccountState, login, logout, resetAll, invalidateState, classifyLoginError, normalizeZentaoUrl,
-  clearLocalData, readAccount, RESET_ENV
+  clearLocalData, readAccount, RESET_ENV,
+  reconcileBeforeChange, ensureDataScope, probeForeignData
 };
