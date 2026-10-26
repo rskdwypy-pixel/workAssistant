@@ -19,6 +19,7 @@ const SUITES = [
   'test-optimistic',
   'test-rollback',
   'test-backend-fixes.mjs',
+  'test-login-storm.mjs',
   'test-task-intake.mjs',
   'test-task-modal-flow',
   'test-task-card-bindings',

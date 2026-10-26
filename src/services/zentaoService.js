@@ -7,6 +7,25 @@ let zentaoCookies = null;
 let zentaoCookieExpiry = null;
 // 正在进行的登录（并发请求共用一次登录，避免同时打出多次登录）
 let loginInFlight = null;
+// 最近几次登录成功的时间。会话失效触发的重登做限速：30 秒内最多登录 2 次，再多就不再重登
+// （防止连环重登把禅道的「登录」动态刷屏；偶发的真实过期不受影响）
+let recentLogins = [];
+const LOGIN_WINDOW_MS = 30 * 1000;
+const LOGIN_WINDOW_MAX = 2;
+const loginsInWindow = () => (recentLogins = recentLogins.filter(t => Date.now() - t < LOGIN_WINDOW_MS)).length;
+
+// 同时发往禅道的请求上限（新版禅道在并发 6 以上时实测会开始返回异常）。登录请求不占名额，避免登录排在队尾造成死锁。
+const MAX_INFLIGHT = 4;
+let inflight = 0;
+const waiters = [];
+async function acquireSlot() {
+  if (inflight < MAX_INFLIGHT) { inflight++; return; }
+  await new Promise(resolve => waiters.push(resolve));   // 名额由释放者直接交接，inflight 数不变
+}
+function releaseSlot() {
+  const next = waiters.shift();
+  if (next) next(); else inflight--;
+}
 
 // 禅道登录用的 md5（与前台 md5.js 行为一致：小写十六进制）
 const md5 = (s) => createHash('md5').update(String(s), 'utf8').digest('hex');
@@ -67,11 +86,18 @@ async function zentaoFetch(input, init = {}) {
   if (!headers.has('Referer')) headers.set('Referer', `${base}/zentao/`);
   if (method !== 'GET' && method !== 'HEAD' && !headers.has('Origin')) headers.set('Origin', base);
 
-  const send = (h) => globalFetch(input, {
+  const raw = (h) => globalFetch(input, {
     ...rest,
     headers: h,
     signal: rest.signal || AbortSignal.timeout(timeout || ZENTAO_TIMEOUT_MS)
   });
+  // 带会话的请求限制并发；登录自己（_noSessionRetry）和没带 Cookie 的不限
+  const gated = !_noSessionRetry && !!headers.get('Cookie');
+  const send = async (h) => {
+    if (!gated) return raw(h);
+    await acquireSlot();
+    try { return await raw(h); } finally { releaseSlot(); }
+  };
 
   const resp = await send(headers);
   const sentCookie = headers.get('Cookie');
@@ -82,8 +108,15 @@ async function zentaoFetch(input, init = {}) {
 
   // 会话失效：如果缓存里已经是别人刷新过的新会话就直接用，否则作废后重新登录
   const sentSid = parseCookieHeader(sentCookie).zentaosid;
+  const where = `${String(input).replace(/^https?:\/\/[^/]+\/zentao\//, '').slice(0, 60)} → HTTP ${resp.status} ${text.slice(0, 60).replace(/\s+/g, ' ')}`;
+  // 短时间内已经登录过好几次、会话还是被判失效：多半不是真的过期（个别接口的特殊返回等），再登录也解决不了，
+  // 只会在禅道的动态里刷出一堆「登录」。不再重登，原样交给调用方处理。
+  if (zentaoCookies && zentaoCookies.zentaosid === sentSid && loginsInWindow() >= LOGIN_WINDOW_MAX) {
+    console.warn(`[ZentaoService] ${LOGIN_WINDOW_MS / 1000} 秒内已登录 ${loginsInWindow()} 次，仍被判会话失效，不再重登：${where}`);
+    return resp;
+  }
   if (!zentaoCookies || zentaoCookies.zentaosid === sentSid) {
-    console.log('[ZentaoService] 会话已失效，重新登录后重试');
+    console.log(`[ZentaoService] 会话已失效，重新登录后重试：${where}`);
     clearCookies();
   }
   const fresh = await getZentaoCookies();
@@ -204,6 +237,7 @@ async function getZentaoCookies() {
       .then((cookies) => {
         zentaoCookies = cookies;
         zentaoCookieExpiry = Date.now() + 60 * 60 * 1000;
+        recentLogins.push(Date.now());
         return cookies;
       })
       .finally(() => {
@@ -345,11 +379,9 @@ async function createTask(taskData) {
     formData.append('execution', executionId);
     formData.append('type', taskData.type || 'devel');
     formData.append('module', '0');
-    if (taskData.assignedTo) {
-      formData.append('assignedTo[]', taskData.assignedTo);
-    } else {
-      formData.append('assignedTo[]', '');
-    }
+    // 旧版指派人是多选框 assignedTo[]；新版（21+）是单选 assignedTo，再用 assignedTo[] 提交会被存成字符串 "Array"
+    const assignedField = (await isModernZentao()) ? 'assignedTo' : 'assignedTo[]';
+    formData.append(assignedField, taskData.assignedTo || '');
     formData.append('teamMember', '');
     formData.append('mode', 'linear');
     formData.append('status', 'wait');

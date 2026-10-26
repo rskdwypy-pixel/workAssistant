@@ -10,7 +10,7 @@
  *   - 看板型执行要带 region / lane（取自看板页）。
  */
 import { config } from '../config.js';
-import { getZentaoCookies, cookiesToString, getZentaoJson, getTaskView, getKanbanParams, getTasks } from './zentaoService.js';
+import { getZentaoCookies, cookiesToString, getZentaoJson, getTaskView, getKanbanParams, getTasks, isModernZentao } from './zentaoService.js';
 
 const TASK_TYPES = ['design', 'devel', 'request', 'test', 'study', 'discuss', 'ui', 'affair', 'misc'];
 const base = () => String(config.zentao.url || '').replace(/\/$/, '');
@@ -43,10 +43,11 @@ export function normalizeDraft(d = {}) {
 }
 
 /** 组装表单（不含看板字段时就是普通执行表单） */
-export function buildTaskForm(draft, { storyId, kanban } = {}) {
+export function buildTaskForm(draft, { storyId, kanban, modern = false } = {}) {
   const fd = new FormData();
   const put = (k, v) => fd.append(k, v == null ? '' : String(v));
-  put('type', draft.type); put('module', '0'); put('assignedTo[]', draft.assignedTo);
+  // 新版（21+）指派人是单选 assignedTo；再用 assignedTo[] 会被存成字符串 "Array"
+  put('type', draft.type); put('module', '0'); put(modern ? 'assignedTo' : 'assignedTo[]', draft.assignedTo);
   put('teamMember', ''); put('mode', 'linear');
   if (kanban && kanban.region && kanban.lane) { put('region', kanban.region); put('lane', kanban.lane); }
   put('status', 'wait'); put('story', storyId || ''); put('color', '');
@@ -125,7 +126,7 @@ export async function createLinkedTask(link, draft) {
     const resp = await fetch(url, {
       method: 'POST',
       headers: { Cookie: CH, 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json, text/javascript, */*; q=0.01', Referer: url },
-      body: buildTaskForm(d, { storyId, kanban: meta.kanban }),
+      body: buildTaskForm(d, { storyId, kanban: meta.kanban, modern: (await isModernZentao()) === true }),
       redirect: 'manual'
     });
     const text = await resp.text();
