@@ -7,7 +7,7 @@
  * 需求是只读视图（P0）：浏览、查看、在禅道打开。创建 / 评审 / 变更走禅道网页。
  * 路由基于真实实例（ZenTao 18+）抓取：my-story-{type}、story-view-{id}。
  */
-import { fetchMyList, getZentaoJson, isConfigured, zentaoFetch, getZentaoCookies, cookiesToString } from './zentaoService.js';
+import { fetchMyList, getZentaoJson, isConfigured, zentaoFetch, getZentaoCookies, cookiesToString, isModernZentao } from './zentaoService.js';
 import { sanitizeDocHtml, slimFiles } from './docService.js';
 import { decodeZentaoText } from '../utils/text.js';
 import { config } from '../config.js';
@@ -223,7 +223,9 @@ async function getStory(id) {
     assignedTo: decodeZentaoText(users[s.assignedTo] || s.assignedTo || ''),
     assignedToAccount: String(s.assignedTo || ''),
     openedDate: s.openedDate || '',
-    lastEditedDate: s.lastEditedDate || s.changedDate || ''
+    lastEditedDate: s.lastEditedDate || s.changedDate || '',
+    // 禅道原样的 lastEditedDate（可能是空串），编辑时回传做并发校验要用原值
+    lastEditedRaw: String(s.lastEditedDate ?? '')
   };
   const fresh = storyCache.read();
   const details = { ...((fresh && fresh.details) || {}) };
@@ -327,7 +329,9 @@ async function getStoryForm({ product } = {}) {
 /** 在某产品下按标题回查最新的需求 ID（新建响应不带 ID） */
 async function findStoryIdByTitle(product, title) {
   const want = decodeZentaoText(String(title || '')).trim();
+  // product-browse 默认按 ID 倒序、最新的在前，新旧两个版本都有；story-browse 新版已去掉，旧版实测也读不到，仅作兜底
   const paths = [
+    `product-browse-${product}.json`,
     `story-browse-${product}-0-all-0-id_desc-0-50-1.json?onlybody=yes`,
     `story-browse-${product}.json?onlybody=yes`
   ];
@@ -436,6 +440,8 @@ async function editStory(opts = {}) {
         'Cookie': cookiesToString(await getZentaoCookies())
       }
     });
+    // 撤回会更新 lastEditedDate，必须绕过缓存重读，否则带着旧的时间提交会被禅道拒绝（「记录可能已经被改动」）
+    invalidateStories(id);
     try { cur = await getStory(id); } catch { /* 用撤回前的值兜底 */ }
   }
 
@@ -460,7 +466,8 @@ async function editStory(opts = {}) {
   fd.set('verify', String(opts.verify != null ? opts.verify : cur.verifyRaw || ''));
   fd.set('comment', String(opts.comment || ''));
   // 禅道自身传零值哨兵；有真实 lastEditedDate 就带上做并发校验
-  fd.set('lastEditedDate', String(cur.lastEditedDate || '0000-00-00 00:00:00'));
+  // 新版从没编辑过的需求 lastEditedDate 是空串，原样回传才对得上；旧版没有时用零值
+  fd.set('lastEditedDate', String((await isModernZentao()) ? cur.lastEditedRaw : (cur.lastEditedDate || '0000-00-00 00:00:00')));
   fd.set('product', String(cur.product || opts.product || ''));
   fd.set('module', String(opts.module != null ? opts.module : '0'));
   fd.set('parent', '0');

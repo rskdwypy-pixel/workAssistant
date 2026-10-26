@@ -496,6 +496,22 @@ async function getTasks(filters = {}) {
       throw new Error('未指定执行ID，且没有配置默认执行');
     }
 
+    // 优先读执行的任务列表 JSON（all = 含已完成 / 已关闭，一次 500 条）：
+    // 旧的 task-ajaxGetTasks 只回前 50 行 HTML，任务多的执行里新建的任务排在后面找不到；新版则已去掉该接口
+    try {
+      const d = await getZentaoJson(`execution-task-${executionId}-all-0-id_desc-0-500-1.json`, cookiesToString(cookies));
+      const raw = d && d.tasks;
+      if (raw) {
+        return (Array.isArray(raw) ? raw : Object.values(raw))
+          .filter(t => t && t.id && String(t.deleted) !== '1')
+          .filter(t => (!filters.status || t.status === filters.status) && (!filters.assignedTo || t.assignedTo === filters.assignedTo))
+          .map(t => ({ id: String(t.id), name: decodeZentaoText(t.name || ''), assignedTo: t.assignedTo || '', status: t.status || '' }));
+      }
+    } catch (err) {
+      if (await isModernZentao()) throw err;
+      /* 旧版读不到就退回下面的 HTML 行 */
+    }
+
     // 构建查询参数
     const params = [];
     if (filters.status) params.push(`status=${filters.status}`);
@@ -806,6 +822,7 @@ async function syncMyBugs() {
     assignedDate: b.assignedDate || '',
     openedAt: zentaoTime(b.openedDate),
     editedAt: zentaoTime(b.lastEditedDate),
+    resolvedAt: zentaoTime(b.resolvedDate),
     executionId: b.execution && b.execution !== '0' ? String(b.execution) : null,
     projectId: b.project && b.project !== '0' ? String(b.project) : null
   }));
@@ -1014,6 +1031,39 @@ function extractFormFields(html) {
 }
 
 /**
+ * 新版禅道（21+）的编辑页 HTML 里只有几个隐藏字段，其余表单项由脚本渲染，extractFormFields 取不到。
+ * 这里用动作页的 JSON（task / bug 对象）把缺失或为空的字段补齐，字段名与旧版表单一致。
+ * @param {Object} fields - extractFormFields 的结果（就地补齐）
+ * @param {'task'|'bug'} kind
+ * @param {string|number} id
+ * @param {string} CH - cookie 头
+ * @param {string[]} names - 需要补的字段名（对象上同名属性）；带 [] 的是多值字段（对象上是逗号分隔串）
+ * @param {string} [action] - 取哪个动作页的 JSON，默认 edit
+ * @returns {Promise<Object>} 动作页 JSON 里的 task / bug 对象
+ */
+async function fillFormFromJson(fields, kind, id, CH, names, action = 'edit') {
+  const inner = await getZentaoJson(`${kind}-${action}-${id}.json?onlybody=yes`, CH);
+  const obj = (inner && inner[kind]) || {};
+  for (const n of names) {
+    const multi = n.endsWith('[]');
+    const key = multi ? n.slice(0, -2) : n;
+    if (multi ? (fields[n] && fields[n].length) : (fields[n] !== undefined && fields[n] !== '')) continue;
+    const v = obj[key];
+    if (v === undefined || v === null) continue;
+    const str = String(v);
+    if (multi) fields[n] = str.split(',').map(x => x.trim()).filter(Boolean);
+    else fields[n] = str.startsWith('0000-00-00') ? '' : str;
+  }
+  return obj;
+}
+
+/** 新版编辑任务 / Bug 表单需要从 JSON 补齐的字段 */
+const TASK_EDIT_JSON_FIELDS = ['name', 'type', 'pri', 'assignedTo', 'estStarted', 'deadline', 'desc', 'module', 'story', 'execution', 'parent', 'color', 'keywords', 'mailto', 'status'];
+const BUG_EDIT_JSON_FIELDS = ['title', 'product', 'module', 'project', 'execution', 'openedBuild[]', 'assignedTo', 'deadline', 'type', 'os[]', 'browser[]', 'severity', 'pri', 'steps', 'status', 'keywords', 'mailto[]', 'story', 'task', 'color'];
+/** 新版 Bug 动作页（指派 / 激活）要补的字段 */
+const BUG_ACTION_JSON_FIELDS = { assignTo: ['assignedTo', 'mailto[]', 'status'], activate: ['assignedTo', 'openedBuild[]', 'status', 'mailto[]'] };
+
+/**
  * 表单字段 → 提交体（数组字段逐项 append，空数组按禅道约定提交一个空值）
  */
 function toFormBody(fields) {
@@ -1052,6 +1102,7 @@ function extractZentaoError(text) {
   const t = String(text || '');
   try {
     const j = JSON.parse(t);
+    if (j && j.result === 'success') return ''; // 新版成功响应也带 message（"保存成功"），不是错误
     const m = j && j.message;
     if (typeof m === 'string') return m;
     if (m && typeof m === 'object') {
@@ -1068,6 +1119,10 @@ function extractZentaoError(text) {
 function isZentaoSubmitSuccess(text) {
   if (!text) return false;
   const t = String(text);
+  // 新版（21+）直接回 JSON：{"result":"success","message":"保存成功",...}，失败是 {"result":"fail","message":…}
+  if (/^\s*\{/.test(t)) {
+    try { return JSON.parse(t).result === 'success'; } catch { /* 不是 JSON，按旧版脚本判断 */ }
+  }
   // 禅道各类收尾脚本：刷新父页面 / 关闭弹窗 / 直接关窗
   if (/parent\.parent\.ajaxRefresh/.test(t)) return true;
   if (/selfClose|closeModal|window\.close\(\)/.test(t)) return true;
@@ -1136,6 +1191,27 @@ async function readMyTaskConsumed(taskId, cookieHeader) {
 }
 
 /**
+ * 任务详情 JSON（含 .task）。新版禅道里，看板类型执行下的任务访问 task-view 只回一条「跳转到看板」的指令（没有任务数据），
+ * 这时改读 task-edit 的 JSON（同样带 task 对象，状态 / 工时 / 附件都在里面）。
+ */
+async function getTaskView(taskId, CH) {
+  const inner = await getZentaoJson(`task-view-${taskId}.json?onlybody=yes`, CH);
+  if (inner && inner.task) return inner;
+  if (await isModernZentao()) return getZentaoJson(`task-edit-${taskId}.json?onlybody=yes`, CH);
+  return inner;
+}
+
+/** 任务详情里的当前状态（新版禅道用；done / closed 的任务也读得到），读不到返回 null */
+async function readTaskStatusJson(taskId, CH) {
+  try {
+    const inner = await getTaskView(taskId, CH);
+    return (inner && inner.task && inner.task.status) || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 更新禅道任务状态（镜像浏览器：取动作表单 → 回填 → 提交 → 回读校验）
  * @param {number|string} taskId - 任务ID
  * @param {string} status - 目标状态 wait/doing/done/closed/cancel/activate
@@ -1172,9 +1248,19 @@ async function updateTaskStatus(taskId, status, options = {}) {
     const formResp = await fetch(formUrl, { headers: { Cookie: CH } });
     const html = await formResp.text();
     const fields = extractFormFields(html);
+    const modern = await isModernZentao();
+    // 新版动作表单由脚本渲染，HTML 里取不到当前工时等字段：用任务 JSON 补上
+    const taskNow = modern ? await fillFormFromJson(fields, 'task', taskId, CH, ['consumed', 'left']) : null;
 
     // 2) 覆盖/补充关键字段
     if (options.comment) fields.comment = options.comment;
+    if (action === 'activate') {
+      // 激活要有指派人和预计剩余（两个版本都是）；已关闭 / 已完成的任务指派人是 closed 之类，不能沿用
+      if (modern || !fields.assignedTo || fields.assignedTo === 'closed') fields.assignedTo = options.assignedTo || config.zentao.username;
+      const est = Number((taskNow && taskNow.estimate) || fields.estimate) || 0;
+      if (options.left > 0 || !(Number(fields.left) > 0)) fields.left = String(options.left > 0 ? options.left : (est > 0 ? est : 1));
+      if (modern) fields.status = 'doing';
+    }
     if (action === 'finish') {
       const prev = Number(fields.consumed || 0);
       const cur = options.consumed != null ? Number(options.consumed) : 0;
@@ -1210,11 +1296,14 @@ async function updateTaskStatus(taskId, status, options = {}) {
     // 4) 回读校验。注意：任务被 done/closed 后会从「我的任务」消失，
     //    此时 observed 为 null，**不能据此判失败**。
     //    所以主判据是禅道的提交标志，observed 只用于补充状态文案。
-    const observed = await readMyTaskStatus(taskId, CH);
-    const expected = expectedMap[status];
+    const expected = expectedMap[status] || (action === 'activate' ? 'doing' : undefined);
+    // 新版：禅道可能回「成功」却什么都没改，直接读任务详情的真实状态为准（详情里 done / closed 的任务也读得到）
+    const observed = modern ? await readTaskStatusJson(taskId, CH) : await readMyTaskStatus(taskId, CH);
 
     let ok;
-    if (submitted) {
+    if (modern && observed) {
+      ok = action === 'activate' ? !['done', 'closed', 'cancel'].includes(observed) : (!expected || observed === expected);
+    } else if (submitted) {
       // 禅道明确收尾了 —— 这是权威的成功信号，优先采信
       ok = true;
     } else if (observed != null) {
@@ -1257,7 +1346,11 @@ async function recordTaskEstimate(taskId, effortData) {
   try {
     const cookies = await getZentaoCookies();
 
-    const endpoint = `${config.zentao.url}/zentao/task-recordEstimate-${taskId}.html?onlybody=yes`;
+    // 新版：接口改名 task-recordWorkhour，日期字段是 date[n]（不是 dates[n]），一行就够
+    const modern = await isModernZentao();
+    const endpoint = modern
+      ? `${config.zentao.url}/zentao/task-recordWorkhour-${taskId}.json?onlybody=yes`
+      : `${config.zentao.url}/zentao/task-recordEstimate-${taskId}.html?onlybody=yes`;
 
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -1267,14 +1360,14 @@ async function recordTaskEstimate(taskId, effortData) {
 
     // 构建表单数据（URL 编码格式）
     const params = new URLSearchParams();
-    params.append('dates[1]', today);
+    params.append(modern ? 'date[1]' : 'dates[1]', today);
     params.append('id[1]', '1');
     params.append('work[1]', effortData.work || '工作内容进度更新');
     params.append('consumed[1]', String(effortData.consumed || 0));
     params.append('left[1]', String(effortData.left || 0));
 
-    // 添加4个空的表单项（禅道表单要求）
-    for (let i = 2; i <= 5; i++) {
+    // 添加4个空的表单项（旧版禅道表单要求）
+    for (let i = 2; i <= (modern ? 1 : 5); i++) {
       params.append(`dates[${i}]`, today);
       params.append(`id[${i}]`, String(i));
       params.append(`work[${i}]`, '');
@@ -1339,16 +1432,17 @@ async function editTaskEstimate(effortId, { date, consumed, left, work } = {}) {
     params.append('consumed', String(consumed));
     params.append('left', String(left));
     params.append('work', String(work || ''));
-    const resp = await fetch(`${zentaoBase()}/zentao/task-editEstimate-${effortId}.html?onlybody=yes`, {
+    const editPath = (await isModernZentao()) ? `task-editEffort-${effortId}.json?onlybody=yes` : `task-editEstimate-${effortId}.html?onlybody=yes`;
+    const resp = await fetch(`${zentaoBase()}/zentao/${editPath}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest', 'Cookie': CH },
       body: params.toString(),
       redirect: 'manual'
     });
     const text = await resp.text();
+    if (/task-recordEstimate-\d+/.test(text) || isZentaoSubmitSuccess(text)) return { success: true, message: '工时已修改' };
     const reason = extractZentaoError(text);
     if (reason) return { success: false, message: reason };
-    if (/task-recordEstimate-\d+/.test(text) || isZentaoSubmitSuccess(text)) return { success: true, message: '工时已修改' };
     return { success: false, message: '禅道没有接受这次修改' };
   } catch (err) {
     return { success: false, message: err.message };
@@ -1365,17 +1459,55 @@ async function deleteTaskEstimate(effortId) {
   try {
     if (!/^\d+$/.test(String(effortId))) return { success: false, message: '非法的工时记录 ID' };
     const CH = cookiesToString(await getZentaoCookies());
-    const resp = await fetch(`${zentaoBase()}/zentao/task-deleteEstimate-${effortId}-yes.html?onlybody=yes`, {
-      headers: { 'Accept': 'text/html', 'X-Requested-With': 'XMLHttpRequest', 'Cookie': CH },
+    // 新版：GET task-deleteWorkhour-{id}-yes 直接删除（不带 -yes 时，删最后一条工时会先回一段「确认删除吗」的弹窗脚本，不会真删）
+    // Accept 也必须是 JSON：按 text/html 请求同样只回弹窗脚本
+    const modern = await isModernZentao();
+    const delPath = modern ? `task-deleteWorkhour-${effortId}-yes.json` : `task-deleteEstimate-${effortId}-yes.html?onlybody=yes`;
+    const resp = await fetch(`${zentaoBase()}/zentao/${delPath}`, {
+      headers: { 'Accept': modern ? 'application/json' : 'text/html', 'X-Requested-With': 'XMLHttpRequest', 'Cookie': CH },
       redirect: 'manual'
     });
     const text = await resp.text();
-    const reason = extractZentaoError(text);
+    const reason = isZentaoSubmitSuccess(text) ? '' : extractZentaoError(text);
     if (reason) return { success: false, message: reason };
     return { success: resp.status < 400, message: resp.status < 400 ? '工时已删除' : `HTTP ${resp.status}` };
   } catch (err) {
     return { success: false, message: err.message };
   }
+}
+
+// ============================================================================
+// 禅道版本
+// ============================================================================
+
+/** 页面改成 zin 框架、接口大改的起始大版本（实测 18.3 是旧版，22.3 是新版） */
+const MODERN_ZENTAO_MAJOR = 21;
+const versionMemo = new Map();
+
+/**
+ * 禅道版本号（如 "18.3"）。index.php?mode=getconfig 不用登录就返回；取不到返回 ''。
+ * 按禅道地址缓存；网络类失败不缓存，下次再取。
+ */
+async function getZentaoVersion() {
+  const base = zentaoBase();
+  if (versionMemo.has(base)) return versionMemo.get(base);
+  try {
+    const resp = await fetch(`${base}/zentao/index.php?mode=getconfig`, { _noSessionRetry: true, headers: { Accept: 'application/json' } });
+    const cfg = await resp.json();
+    const version = String((cfg && cfg.version) || '').trim();
+    if (version) versionMemo.set(base, version);
+    return version;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 是不是新版禅道（21+，zin 框架）。true / false；版本取不到返回 null，调用方退回「先试旧接口、不行再试新接口」。
+ */
+async function isModernZentao() {
+  const major = parseInt(await getZentaoVersion(), 10);
+  return Number.isFinite(major) ? major >= MODERN_ZENTAO_MAJOR : null;
 }
 
 /**
@@ -1384,6 +1516,10 @@ async function deleteTaskEstimate(effortId) {
  * @throws {Error} 禅道不可达或页面结构变化导致解析失败时抛出（不再静默返回空数组）
  */
 async function getExecutions() {
+  // 新版页面里不再内嵌数据，直接读 JSON（带 type）；一次取 500 条避开默认每页 20 条
+  const modern = await isModernZentao();
+  if (modern) return mapExecutions(await fetchExecutionsJson());
+
   let html;
   try {
     const cookies = await getZentaoCookies();
@@ -1407,17 +1543,39 @@ async function getExecutions() {
   // 页面里的数据形如 <script>data = "<转义后的 JSON 字符串>"</script>
   // 必须用捕获组只取引号内的内容：旧实现把结尾引号一起带进来，JSON.parse 恒报错，执行列表永远为空
   const dataMatch = html.match(/<script>\s*data\s*=\s*"((?:\\[\s\S]|[^\\"])*)"/);
-  if (!dataMatch) {
+
+  let executions;
+  if (dataMatch) {
+    try {
+      executions = JSON.parse(JSON.parse(`"${dataMatch[1]}"`));
+    } catch (err) {
+      throw new Error(`解析执行列表失败: ${err.message}`);
+    }
+  } else if (modern === null) {
+    // 版本没取到：页面里没数据时试一下新版的 JSON 接口
+    executions = await fetchExecutionsJson();
+  } else {
     throw new Error('未在执行列表页面中找到数据（禅道页面结构可能已变化）');
   }
 
+  return mapExecutions(executions);
+}
+
+/** 新版禅道的执行列表 JSON */
+async function fetchExecutionsJson() {
   let executions;
   try {
-    executions = JSON.parse(JSON.parse(`"${dataMatch[1]}"`));
+    const inner = await getZentaoJson('execution-all-all-order_asc-0-0-0-500-1.json');
+    const stats = inner && inner.executionStats;
+    executions = Array.isArray(stats) ? stats : Object.values(stats || {});
   } catch (err) {
-    throw new Error(`解析执行列表失败: ${err.message}`);
+    throw new Error(`未在执行列表页面中找到数据（禅道页面结构可能已变化）：${err.message}`);
   }
+  if (!executions.length) throw new Error('未在执行列表页面中找到数据（禅道页面结构可能已变化）');
+  return executions;
+}
 
+function mapExecutions(executions) {
   console.log('[ZentaoService] 解析到', executions.length, '个执行');
 
   // 页面上的状态是中文文案，转换为禅道内部状态码（与其他接口保持一致）
@@ -1595,6 +1753,11 @@ async function createKanbanCard(cardData) {
  */
 async function getKanbanParams(executionId, laneType = 'task', columnType = 'wait') {
   try {
+    if (await isModernZentao()) {
+      // 新版页面里没有 .region / .kanban-lane 元素，位置参数读 JSON（同 getKanbanPageParams）
+      const p = await getKanbanPageParams(executionId, laneType, columnType);
+      return p && p.regionId && p.laneId && p.columnId ? { regionId: p.regionId, laneId: p.laneId, columnId: p.columnId } : null;
+    }
     const cookies = await getZentaoCookies();
     const endpoint = `${config.zentao.url}/zentao/execution-kanban-${executionId}.html`;
 
@@ -1701,6 +1864,28 @@ function extractNestedObject(html, varName) {
 
 async function getKanbanPageParams(executionId, laneType = 'task', columnType = 'wait') {
   try {
+    if (await isModernZentao()) {
+      // 新版看板页面不再内嵌数据：JSON 里 kanbanList[区域].items[分组].data.{lanes,cols}
+      const d = await getZentaoJson(`execution-kanban-${executionId}.json`);
+      let regionId = null, laneId = null, columnId = null;
+      for (const region of (d && d.kanbanList) || []) {
+        for (const item of region.items || []) {
+          const lane = ((item.data && item.data.lanes) || []).find(l => l.type === laneType);
+          const col = ((item.data && item.data.cols) || []).find(c => c.type === columnType);
+          if (lane && !laneId) { laneId = lane.id; regionId = region.id; }
+          if (col && !columnId) columnId = col.id;
+        }
+        if (laneId && columnId) break;
+      }
+      const project = d && d.project;
+      const result = {
+        productId: d && d.productID != null && String(d.productID) !== '0' ? String(d.productID) : (d && d.productID != null ? String(d.productID) : null),
+        projectId: project && project.id ? String(project.id) : (d && d.projectID ? String(d.projectID) : null),
+        regionId, laneId: laneId != null ? String(laneId) : null, columnId: columnId != null ? String(columnId) : null
+      };
+      console.log('[ZentaoService] 解析看板页面参数:', { executionId, laneType, columnType, ...result });
+      return result;
+    }
     const cookies = await getZentaoCookies();
     const base = config.zentao.url.replace(/\/$/, '');
     const resp = await fetch(`${base}/zentao/execution-kanban-${executionId}.html`, {
@@ -1815,10 +2000,19 @@ async function deleteTask(executionId, taskId) {
     const cookies = await getZentaoCookies();
     const base = config.zentao.url.replace(/\/$/, '');
     const CH = cookiesToString(cookies);
-    const endpoint = `${base}/zentao/task-delete-${executionId}-${taskId}-yes-.html?onlybody=yes`;
+    // 新版去掉了路径里的执行 ID，且回「保存成功」不代表真删了，要读详情的 deleted 标记确认
+    const modern = await isModernZentao();
+    const endpoint = modern
+      ? `${base}/zentao/task-delete-${taskId}-yes.json`
+      : `${base}/zentao/task-delete-${executionId}-${taskId}-yes-.html?onlybody=yes`;
     console.log('[ZentaoService] 删除任务:', endpoint);
-    const resp = await fetch(endpoint, { method: 'GET', headers: { Cookie: CH }, redirect: 'manual' });
+    const resp = await fetch(endpoint, { method: 'GET', headers: { Cookie: CH, 'X-Requested-With': 'XMLHttpRequest' }, redirect: 'manual' });
     const text = await resp.text();
+    if (modern) {
+      const inner = await getTaskView(taskId, CH).catch(() => null);
+      const gone = !inner || !inner.task || String(inner.task.deleted) === '1';
+      return gone ? { success: true, message: '任务已删除' } : { success: false, message: extractZentaoError(text) || '删除未生效' };
+    }
     const successMark = /alert-success|删除成功|已删除|已经被删除/.test(text)
       || isZentaoSubmitSuccess(text);   // 禅道删除成功也会走 ajaxRefresh 收尾脚本
     // 回查：任务仍在执行列表说明未删除
@@ -1851,6 +2045,9 @@ async function editTask({ taskId, execution, name, pri, assignedTo, deadline }) 
     if (!('name' in fields) || !('lastEditedDate' in fields)) {
       return { success: false, message: '没有取到禅道任务编辑表单（任务可能已删除或无权限）' };
     }
+    if (await isModernZentao()) {
+      await fillFormFromJson(fields, 'task', taskId, CH, TASK_EDIT_JSON_FIELDS);
+    }
 
     // 只改调用方给出的字段；其余字段（描述、抄送、工时等）按表单原值带回
     if (name) fields.name = name;
@@ -1866,11 +2063,12 @@ async function editTask({ taskId, execution, name, pri, assignedTo, deadline }) 
 
     const postResp = await fetch(`${base}/zentao/task-edit-${taskId}.html`, {
       method: 'POST',
-      headers: { Cookie: CH, 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: { Cookie: CH, 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
       body: params.toString(),
       redirect: 'manual'
     });
     const text = await postResp.text();
+    if (process.env.WA_DEBUG_POST) console.log('DBG body:', params.toString().slice(0, 900), '\nDBG resp:', postResp.status, JSON.stringify(text.slice(0, 300)));
     // 统一走isZentaoSubmitSuccess：原先只认 alert-success/保存成功，
     // 漏掉禅道的 ajaxRefresh 收尾脚本，会把成功的编辑报成「编辑未生效」
     const ok = isZentaoSubmitSuccess(text)
@@ -2078,7 +2276,9 @@ async function activateBug({ bugId, assignedTo, pri, type, ccList, comment }) {
     if (Array.isArray(ccList)) ccList.forEach((c) => { if (c) params.append('mailto[]', c); });
     params.append('comment', comment || '');
     params.append('uid', genUid());
-    const resp = await fetch(`${base}/zentao/bug-confirmbug-${bugId}.html?onlybody=yes`, {
+    // 新版把 bug-confirmbug 改名为 bug-confirm
+    const confirmPath = (await isModernZentao()) ? `bug-confirm-${bugId}.json?onlybody=yes` : `bug-confirmbug-${bugId}.html?onlybody=yes`;
+    const resp = await fetch(`${base}/zentao/${confirmPath}`, {
       method: 'POST',
       headers: { Cookie: CH, 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
       body: params.toString()
@@ -2156,6 +2356,10 @@ async function submitBugForm(bugId, action, mutate, verify, okMessage) {
     const page = `${zentaoBase()}/zentao/bug-${action}-${bugId}.html?onlybody=yes`;
     const html = await (await fetch(page, { headers: { Accept: 'text/html', Cookie: CH } })).text();
     const fields = extractFormFields(html);
+    if (await isModernZentao()) {
+      await fillFormFromJson(fields, 'bug', bugId, CH, action === 'edit' ? BUG_EDIT_JSON_FIELDS : BUG_ACTION_JSON_FIELDS[action], action);
+      if (action === 'activate' && !(fields['openedBuild[]'] && fields['openedBuild[]'].length)) fields['openedBuild[]'] = ['trunk'];
+    }
     if (!('assignedTo' in fields)) {
       return { success: false, message: `没有取到禅道 Bug #${bugId} 的表单（可能已删除、已关闭或无权限）` };
     }
@@ -2328,7 +2532,7 @@ async function resolveViewPath(type, objectId, sid) {
       });
       const outer = await resp.json();
       const inner = typeof outer.data === 'string' ? JSON.parse(outer.data) : outer.data;
-      if (inner && inner.locate) page += '?onlybody=yes';
+      if (inner && (inner.locate || inner.load)) page += '?onlybody=yes';
     } catch { /* 判断不了就打开普通详情页 */ }
   }
   return `/zentao/index-index.html#app=${VIEW_APPS[type]}&url=${encodeURIComponent(page)}`;
@@ -2339,10 +2543,7 @@ async function resolveViewPath(type, objectId, sid) {
  */
 async function getTaskDetail(taskId) {
   const CH = cookiesToString(await getZentaoCookies());
-  const resp = await fetch(`${zentaoBase()}/zentao/task-view-${taskId}.json?onlybody=yes`, {
-    headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'Cookie': CH }
-  });
-  const inner = await readZentaoJson(resp);
+  const inner = await getTaskView(taskId, CH);
   if (!inner || !inner.task) throw new Error(`读取禅道任务 #${taskId} 失败（可能已删除或无权限）`);
   return inner.task;
 }
@@ -2353,10 +2554,29 @@ async function getTaskDetail(taskId) {
  */
 async function getTaskExecutionOptions(taskId) {
   const CH = cookiesToString(await getZentaoCookies());
+  const modern = await isModernZentao();
+  if (modern) {
+    // 新版的编辑表单由脚本渲染，HTML 里没有 <select>；JSON 里的 executions 是 {执行ID: 名称}
+    const inner = await getZentaoJson(`task-edit-${taskId}.json?onlybody=yes`, CH);
+    const ex = inner && inner.executions;
+    const ids = (Array.isArray(ex) ? ex.map(x => x && x.id) : Object.keys(ex || {})).map(String).filter(id => /^\d+$/.test(id));
+    if (!ids.length) throw new Error('没有取到禅道任务编辑表单（任务可能已删除或无权限）');
+    return ids;
+  }
   const resp = await fetch(`${zentaoBase()}/zentao/task-edit-${taskId}.html?onlybody=yes`, { headers: { 'Accept': 'text/html', 'Cookie': CH } });
   const html = await resp.text();
   const select = html.match(/<select\b[^>]*name=['"]execution['"][\s\S]*?<\/select>/i);
-  if (!select) throw new Error('没有取到禅道任务编辑表单（任务可能已删除或无权限）');
+  if (!select) {
+    // 版本没取到时的兜底：试新版的 JSON
+    if (modern === null) try {
+      const inner = await getZentaoJson(`task-edit-${taskId}.json?onlybody=yes`, CH);
+      const ex = inner && inner.executions;
+      const ids = Array.isArray(ex) ? ex.map(x => x && x.id) : Object.keys(ex || {});
+      const list = ids.map(String).filter(id => /^\d+$/.test(id));
+      if (list.length) return list;
+    } catch { /* 落到下面统一的报错 */ }
+    throw new Error('没有取到禅道任务编辑表单（任务可能已删除或无权限）');
+  }
   return [...select[0].matchAll(/<option\b[^>]*value=['"](\d+)['"]/g)].map(m => m[1]);
 }
 
@@ -2390,7 +2610,8 @@ async function listObjectFiles(type, objectId) {
   const resp = await fetch(`${zentaoBase()}/zentao/${o.view(objectId)}`, {
     headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'Cookie': CH }
   });
-  const inner = await readZentaoJson(resp);
+  let inner = await readZentaoJson(resp);
+  if (type === 'task' && !(inner && inner.task)) inner = await getTaskView(objectId, CH);
   const obj = inner && inner[type];
   if (!obj) {
     const why = inner && inner.locate ? `禅道要求跳转到 ${String(inner.locate).replace(/^https?:\/\/[^/]+/, '')}` : '可能已删除或无权限';
@@ -2442,6 +2663,22 @@ function escapeHtmlAttr(s) {
 }
 
 /**
+ * 取任务 / Bug 的编辑表单：字段 + 编辑会话 uid。
+ * 旧版从编辑页 HTML 里解析（uid 在 var kuid 里）；新版 HTML 里只有几个隐藏字段，用 JSON 补齐，uid 自己生成。
+ */
+async function loadEditForm(type, objectId, CH) {
+  const o = zentaoObject(type);
+  const html = await (await fetch(`${zentaoBase()}/zentao/${o.edit(objectId)}`, { headers: { 'Accept': 'text/html', 'Cookie': CH } })).text();
+  const fields = extractFormFields(html);
+  let uid = (html.match(/var kuid = ['"]([^'"]+)['"]/) || [])[1];
+  if (await isModernZentao()) {
+    await fillFormFromJson(fields, type, objectId, CH, type === 'bug' ? BUG_EDIT_JSON_FIELDS : TASK_EDIT_JSON_FIELDS);
+    uid = uid || genUid();
+  }
+  return { fields, uid, html };
+}
+
+/**
  * 给禅道里已存在的任务 / Bug 追加附件（走编辑表单，一次提交）
  *
  * inline 的图片同时插入正文（任务描述 / Bug 重现步骤），并保留一份附件。
@@ -2460,10 +2697,7 @@ async function attachFilesToObject(type, objectId, files) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const CH = cookiesToString(await getZentaoCookies());
-      const formResp = await fetch(`${zentaoBase()}/zentao/${o.edit(objectId)}`, { headers: { 'Accept': 'text/html', 'Cookie': CH } });
-      const html = await formResp.text();
-      const fields = extractFormFields(html);
-      const uid = (html.match(/var kuid = ['"]([^'"]+)['"]/) || [])[1];
+      const { fields, uid } = await loadEditForm(type, objectId, CH);
       if (!(o.title in fields) || !uid) {
         return { success: false, message: `没有取到禅道${type === 'bug' ? ' Bug' : '任务'}编辑表单（可能已删除或无权限）` };
       }
@@ -2494,7 +2728,7 @@ async function attachFilesToObject(type, objectId, files) {
 
       const postResp = await fetch(`${zentaoBase()}/zentao/${o.submit(objectId)}`, {
         method: 'POST',
-        headers: { 'Cookie': CH },
+        headers: { 'Cookie': CH, 'X-Requested-With': 'XMLHttpRequest' },
         body: fd,
         redirect: 'manual',
         timeout: 300000
@@ -2573,19 +2807,16 @@ async function removeInlineImage(type, objectId, attachment) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const CH = cookiesToString(await getZentaoCookies());
-      const formResp = await fetch(`${zentaoBase()}/zentao/${o.edit(objectId)}`, { headers: { 'Accept': 'text/html', 'Cookie': CH } });
-      const html = await formResp.text();
-      const fields = extractFormFields(html);
+      const { fields, uid } = await loadEditForm(type, objectId, CH);
       if (!(o.title in fields)) return { success: false, removed: false, message: '没有取到禅道编辑表单' };
       const img = findInlineImage(fields[o.body], attachment);
       if (!img) return { success: true, removed: false, message: '正文里没有对应的图片' };
 
       fields[o.body] = stripImageTag(fields[o.body], img.tag);
-      const uid = (html.match(/var kuid = ['"]([^'"]+)['"]/) || [])[1];
       if (uid) fields.uid = uid;
       const postResp = await fetch(`${zentaoBase()}/zentao/${o.submit(objectId)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Cookie': CH },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Cookie': CH, 'X-Requested-With': 'XMLHttpRequest' },
         body: toFormBody(fields),
         redirect: 'manual'
       });
@@ -2747,8 +2978,23 @@ async function listExecutionTasks(executionId, CH) {
  * @returns {Promise<Array<{account:string, date:string, consumed:number, work:string}>>}
  */
 async function getTaskEfforts(taskId, CH) {
-  const inner = await getZentaoJson(`task-recordEstimate-${taskId}.json?onlybody=yes`, CH);
-  return ((inner && inner.efforts) || [])
+  // 新版禅道把「记录工时」改名 task-recordWorkhour，旧路径返回空响应
+  const modern = await isModernZentao();
+  const oldPath = `task-recordEstimate-${taskId}.json?onlybody=yes`;
+  const newPath = `task-recordWorkhour-${taskId}.json?onlybody=yes`;
+  let inner;
+  if (modern !== null) {
+    inner = await getZentaoJson(modern ? newPath : oldPath, CH);
+  } else {
+    try {
+      inner = await getZentaoJson(oldPath, CH);
+    } catch (err) {
+      if (!/JSON|Unexpected/.test(err.message)) throw err;
+      inner = await getZentaoJson(newPath, CH);
+    }
+  }
+  const efforts = inner && inner.efforts;
+  return (Array.isArray(efforts) ? efforts : Object.values(efforts || {}))
     .filter(e => String(e.deleted) !== '1')
     .map(e => ({ id: String(e.id || ''), account: String(e.account), date: String(e.date).slice(0, 10), consumed: Number(e.consumed) || 0, left: Number(e.left) || 0, work: e.work || '' }));
 }
@@ -2840,6 +3086,9 @@ export {
   resolveViewPath,
   getTaskDetail,
   getTaskExecutionOptions,
+  getZentaoVersion,
+  isModernZentao,
+  getTaskView,
   // 报告页
   getTeamMembers,
   searchZentao,

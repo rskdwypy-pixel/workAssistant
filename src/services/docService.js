@@ -9,7 +9,7 @@
  * 按库列出不走 doc-browse-{libID}（各版本参数位不同、实测易返回空），统一拉全量再分组。
  * 文件预览/下载复用已有的 GET /api/zentao/files/:fileId/content。
  */
-import { getZentaoJson, isConfigured, zentaoFetch, getZentaoCookies, cookiesToString } from './zentaoService.js';
+import { getZentaoJson, isConfigured, zentaoFetch, getZentaoCookies, cookiesToString, isModernZentao } from './zentaoService.js';
 import { config } from '../config.js';
 import { decodeZentaoText } from '../utils/text.js';
 import { marked } from 'marked';
@@ -74,7 +74,99 @@ async function listLibs({ cacheOnly = false, force = false } = {}) {
   });
 }
 
+// ---- 新版禅道（21+ / IPD，zin 框架）：doc-objectLibs / doc-browse 已不存在，改用 doc-ajaxGetSpaceData ----
+// 该接口返回裸 JSON（不是 {data:"…"} 包装），按「空间类型[-空间 ID]」取：返回该空间下的库与文档。
+// 不带 ID 时只给第一个空间，所以产品 / 项目要按 spaces 里的 ID 逐个取。
+
+async function ajaxJson(path) {
+  const cookies = cookiesToString(await getZentaoCookies());
+  const resp = await zentaoFetch(`${ZENTAO_PATH()}/${path}`, {
+    headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest', Cookie: cookies }
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return JSON.parse(await resp.text());
+}
+
+const spaceDataPath = (space, id) => `doc-ajaxGetSpaceData-${space}${id ? `-${id}` : ''}.json`;
+
+/** 当前禅道是否是新版文档接口：按禅道版本判断；版本取不到时探测一次（按禅道地址缓存，网络类错误不下结论） */
+let modernMemo = null;
+async function isModernDocs() {
+  const byVersion = await isModernZentao();
+  if (byVersion !== null) return byVersion;
+  const url = config.zentao.url;
+  if (modernMemo && modernMemo.url === url) return modernMemo.value;
+  let value = false;
+  try {
+    const d = await ajaxJson(spaceDataPath('custom'));
+    value = !!(d && Array.isArray(d.libs));
+  } catch (err) {
+    if (!/JSON|Unexpected/.test(err.message)) return false;
+  }
+  modernMemo = { url, value };
+  return value;
+}
+
+const MODERN_SPACES = ['mine', 'custom', 'product', 'project'];
+const MODERN_TTL_MS = 30 * 1000;
+let modernSnapshot = null;
+
+/** 拉全部空间的库和文档（库与文档列表共用，30 秒内同一次同步只请求一遍） */
+function fetchModernSpaces() {
+  if (modernSnapshot && Date.now() - modernSnapshot.at < MODERN_TTL_MS) return Promise.resolve(modernSnapshot.data);
+  return singleFlight('doc-modern-spaces', async () => {
+    const libs = new Map();
+    const docs = new Map();
+    const absorb = (d) => {
+      for (const lib of toArray(d && d.libs)) if (lib && lib.id && String(lib.deleted) !== '1') libs.set(String(lib.id), lib);
+      for (const doc of toArray(d && d.docs)) if (doc && doc.id && String(doc.deleted) !== '1') docs.set(String(doc.id), doc);
+    };
+    const queue = [];
+    for (const space of MODERN_SPACES) {
+      let first;
+      try { first = await ajaxJson(spaceDataPath(space)); } catch { continue; }
+      absorb(first);
+      const ids = toArray(first && first.spaces).map(x => x && x.id).filter(Boolean);
+      // 「我的」「自定义」各只有一个空间，第一次已拿到；产品 / 项目要逐个空间取
+      if (space === 'product' || space === 'project') ids.forEach(id => queue.push([space, id]));
+    }
+    let next = 0;
+    const worker = async () => {
+      while (next < queue.length) {
+        const [space, id] = queue[next++];
+        try { absorb(await ajaxJson(spaceDataPath(space, id))); } catch { /* 无权限的空间跳过 */ }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(6, queue.length) }, worker));
+    const data = { libs: [...libs.values()], docs: [...docs.values()] };
+    modernSnapshot = { at: Date.now(), data };
+    return data;
+  });
+}
+
+function slimLibModern(lib) {
+  const space = String(lib.type || 'custom');
+  const objectID = space === 'product' ? String(lib.product || '0')
+    : space === 'project' ? String(lib.project || '0')
+    : space === 'execution' ? String(lib.execution || '0')
+    : String(lib.parent || '0'); // 我的空间 / 自定义库：新版接口里的 objectID 是所属空间的 ID
+  return {
+    id: String(lib.id),
+    name: decodeZentaoText(lib.name || `文档库 ${lib.id}`),
+    space,
+    spaceLabel: SPACE_LABEL[space] || space,
+    objectType: space,
+    objectID,
+    acl: String(lib.acl || 'open'),
+    docCount: Number(lib.allCount ?? lib.docCount ?? 0) || 0
+  };
+}
+
 async function fetchLibsRemote() {
+  if (await isModernDocs()) {
+    const { libs } = await fetchModernSpaces();
+    return libs.map(slimLibModern);
+  }
   const seen = new Map();
   for (const space of LIB_SPACES) {
     let data;
@@ -138,6 +230,10 @@ function slimDoc(d) {
 
 /** 翻页拉全量（过滤已删除） */
 async function fetchDocsRemote() {
+  if (await isModernDocs()) {
+    const { docs } = await fetchModernSpaces();
+    return docs.map(slimDoc);
+  }
   const perPage = 200;
   const out = [];
   let page = 1;
@@ -196,6 +292,7 @@ async function listDocs({ keyword = '', maxAge = 0 } = {}) {
 
 /** 写操作之后让缓存失效：列表下次一定重拉，该文档的详情丢掉，文档库（文档数）也重拉 */
 function invalidateDocs(id) {
+  modernSnapshot = null; // 新版的空间快照（30 秒内复用）也作废，否则删了 / 改了还读到旧的
   const cache = docCache.read();
   if (cache) {
     const details = { ...(cache.details || {}) };
@@ -271,7 +368,8 @@ async function createDoc({ lib, module = '0', title, body = '', contentType = 'm
   fd.set('uid', u);
   fd.set('type', 'text');
   fd.set('contentType', ct);
-  if (ct === 'markdown') { fd.set('content', ''); fd.set('contentMarkdown', String(body || '')); }
+  // 旧版 markdown 正文走 contentMarkdown；新版只认 content
+  if (ct === 'markdown' && !(await isModernDocs())) { fd.set('content', ''); fd.set('contentMarkdown', String(body || '')); }
   else { fd.set('content', String(body || '')); }
   fd.set('lib', String(lib));
   fd.set('module', String(module || '0'));
@@ -293,8 +391,8 @@ async function createDoc({ lib, module = '0', title, body = '', contentType = 'm
     const errs = json.errors && typeof json.errors === 'object' ? Object.values(json.errors).join('；') : '';
     throw new Error(json.message || errs || '创建失败');
   }
-  // locate 形如 /zentao/doc-objectLibs-product-24-75-13.html，末段即新文档 id
-  const id = (String(json.locate || '').match(/-(\d+)\.html/) || [])[1] || null;
+  // 新版直接回 id；旧版 locate 形如 /zentao/doc-objectLibs-product-24-75-13.html，末段即新文档 id
+  const id = (json.id != null ? String(json.id) : null) || (String(json.locate || '').match(/-(\d+)\.html/) || [])[1] || null;
   invalidateDocs();
   return { id, message: json.message || '保存成功' };
 }
@@ -319,13 +417,16 @@ function objectOfLib(lib) {
 async function editDoc({ id, title, body, keywords, acl, files } = {}) {
   assertReady();
   if (!/^\d+$/.test(String(id))) throw new Error('非法的文档 ID');
-  const data = await getZentaoJson(`doc-view-${id}.json?onlybody=yes`);
+  const modern = await isModernDocs();
+  // 新版：文档本体走 doc-ajaxGetDoc，编辑地址去掉了对象 / 库参数
+  const data = modern ? { doc: await ajaxJson(`doc-ajaxGetDoc-${id}.json`).catch(() => null), lib: {} } : await getZentaoJson(`doc-view-${id}.json?onlybody=yes`);
   const doc = data && data.doc;
   if (!doc || !doc.id) throw new Error('文档不存在或无权限');
   const { objectType, objectID } = objectOfLib(data.lib || {});
   const lib = String(doc.lib || '');
   const ct = String(doc.contentType || 'markdown').toLowerCase();
-  const url = `${ZENTAO_PATH()}/doc-edit-${id}-false-${objectType}-${objectID}-${lib}.html`;
+  if (modern && ct === 'doc') throw new Error('这篇文档用的是禅道新编辑器，请在禅道里编辑');
+  const url = modern ? `${ZENTAO_PATH()}/doc-edit-${id}.json` : `${ZENTAO_PATH()}/doc-edit-${id}-false-${objectType}-${objectID}-${lib}.html`;
   const fd = new FormData();
   fd.set('title', String(title != null ? title : decodeZentaoText(doc.title || '')).trim());
   // 正文：编辑接口 markdown 也放 content 字段（与抓包一致）；html 同理
@@ -357,6 +458,13 @@ async function editDoc({ id, title, body, keywords, acl, files } = {}) {
   if (json.result !== 'success') {
     const errs = json.errors && typeof json.errors === 'object' ? Object.values(json.errors).join('；') : '';
     throw new Error(json.message || errs || '保存失败');
+  }
+  if (modern && (title != null || body != null)) {
+    // 新版对不合规的地址也回「保存成功」却什么都不改：回读确认
+    const after = await ajaxJson(`doc-ajaxGetDoc-${id}.json`).catch(() => null);
+    const okTitle = title == null || (after && decodeZentaoText(after.title || '') === String(title).trim());
+    const okBody = body == null || (after && String(after.content || '') === String(body));
+    if (!okTitle || !okBody) throw new Error('保存失败：禅道没有接受这次修改');
   }
   invalidateDocs(id);
   return { id: String(id), message: json.message || '保存成功' };
@@ -416,7 +524,7 @@ async function collectDoc(id) {
 async function deleteDoc(id) {
   assertReady();
   if (!/^\d+$/.test(String(id))) throw new Error('非法的文档 ID');
-  await zentaoFetch(`${ZENTAO_PATH()}/doc-delete-${id}-yes-.html`, {
+  await zentaoFetch(`${ZENTAO_PATH()}/doc-delete-${id}-yes-.${(await isModernDocs()) ? 'json' : 'html'}`, {
     headers: {
       'X-Requested-With': 'XMLHttpRequest',
       'Accept': 'application/json, text/javascript, */*; q=0.01',
@@ -459,8 +567,10 @@ async function getDoc(id) {
   const listed = cache && Array.isArray(cache.items) && cache.items.find(i => i.id === id);
   if (hit && listed && Date.now() - (cache.syncedAt || 0) < DETAIL_TRUST_MS && hit.sig === listed.sig) return hit.data;
   let data;
+  const modern = await isModernDocs();
   try {
-    data = await getZentaoJson(`doc-view-${id}.json?onlybody=yes`);
+    // 新版 doc-view 的 JSON 只剩页面骨架，文档本体走 doc-ajaxGetDoc（直接返回文档对象）
+    data = modern ? { doc: await ajaxJson(`doc-ajaxGetDoc-${id}.json`) } : await getZentaoJson(`doc-view-${id}.json?onlybody=yes`);
   } catch (err) {
     // 文档不存在 / 无权限时禅道返回的不是合法 JSON（失败结果后拼着跳转脚本），解析失败即视为不存在
     if (/JSON|Unexpected/.test(err.message)) {
@@ -478,8 +588,12 @@ async function getDoc(id) {
   }
   const type = String(doc.type || 'text');
   const contentType = String(doc.contentType || 'html').toLowerCase();
-  const { contentHtml, contentText } = renderContent(type, contentType, doc.content || '');
-  const isText = type === 'text' || type === 'markdown';
+  // 新版编辑器（contentType=doc）的 content 是 BlockSuite JSON：展示用禅道渲染好的 html，且不能当文本回填编辑
+  const blocksuite = contentType === 'doc';
+  const { contentHtml, contentText } = blocksuite && (type === 'text' || type === 'markdown')
+    ? { contentHtml: sanitizeDocHtml(doc.html || ''), contentText: '' }
+    : renderContent(type, contentType, doc.content || '');
+  const isText = (type === 'text' || type === 'markdown') && !blocksuite;
   const result = {
     id: String(doc.id),
     title: decodeZentaoText(doc.title || '(无标题)'),

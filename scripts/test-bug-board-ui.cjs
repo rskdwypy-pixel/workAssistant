@@ -34,10 +34,15 @@ function extract(names) {
   }).join('\n');
 }
 
+const pad2 = (n) => String(n).padStart(2, '0');
+const dayStr = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const TODAY = dayStr(new Date());
+const YESTERDAY = dayStr(new Date(Date.now() - 86400000));
+
 const bugsFixture = () => [
   { id: 'u1', type: 'bug', title: '未确认的 Bug', status: 'unconfirmed', priority: 2, severity: 3, bugType: 'config', zentaoId: 101, assignedTo: 'zhangs' },
   { id: 'a1', type: 'bug', title: '已确认的 Bug', status: 'activated', priority: 3, severity: 2, zentaoId: 102, assignedTo: 'zhangs' },
-  { id: 'r1', type: 'bug', title: '已解决的 Bug', status: 'resolved', priority: 3, severity: 3, zentaoId: 103, assignedTo: 'lijc' },
+  { id: 'r1', type: 'bug', title: '已解决的 Bug', status: 'resolved', priority: 3, severity: 3, zentaoId: 103, assignedTo: 'lijc', resolvedAt: `${TODAY} 10:00:00` },
   { id: 'n1', type: 'bug', title: '没同步的 Bug', status: 'unconfirmed', priority: 3, severity: 4 }
 ];
 
@@ -68,6 +73,7 @@ function setup(state) {
   };
   win.eval(`
     var API_BASE_URL = 'http://127.0.0.1:3721';
+    var selectedDate = '${TODAY}';
     const Toast = {
       success(m){ window.__s.toasts.push(['success', m]); }, error(m){ window.__s.toasts.push(['error', m]); },
       warning(m){ window.__s.toasts.push(['warning', m]); }, info(m){ window.__s.toasts.push(['info', m]); }
@@ -95,6 +101,16 @@ const card = (doc, id) => doc.querySelector(`.bug-card[data-bug-id="${id}"]`);
 
   // ============ 卡片 ============
   check('已确认卡片浅蓝、已解决卡片浅绿（状态类名）', card(doc, 'a1').classList.contains('bug-status-activated') && card(doc, 'r1').classList.contains('bug-status-resolved') && card(doc, 'u1').classList.contains('bug-status-unconfirmed'));
+  // 已解决列只显示所选日历日期解决的 Bug
+  BM.bugs.push({ id: 'r2', type: 'bug', title: '昨天解决的 Bug', status: 'resolved', priority: 3, severity: 3, zentaoId: 104, assignedTo: 'lijc', resolvedAt: `${YESTERDAY} 16:30:00` });
+  await BM.renderBugs();
+  check('已解决列只显示所选日期解决的 Bug（今天看不到昨天解决的）', card(doc, 'r1') && !card(doc, 'r2') && doc.getElementById('bugClosedListCount').textContent === '1');
+  win.eval(`selectedDate = '${YESTERDAY}'`);
+  await BM.renderBugs();
+  check('切到昨天：只显示昨天解决的 Bug', !card(doc, 'r1') && card(doc, 'r2') && doc.getElementById('bugClosedListCount').textContent === '1');
+  BM.bugs = BM.bugs.filter(b => b.id !== 'r2');
+  win.eval(`selectedDate = '${TODAY}'`);
+  await BM.renderBugs();
   check('卡片上有 P▼ 优先级与指派人按钮，可拖拽', /P2/.test(card(doc, 'u1').querySelector('.bug-priority-toggle').textContent) && /张三/.test(card(doc, 'u1').querySelector('.bug-assignee-btn').textContent) && card(doc, 'u1').draggable);
   check('没有指派人时显示「未指派」可点', /未指派/.test(card(doc, 'n1').querySelector('.bug-assignee-btn').textContent));
   check('禅道 ID 仍是绿色链接（浅色底上加白底）', card(doc, 'r1').querySelector('.bug-id-link-inline') && /#103/.test(card(doc, 'r1').textContent));

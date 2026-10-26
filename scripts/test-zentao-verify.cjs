@@ -96,14 +96,16 @@ function makeEnv() {
     `env.updateTaskStatus = updateTaskStatus;`,
     `env.recordTaskEstimate = recordTaskEstimate;`,
     `env.isZentaoSubmitSuccess = isZentaoSubmitSuccess;`,
+    `env.extractZentaoError = extractZentaoError;`,
     `return env;`
   ].join('\n');
 
   // 真函数里引用了 fetch / config / getZentaoCookies / cookiesToString /
-  // extractFormFields / nowDateTime / zentaoBase / MY_LIST_PAGE_SIZE，全部按参数注入
+  // extractFormFields / nowDateTime / zentaoBase / MY_LIST_PAGE_SIZE / isModernZentao，全部按参数注入
+  // （这里固定按旧版禅道走；新版分支靠真实服务器验证）
   const fn = new Function(
     'fetch', 'config', 'getZentaoCookies', 'cookiesToString',
-    'extractFormFields', 'nowDateTime', 'zentaoBase', 'MY_LIST_PAGE_SIZE',
+    'extractFormFields', 'nowDateTime', 'zentaoBase', 'MY_LIST_PAGE_SIZE', 'isModernZentao',
     code
   );
 
@@ -118,7 +120,7 @@ function makeEnv() {
   const forwardFetch = (...a) => globalThis.__zenv.fetch(...a);
 
   return fn(forwardFetch, stubs.config, stubs.getZentaoCookies, stubs.cookiesToString,
-    stubs.extractFormFields, stubs.nowDateTime, () => 'http://z', 500);
+    stubs.extractFormFields, stubs.nowDateTime, () => 'http://z', 500, async () => false);
 }
 
 // package.json 是 ESM，.cjs 不允许顶层 await，整体包一层
@@ -138,6 +140,11 @@ async function main() {
   check('识别「保存成功」文案', env.isZentaoSubmitSuccess('<div>保存成功</div>') === true);
   check('退回表单判为失败（不能误放行）',
     env.isZentaoSubmitSuccess(BACK_TO_FORM) === false);
+  // 新版禅道（21+）直接回 JSON
+  check('新版 JSON {"result":"success"} 判成功', env.isZentaoSubmitSuccess('{"result":"success","message":"保存成功","closeModal":true}') === true);
+  check('新版 JSON {"result":"fail"} 判失败', env.isZentaoSubmitSuccess('{"result":"fail","message":{"left":["Field \'left\' not empty"]}}') === false);
+  check('新版成功响应里的「保存成功」不当成错误原因', env.extractZentaoError('{"result":"success","message":"保存成功"}') === '');
+  check('新版失败响应取出字段错误', /not empty/.test(env.extractZentaoError('{"result":"fail","message":{"left":["Field \'left\' not empty"]}}')));
   check('空响应判为失败', env.isZentaoSubmitSuccess('') === false);
   check('null 不炸', env.isZentaoSubmitSuccess(null) === false);
 }

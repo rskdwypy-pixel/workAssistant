@@ -141,6 +141,7 @@ async function updateBugStatus(bugId, newStatus, extraData = {}) {
 
     // 只改给出的字段：以前不传状态也会把状态改成 undefined
     if (newStatus !== undefined && newStatus !== null && newStatus !== '') bug.status = newStatus;
+    if (newStatus === 'resolved') bug.resolvedAt = new Date().toISOString();
     bug.updatedAt = new Date().toISOString();
     if (extraData.title !== undefined && String(extraData.title).trim()) {
       bug.title = String(extraData.title).trim();
@@ -252,7 +253,7 @@ async function createBugWithSync(bugData) {
 const ZENTAO_BUG_FIELDS = [
   'title', 'status', 'severity', 'priority', 'bugType', 'productName',
   'openedBy', 'resolvedBy', 'resolution', 'confirmed', 'assignedTo',
-  'executionId', 'executionName', 'projectId', 'projectName', 'openedAt', 'editedAt'
+  'executionId', 'executionName', 'projectId', 'projectName', 'openedAt', 'editedAt', 'resolvedAt'
 ];
 
 /**
@@ -321,6 +322,7 @@ async function importZentaoBugs(zentaoBugs) {
             assignedDate: zentaoBug.assignedDate || '',
             openedAt: zentaoBug.openedAt || '',
             editedAt: zentaoBug.editedAt || '',
+            resolvedAt: zentaoBug.resolvedAt || '',
             cc: [],
             assignedToList: [],
             comments: [],

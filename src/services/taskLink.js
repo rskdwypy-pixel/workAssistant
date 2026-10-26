@@ -10,7 +10,7 @@
  *   - 看板型执行要带 region / lane（取自看板页）。
  */
 import { config } from '../config.js';
-import { getZentaoCookies, cookiesToString, getZentaoJson, getKanbanParams, getTasks } from './zentaoService.js';
+import { getZentaoCookies, cookiesToString, getZentaoJson, getTaskView, getKanbanParams, getTasks } from './zentaoService.js';
 
 const TASK_TYPES = ['design', 'devel', 'request', 'test', 'study', 'discuss', 'ui', 'affair', 'misc'];
 const base = () => String(config.zentao.url || '').replace(/\/$/, '');
@@ -141,7 +141,7 @@ export async function createLinkedTask(link, draft) {
     // 回读确认真的关联上了
     let linked = false;
     try {
-      const t = (await getZentaoJson(`task-view-${taskId}.json?onlybody=yes`, CH)).task || {};
+      const t = (await getTaskView(taskId, CH)).task || {};
       linked = bugId ? String(t.fromBug) === String(bugId) : storyId ? String(t.story) === String(storyId) : true;
     } catch { /* 回读失败不影响创建结果 */ }
     return { success: true, taskId, linked, message: linked ? `任务已创建（#${taskId}）` : `任务已创建（#${taskId}），但没能确认关联，请到禅道核对` };

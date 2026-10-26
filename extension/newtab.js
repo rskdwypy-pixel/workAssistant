@@ -2377,6 +2377,7 @@ function renderCalendar(data) {
         dayDiv.classList.add('selected');
         selectedDate = dateStr;
         loadTasksByDate(dateStr);
+        if (typeof BugManager !== 'undefined' && BugManager.bugs) BugManager.renderBugs();
       });
     }
 
@@ -7810,6 +7811,16 @@ const BugManager = {
     console.log('[BugManager] ========== loadBugs 结束 ==========');
   },
 
+  /** Bug 的解决日期（本地 YYYY-MM-DD）：禅道 resolvedDate → 本地解决时间 → 最后修改时间 */
+  resolvedDay(bug) {
+    const v = bug.resolvedAt || bug.editedAt || bug.updatedAt || '';
+    if (/^\d{4}-\d{2}-\d{2} /.test(v)) return v.slice(0, 10);
+    const d = new Date(v);
+    if (isNaN(d)) return '';
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  },
+
   async renderBugs() {
     console.log('[BugManager] ========== renderBugs 开始 ==========');
     console.log('[BugManager] 待渲染的 Bug 数量:', this.bugs.length);
@@ -7896,7 +7907,8 @@ const BugManager = {
         activatedCount++;
         console.log(`[BugManager] → Bug "${bug.title}" 渲染到已确认列`);
       } else if (bug.status === 'resolved' || bug.status === 'closed') {
-        // resolved 和 closed 状态都渲染到已解决列
+        // 已解决列只显示所选日历日期解决的 Bug
+        if (this.resolvedDay(bug) !== selectedDate) continue;
         closedList.appendChild(card);
         closedCount++;
         console.log(`[BugManager] → Bug "${bug.title}" 渲染到已解决列 (状态: ${bug.status})`);

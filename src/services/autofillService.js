@@ -19,7 +19,7 @@
 import { randomBytes } from 'crypto';
 import { join } from 'path';
 import { config } from '../config.js';
-import { fetchMyList, getZentaoJson, getTaskEfforts, isConfigured, getZentaoCookies, cookiesToString } from './zentaoService.js';
+import { fetchMyList, getZentaoJson, getTaskView, getTaskEfforts, isConfigured, getZentaoCookies, cookiesToString } from './zentaoService.js';
 import { getMonthEfforts, addEffort, deleteEffort, standardHours, myEffortsByTask } from './effortService.js';
 import { readJSON, writeJSON } from '../utils/storage.js';
 import { decodeZentaoText } from '../utils/text.js';
@@ -307,7 +307,7 @@ async function describeTask(taskId, CH) {
   if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.text;
   let text = '';
   try {
-    const d = await getZentaoJson(`task-view-${taskId}.json?onlybody=yes`, CH);
+    const d = await getTaskView(taskId, CH);
     text = redact(decodeZentaoText(String((d && d.task && d.task.desc) || '')).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ')).slice(0, 200);
   } catch { /* 取不到描述就只用任务名 */ }
   taskDescCache.set(taskId, { at: Date.now(), text });
