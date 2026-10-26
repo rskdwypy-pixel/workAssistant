@@ -195,7 +195,17 @@ async function restartSupervisor(env) {
   await new Promise(r => server.listen(8798, '127.0.0.1', r));
   await restartSupervisor({ WA_UPDATE_URL: 'http://127.0.0.1:8798/releases' });
   check('守护进程（带测试下载地址）拉起后台', !!(await waitVersion(baseVersion)), logTail());
-  let s = await request('POST', '/api/update/check', {});
+  // 检查更新发现新版本就立刻返回（state=downloading），下载在后台进行：轮询状态等它就绪（界面的进度条也是这么读的）
+  const checkUntilDone = async () => {
+    let r = await request('POST', '/api/update/check', {});
+    const t0 = Date.now();
+    while (r && r.data && r.data.state === 'downloading' && Date.now() - t0 < 180000) {
+      await sleep(500);
+      r = await request('GET', '/api/update/status');
+    }
+    return r;
+  };
+  let s = await checkUntilDone();
   check('检查：下载、校验签名后就绪', s && s.data.state === 'ready' && s.data.readyVersion === '99.0.0', JSON.stringify(s) + '\n' + logTail());
   let applied = await request('POST', '/api/update/apply', {});
   check('安装：后台以 75 退出，守护进程按新版本拉起', !!(await waitVersion('99.0.0')), JSON.stringify(applied) + '\n' + logTail());
@@ -205,7 +215,7 @@ async function restartSupervisor(env) {
   check('启动自检：新版本运行 30 秒后清掉标记', !!(await waitFor(async () => !fs.existsSync(path.join(WA_HOME, 'update-pending')), 60000)));
 
   latest = 'v99.0.1';
-  s = await request('POST', '/api/update/check', {});
+  s = await checkUntilDone();
   check('坏版本：同样能下载', s && s.data.state === 'ready' && s.data.readyVersion === '99.0.1', JSON.stringify(s));
   applied = await request('POST', '/api/update/apply', {});
   const back = await waitFor(async () => {
