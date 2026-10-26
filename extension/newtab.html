@@ -243,6 +243,7 @@
         <div class="account-area" id="accountArea">
           <span id="accountLoading" class="account-loading" role="status"><span class="account-spinner" aria-hidden="true"></span>正在读取禅道账号…</span>
           <button id="accountLoginBtn" class="tab-login-btn" type="button" hidden>登录禅道</button>
+          <button id="notifyBellBtn" class="account-settings-btn notify-bell" type="button" title="新指派提醒" aria-label="新指派提醒" aria-haspopup="true" aria-expanded="false" hidden><svg aria-hidden="true"><use href="#si-bell"/></svg><span class="notify-count" id="notifyCount" hidden></span></button>
           <button id="accountSettingsBtn" class="account-settings-btn" type="button" title="设置" aria-label="设置" hidden><svg aria-hidden="true"><use href="#si-sliders"/></svg></button>
           <button id="accountAvatarBtn" class="account-avatar" type="button" aria-haspopup="true" aria-expanded="false" hidden></button>
         </div>
@@ -972,6 +973,23 @@
             <h4>通知推送</h4>
             <p class="set-desc">定时生成日报周报，并推送到系统通知或群机器人。</p>
 
+            <div class="set-row" id="assignNotifyRow">
+              <div class="sr-label">新指派提醒<small>修改后立即生效</small></div>
+              <div class="sr-control">
+                <label class="set-check"><input type="checkbox" id="notifyEnabled"> 别人把任务 / Bug / 需求指派给我时提醒</label>
+                <div class="row notify-channels">
+                  <label class="set-check"><input type="checkbox" id="notifySystem"> 系统通知</label>
+                  <label class="set-check"><input type="checkbox" id="notifyWebhook"> Webhook 推送</label>
+                </div>
+                <span class="input-hint" id="notifyHint">每 5 分钟检查一次「指派给我」的列表。浏览器关着时系统通知和 Webhook 也会发。</span>
+                <div class="row">
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="notifyTestBtn"><span class="btn-label">发送测试</span></button>
+                  <button type="button" class="set-btn set-btn-secondary set-btn-sm" id="notifyCheckBtn"><span class="btn-label">立即检查</span></button>
+                  <span id="notifyTestResult" class="test-result"></span>
+                </div>
+              </div>
+            </div>
+
             <div class="set-row">
               <div class="sr-label">早间提醒</div>
               <div class="sr-control">
@@ -1335,6 +1353,7 @@
   <script src="onboarding.js"></script>
   <script src="account.js"></script>
   <script src="update-ui.js"></script>
+  <script src="notify-ui.js"></script>
   <!-- 按钮状态管理器 -->
   <script src="buttonStateManager.js"></script>
   <!-- 乐观 UI：禅道操作先改界面，失败再回退 -->

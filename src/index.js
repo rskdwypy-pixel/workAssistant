@@ -13,8 +13,10 @@ import todosRouter from './routes/todos.js';
 import effortsRouter from './routes/efforts.js';
 import autofillRouter from './routes/autofill.js';
 import accountRouter from './routes/account.js';
+import notifyRouter from './routes/notify.js';
 import { startAttachmentRetry } from './services/attachmentSync.js';
 import { startReminder } from './services/reminder.js';
+import { start as startAssignNotifier } from './services/assignNotify.js';
 import { startSummary } from './services/summary.js';
 import updateRouter from './routes/update.js';
 import { getUpdater } from './services/updater.js';
@@ -54,6 +56,7 @@ app.use('/api', docsRouter);
 app.use('/api', storiesRouter);
 app.use('/api', taskLinkRouter);
 app.use('/api', todosRouter);
+app.use('/api', notifyRouter);
 app.use('/api', autofillRouter);
 app.use('/api', effortsRouter);
 app.use('/api', accountRouter);
@@ -134,6 +137,8 @@ function startServer() {
     // 端口真正拿到手了才挂定时任务，否则会多出一份重复的调度
     startReminder();
     startSummary();
+    // 别人把任务 / Bug / 需求指派给我时提醒（每 5 分钟读一次「指派给我」的列表）
+    startAssignNotifier();
     // 已同步到禅道、仍有待上传附件的记录：定时补传
     startAttachmentRetry();
     updater.start();

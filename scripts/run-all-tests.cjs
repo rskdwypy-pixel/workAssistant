@@ -20,6 +20,8 @@ const SUITES = [
   'test-rollback',
   'test-backend-fixes.mjs',
   'test-login-storm.mjs',
+  'test-assign-notify.mjs',
+  'test-notify-ui',
   'test-task-intake.mjs',
   'test-task-modal-flow',
   'test-task-card-bindings',
