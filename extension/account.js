@@ -418,25 +418,35 @@ const Account = {
     if (mode !== 'relogin') this.fillSavedList(overlay);
   },
 
-  /** 登录卡片顶部的「已保存的账号」：点一下直接登录（用保存的密码） */
+  /**
+   * 登录卡片顶部的「已保存的账号」：点一下直接登录（用保存的密码）。
+   * 已登录时当前账号也列出来（标「当前」，不能点），这样「切换账号」页面里总能看到有哪些账号；
+   * 只有当前账号时说明一下登录过的账号会自动保存在这里。
+   */
   async fillSavedList(overlay) {
     let accounts = [];
     try {
       const res = await AccountApi.saved();
       if (res.success) accounts = (res.data.accounts || []);
     } catch { return; }
-    // 已登录时当前账号不用列出来（点了也没意义）
-    if (this.state && this.state.state !== 'unconfigured') accounts = accounts.filter(a => !a.current);
     const box = overlay.querySelector('.login-saved');
-    if (!box || !accounts.length || !overlay.isConnected) return;
-    box.innerHTML = `<div class="login-saved-title">已保存的账号 · 点一下直接登录</div>` + accounts.map((x) => {
+    if (!box || !overlay.isConnected) return;
+    const loggedIn = !!this.state && this.state.state !== 'unconfigured';
+    if (!loggedIn) accounts = accounts.filter(a => !a.current);   // 未登录时没有「当前账号」可言
+    if (!accounts.length) return;
+    const others = accounts.filter(a => !a.current).length;
+    const rows = accounts.map((x) => {
       const av = avatarOf({ realname: x.realname }, x.username);
-      return `<button type="button" class="login-saved-row" data-login-switch="${accountEsc(x.id)}">
-          <span class="account-avatar" style="background:${av.color}">${accountEsc(av.text)}</span>
-          <span class="am-acct-who"><span class="am-acct-name">${accountEsc(x.realname || x.username)}</span><span class="am-acct-sub">${accountEsc(savedSub(x))}</span></span>
-          <span class="login-saved-go">登录</span>
-        </button>`;
+      const inner = `<span class="account-avatar" style="background:${av.color}">${accountEsc(av.text)}</span>
+          <span class="am-acct-who"><span class="am-acct-name">${accountEsc(x.realname || x.username)}</span><span class="am-acct-sub">${accountEsc(savedSub(x))}</span></span>`;
+      return x.current
+        ? `<div class="login-saved-row is-current" aria-current="true">${inner}<span class="login-saved-go">当前</span></div>`
+        : `<button type="button" class="login-saved-row" data-login-switch="${accountEsc(x.id)}">${inner}<span class="login-saved-go">登录</span></button>`;
     }).join('');
+    const hint = loggedIn && !others
+      ? '<div class="login-saved-empty">还没有其他账号。在下面登录过的账号会自动保存在这里，下次点一下就能切换。</div>'
+      : '';
+    box.innerHTML = `<div class="login-saved-title">已保存的账号${others ? ' · 点一下直接登录' : ''}</div>${rows}${hint}`;
     box.hidden = false;
   },
 

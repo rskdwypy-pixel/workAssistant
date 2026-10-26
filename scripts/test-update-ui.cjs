@@ -37,7 +37,7 @@ function setup(s) {
     const reply = (b) => ({ ok: true, status: 200, json: async () => b });
     if (s.down) throw new TypeError('Failed to fetch');
     if (u === '/health') return reply({ app: 'workassistant', version: s.healthVersion || s.status.current });
-    if (u === '/api/update/status') return reply({ success: true, data: s.status });
+    if (u === '/api/update/status') return reply({ success: true, data: s.statusFn ? s.statusFn() : s.status });
     if (u === '/api/admin/about') return reply({ success: true, data: s.about || { version: '1.2.0', installed: true, platform: 'darwin', node: '22.20.0', installDir: '/Users/x/Library/Application Support/WorkAssistant', dataDir: '/Users/x/Library/Application Support/WorkAssistant/data', logFile: '/Users/x/Library/Logs/WorkAssistant/backend.log', extensionDir: '/Users/x/Library/Application Support/WorkAssistant/extension', port: 3721 } });
     if (u === '/api/update/check') return reply({ success: true, data: s.afterCheck || s.status });
     if (u === '/api/update/settings') { s.status = { ...s.status, auto: JSON.parse(init.body).auto }; return reply({ success: true, data: s.status }); }
@@ -76,9 +76,58 @@ function setup(s) {
   s.afterCheck = statusOf({ state: 'ready', latest: '1.3.0', readyVersion: '1.3.0' });
   $('updateCheckBtn').click();
   await tick(10);
-  check('检查更新：发请求，新版本已下载好时显示「立即更新」', s.requests.some(r => r.url === '/api/update/check' && r.method === 'POST') && !$('updateApplyBtn').hidden && /1\.3\.0 已下载好/.test($('updateStatusText').textContent) && !$('updateCheckBtn').disabled);
+  check('检查更新：发请求，新版本已下载好时显示「立即更新」', s.requests.some(r => r.url === '/api/update/check' && r.method === 'POST') && !$('updateApplyBtn').hidden && /1\.3\.0 已下载完成/.test($('updateStatusText').textContent) && !$('updateCheckBtn').disabled);
+
+  // 检查 → 发现新版本 → 下载进度条 → 立即更新
+  s = { status: statusOf({ current: '1.2.0' }) };
+  ({ win, $ } = setup(s));
+  await tick(10);
+  win.UpdateUI.pollMs = 5;
+  const MB = 1048576;
+  const dl = (received, total) => statusOf({ state: 'downloading', latest: '1.3.0', progress: { received, total, percent: total ? Math.floor(received * 100 / total) : null } });
+  s.afterCheck = dl(0, 0);
+  s.polls = [dl(2 * MB, 8 * MB), dl(4 * MB, 8 * MB), dl(7 * MB, 8 * MB), statusOf({ state: 'ready', latest: '1.3.0', readyVersion: '1.3.0' })];
+  const seen = [];
+  const origStatus = s.statusFn;
+  s.statusFn = () => (s.polls.length ? s.polls.shift() : s.status);
+  $('updateCheckBtn').click();
+  check('点检查更新：先显示「正在检查新版本」，按钮禁用', /正在检查新版本/.test($('updateStatusText').textContent) && $('updateCheckBtn').disabled);
+  await tick(3);
+  const t1 = $('updateStatusText').textContent;
+  check('发现新版本：显示新旧版本号，进度条出现', /发现新版本 v1\.3\.0（当前 v1\.2\.0）/.test(t1) && !$('updateProgress').hidden && $('updateCheckBtn').disabled && /下载中/.test($('updateCheckBtn').textContent), t1);
+  for (let i = 0; i < 40 && $('updateApplyBtn').hidden; i++) {
+    const bar = $('updateProgressBar').style.width; if (bar && !seen.includes(bar)) seen.push(bar);
+    await tick(5);
+  }
+  check('下载中：进度条宽度和百分比文字随进度变化（25% → 50% → 87%）', seen.some(w => w === '25%') && seen.some(w => w === '50%') && seen.some(w => w === '87%'), seen.join(','));
+  check('下载完成：进度条消失，显示「已下载完成」和「立即更新」，检查按钮恢复', $('updateProgress').hidden && !$('updateApplyBtn').hidden && /v1\.3\.0 已下载完成/.test($('updateStatusText').textContent) && !$('updateCheckBtn').disabled && $('updateCheckBtn').textContent === '检查更新');
+  check('下载中文字带已下载 / 总大小', s.requests.filter(r => r.url === '/api/update/status').length >= 4);
+  // 不知道总大小：不确定进度
+  s = { status: statusOf() };
+  ({ win, $ } = setup(s));
+  await tick(10);
+  win.UpdateUI.pollMs = 5;
+  s.afterCheck = dl(3 * MB, 0);
+  s.polls = [dl(3 * MB, 0), statusOf({ state: 'error', latest: '1.3.0', error: '下载失败' })];
+  s.statusFn = () => (s.polls.length ? s.polls.shift() : s.status);
+  $('updateCheckBtn').click();
+  await tick(3);
+  check('服务器没告知大小：显示已下载量和来回滑动的不确定进度条', /已下载 3\.0 MB/.test($('updateStatusText').textContent) && $('updateProgress').classList.contains('is-indeterminate'), $('updateStatusText').textContent);
+  await tick(40);
+  check('下载失败：进度条消失并说明原因', $('updateProgress').hidden && /下载失败/.test($('updateStatusText').textContent) && !$('updateCheckBtn').disabled);
+  // 打开设置时后台正在下载（自动检查触发）：也要显示进度
+  s = { status: dl(1 * MB, 4 * MB) };
+  s.polls = [dl(2 * MB, 4 * MB), statusOf({ state: 'ready', latest: '1.3.0', readyVersion: '1.3.0' })];
+  s.statusFn = () => (s.polls.length ? s.polls.shift() : s.status);
+  ({ win, $ } = setup(s));
+  win.UpdateUI.pollMs = 5;
+  await tick(60);
+  check('打开设置时后台正在下载：自动显示进度并跟到完成', $('updateProgress').hidden && !$('updateApplyBtn').hidden);
 
   // 自动更新开关
+  s = { status: statusOf() };
+  ({ win, $ } = setup(s));
+  await tick(10);
   $('updateAutoToggle').checked = false;
   $('updateAutoToggle').dispatchEvent(new win.Event('change'));
   await tick(10);

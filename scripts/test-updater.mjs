@@ -4,7 +4,7 @@
  *   检查 / 下载 / 校验（哈希、签名、Node 版本）/ 空闲判断 / 安装切换 / 启动自检与回滚（真实运行 bin/workassistant-run）
  */
 import { execFileSync, spawnSync } from 'child_process';
-import { createHash, generateKeyPairSync, sign } from 'crypto';
+import { createHash, generateKeyPairSync, sign, randomBytes } from 'crypto';
 import fs from 'fs';
 import http from 'http';
 import os from 'os';
@@ -24,7 +24,7 @@ const PUB = publicKey.export({ type: 'spki', format: 'pem' }).toString();
 const other = generateKeyPairSync('ed25519').privateKey;
 
 /** 做一个假的版本目录（安装包里的那个目录） */
-function makeVersionDir(dir, version, { node = '18.0.0', exitCode } = {}) {
+function makeVersionDir(dir, version, { node = '18.0.0', exitCode, pad = 0 } = {}) {
   fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'extension'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'scripts', 'bin'), { recursive: true });
@@ -32,15 +32,16 @@ function makeVersionDir(dir, version, { node = '18.0.0', exitCode } = {}) {
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'work-assistant', version }));
   fs.writeFileSync(path.join(dir, 'src', 'index.js'), exitCode !== undefined ? `process.exit(${exitCode})` : `console.log('running ${version}')`);
   fs.writeFileSync(path.join(dir, 'extension', 'manifest.json'), JSON.stringify({ version }));
+  if (pad) fs.writeFileSync(path.join(dir, 'pad.bin'), randomBytes(pad));
   for (const f of ['workassistant-run', 'native-host']) fs.copyFileSync(path.join(ROOT, 'scripts', 'bin', f), path.join(dir, 'scripts', 'bin', f));
 }
 
 /** 发布目录：<tag>/workassistant.tar.gz(.sha256/.sig) */
 const RELEASES = path.join(TMP, 'releases');
-function publish(version, { node, sigKey = privateKey, noSig = false, badSha = false } = {}) {
+function publish(version, { node, sigKey = privateKey, noSig = false, badSha = false, pad = 0 } = {}) {
   const stage = path.join(TMP, 'stage', version);
   fs.rmSync(stage, { recursive: true, force: true });
-  makeVersionDir(path.join(stage, `workassistant-${version}`), version, { node });
+  makeVersionDir(path.join(stage, `workassistant-${version}`), version, { node, pad });
   const out = path.join(RELEASES, `v${version}`);
   fs.mkdirSync(out, { recursive: true });
   const tgz = path.join(out, 'workassistant.tar.gz');
@@ -53,6 +54,7 @@ function publish(version, { node, sigKey = privateKey, noSig = false, badSha = f
 }
 
 let latestTag = 'v1.1.0';
+let slowDownload = 0;   // >0：安装包分几段慢慢发（毫秒），用来观察下载进度
 const server = http.createServer((req, res) => {
   if (req.url === '/releases/latest') {
     res.writeHead(302, { Location: `/releases/tag/${latestTag}` });
@@ -64,6 +66,14 @@ const server = http.createServer((req, res) => {
   const m = req.url.match(/^\/releases\/download\/(v[\d.]+)\/(.+)$/);
   const file = m && path.join(RELEASES, m[1], m[2]);
   if (!file || !fs.existsSync(file)) { res.writeHead(404); return res.end(); }
+  if (slowDownload && file.endsWith('.tar.gz')) {
+    const buf = fs.readFileSync(file);
+    res.writeHead(200, { 'Content-Length': buf.length });
+    const parts = 10, size = Math.ceil(buf.length / parts);
+    let i = 0;
+    const send = () => { if (i >= parts) return res.end(); res.write(buf.subarray(i * size, (i + 1) * size)); i++; setTimeout(send, slowDownload); };
+    return send();
+  }
   res.writeHead(200);
   fs.createReadStream(file).pipe(res);
 });
@@ -83,6 +93,9 @@ function makeHome(name) {
   return home;
 }
 
+function makeUpdater(home, extra = {}) {
+  return updaterFor(home, extra);
+}
 function updaterFor(home, extra = {}) {
   const restarts = [];
   const u = createUpdater({
@@ -115,6 +128,31 @@ try {
   let s = await u.check();
   check('检查：发现新版本，下载、校验后解压到 versions/1.1.0', s.state === 'ready' && s.readyVersion === '1.1.0' && fs.existsSync(path.join(home, 'versions', '1.1.0', 'src', 'index.js')) && !fs.existsSync(path.join(home, 'downloads')), JSON.stringify(s));
   check('检查：记下检查时间', !!JSON.parse(fs.readFileSync(path.join(home, 'data', 'update.json'), 'utf8')).lastCheck);
+
+  // 检查和下载分开：发现新版本立刻返回，下载在后台进行，状态里带进度
+  publish('1.2.0', { pad: 1024 * 1024 });   // 1 MB 随机内容（压缩不掉），让下载有可观察的过程
+  latestTag = 'v1.2.0';
+  slowDownload = 300;
+  const dh = makeHome('h-detach');
+  const dres = makeUpdater(dh);
+  const t0 = Date.now();
+  const found = await dres.u.check({ manual: true, detach: true });
+  check('检查（分步）：发现新版本后立刻返回，状态是「下载中」并带上新版本号', found.state === 'downloading' && found.latest === '1.2.0' && Date.now() - t0 < 1000 && !found.readyVersion && !!found.progress, JSON.stringify(found));
+  const seen = [];
+  for (let i = 0; i < 100; i++) {
+    const st = dres.u.getStatus();
+    if (st.state === 'downloading' && st.progress) seen.push(st.progress);
+    if (st.state === 'ready') break;
+    await new Promise(r => setTimeout(r, 60));
+  }
+  const fin = dres.u.getStatus();
+  const pcts = seen.map(p => p.percent).filter(x => x !== null);
+  check('下载进度：知道总大小，百分比从小到大变化，中途能看到 1%~99% 之间的进度', seen.filter(p => p.total > 0).length > 2 && new Set(seen.filter(p => p.total > 0).map(p => p.total)).size === 1 && pcts.some(x => x > 0 && x < 100) && pcts.every((x, i) => i === 0 || x >= pcts[i - 1]), JSON.stringify({ n: seen.length, totals: [...new Set(seen.map(p => p.total))], pcts: [...new Set(pcts)] }));
+  check('下载完成：状态变成 ready，进度清空，新版本已解压好', fin.state === 'ready' && fin.readyVersion === '1.2.0' && fin.progress === null && fs.existsSync(path.join(dh, 'versions', '1.2.0', 'src', 'index.js')), JSON.stringify(fin));
+  const again = await dres.u.check({ manual: true, detach: true });
+  check('已经下载好的版本再检查：直接 ready，不重复下载', again.state === 'ready' && again.readyVersion === '1.2.0');
+  slowDownload = 0;
+  latestTag = 'v1.1.0';
 
   // 发布源落后：Gitee 在本机同步之前，/latest 还停在旧版本——要取各源里最高的版本，不能只信第一个源
   const lagging = http.createServer((req, res) => {

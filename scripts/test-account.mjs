@@ -273,6 +273,22 @@ try {
   r = await call('GET', '/account/saved');
   check('升级后当前账号自动进入列表（不用重新登录）', r.data.accounts.length === 1 && r.data.accounts[0].current && r.data.accounts[0].username === 'lisi');
 
+  // 换下来的账号：换之前先存进列表（它的密码这时还在配置里，换掉就找不回来了），以后点一下能切回去
+  rmSync(join(tmp, 'accounts.json'), { force: true });
+  await call('GET', '/account?refresh=1');
+  rmSync(join(tmp, 'accounts.json'), { force: true });   // 模拟：以前（没有这个功能）登录的账号，列表里什么都没有
+  r = await call('POST', '/account/login', { url: 'http://10.0.0.1:8088', username: 'zhangs', password: 'pw-zhang', confirmSwitch: true });
+  list = (await call('GET', '/account/saved')).data.accounts;
+  check('登录另一个账号：被换下来的账号自动保存（带密码，列表里可见）', r.success && list.some(a => a.username === 'lisi' && !a.current && a.hasPassword) && list.some(a => a.username === 'zhangs' && a.current), JSON.stringify(list.map(a => `${a.username}${a.current ? '*' : ''}`)));
+  r = await call('POST', '/account/switch', { id: list.find(a => a.username === 'lisi').id });
+  check('点换下来的账号：直接切回去', r.success && /ZENTAO_USERNAME=lisi/.test(env()) && r.data.state.profile.realname === '李四');
+  rmSync(join(tmp, 'accounts.json'), { force: true });
+  const rcv = await acct.reconcileBeforeChange('http://10.0.0.5:8088', 'lisi');
+  list = (await call('GET', '/account/saved')).data.accounts;
+  check('设置里改了地址：改之前先保存当前账号（换地址的历史账号不丢）', list.some(a => a.username === 'lisi' && a.url === 'http://10.0.0.1:8088' && a.hasPassword), JSON.stringify(list.map(a => `${a.username}@${a.url}`)));
+  await call('POST', '/account/login', { url: 'http://10.0.0.1:8088', username: 'lisi', password: 'pw-li', confirmSwitch: true });
+  writeTasks([{ id: 't2', title: '李四的任务', zentaoId: '2' }]);
+
   // 退出不丢列表，重置清空列表（含密码）
   await call('POST', '/account/logout');
   r = await call('GET', '/account/saved');

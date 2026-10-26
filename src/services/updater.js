@@ -19,10 +19,7 @@
  */
 import { execFile, spawn } from 'child_process';
 import { createHash, verify as verifySignature } from 'crypto';
-import {
-  chmodSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync,
-  readdirSync, renameSync, rmSync, unlinkSync, writeFileSync
-} from 'fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync, statSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { RELEASE_PUBLIC_KEY } from './releaseKey.js';
@@ -147,6 +144,8 @@ export function createUpdater(opts = {}) {
       state: installed ? status.state : 'dev',
       latest: status.latest,
       readyVersion: status.readyVersion,
+      // 下载进度：received / total 字节（total 为 0 表示服务器没告知大小），percent 为整数 0~100 或 null
+      progress: status.state === 'downloading' ? (status.progress || { received: 0, total: 0, percent: null }) : null,
       // 已下载好的版本上次安装后启动失败、被退回过：不自动安装，只能手动点「立即更新」
       readyIsBad: !!status.readyVersion && bad.includes(status.readyVersion),
       // 上次自动更新的版本启动失败，已退回
@@ -183,29 +182,69 @@ export function createUpdater(opts = {}) {
     return best.version;
   }
 
-  async function download(url, file) {
-    await run('curl', ['-fsSL', '--retry', '2', '--connect-timeout', '15', '--max-time', '900', '-o', file, url], 920 * 1000);
+  /** 远端文件大小（字节）；取不到返回 0（界面显示不确定进度） */
+  async function remoteSize(url) {
+    try {
+      const out = await run('curl', ['-sIL', '--connect-timeout', '10', '--max-time', '20', url], 25 * 1000);
+      const lens = [...out.matchAll(/^content-length:\s*(\d+)/gim)].map(m => Number(m[1]));
+      return lens.length ? lens[lens.length - 1] : 0;   // 跟随跳转后的最后一个响应
+    } catch {
+      return 0;
+    }
+  }
+
+  function setProgress(received, total) {
+    const percent = total > 0 ? Math.max(0, Math.min(100, Math.floor((received * 100) / total))) : null;
+    status = { ...status, progress: { received, total, percent } };
+  }
+
+  /** @param {{track?:boolean}} [options] track：边下边上报进度（只对大文件，量一下磁盘上文件的大小） */
+  async function download(url, file, { track = false } = {}) {
+    let timer = null;
+    let total = 0;
+    if (track) {
+      total = await remoteSize(url);
+      setProgress(0, total);
+      timer = setInterval(() => {
+        try { setProgress(statSync(file).size, total); } catch { /* 文件还没出现 */ }
+      }, 250);
+    }
+    try {
+      await run('curl', ['-fsSL', '--retry', '2', '--connect-timeout', '15', '--max-time', '900', '-o', file, url], 920 * 1000);
+    } finally {
+      if (timer) clearInterval(timer);
+    }
+    if (track) {
+      let size = total;
+      try { size = statSync(file).size; } catch { /* ignore */ }
+      setProgress(size, size);
+    }
+  }
+
+  /** 这个版本是不是已经下载、校验、解压好了 */
+  function isPrepared(version) {
+    const marker = join(waHome, 'versions', version, '.wa-package');
+    return existsSync(marker) && readText(marker).includes(`"version": "${version}"`);
   }
 
   /** 下载、校验、解压到 versions/<版本>/；返回 true 表示已就绪 */
   async function prepare(version) {
     const dir = join(waHome, 'versions', version);
-    const marker = join(dir, '.wa-package');
-    if (existsSync(marker) && readText(marker).includes(`"version": "${version}"`)) return true;
+    if (isPrepared(version)) return true;
 
     const work = join(waHome, 'downloads');
     rmSync(work, { recursive: true, force: true });
     mkdirSync(work, { recursive: true });
     const tag = `v${version}`;
     const tgz = join(work, 'workassistant.tar.gz');
-    status = { ...status, state: 'downloading', error: '' };
+    status = { ...status, state: 'downloading', error: '', progress: { received: 0, total: 0, percent: null } };
     log(`下载 ${version}`);
     // 安装包、校验文件、签名必须来自同一个源；一个源下载失败就换下一个有这个版本的源
     let got = false;
     let dlErr = null;
     for (const base of candidateBases.length ? candidateBases : [activeBase]) {
       try {
-        await download(`${base}/download/${tag}/workassistant.tar.gz`, tgz);
+        await download(`${base}/download/${tag}/workassistant.tar.gz`, tgz, { track: true });
         await download(`${base}/download/${tag}/workassistant.tar.gz.sha256`, `${tgz}.sha256`);
         try {
           await download(`${base}/download/${tag}/workassistant.tar.gz.sig`, `${tgz}.sig`);
@@ -252,12 +291,18 @@ export function createUpdater(opts = {}) {
     return true;
   }
 
-  /** 检查更新；有新版本就下载好（auto 时随后在空闲时安装） */
-  async function check({ manual = false } = {}) {
+  /**
+   * 检查更新；有新版本就下载好（auto 时随后在空闲时安装）。
+   * @param {{manual?:boolean, detach?:boolean}} [options]
+   *   detach：发现新版本后立刻返回（state=downloading，带 latest），下载在后台继续，界面轮询 getStatus().progress 显示进度；
+   *   不带 detach（定时检查）则一直等到下载完成。
+   */
+  async function check({ manual = false, detach = false } = {}) {
     if (!installed) return getStatus();
     if (busy) return getStatus();
     busy = true;
-    status = { ...status, state: 'checking', error: '' };
+    let detached = false;
+    status = { ...status, state: 'checking', error: '', progress: null };
     try {
       const latest = await fetchLatestVersion();
       saveSettings({ lastCheck: now().toISOString() });
@@ -270,15 +315,27 @@ export function createUpdater(opts = {}) {
         status = { ...status, state: 'error', error: `${latest} 上次安装后启动失败，已退回；可重新运行安装命令手动更新` };
         return getStatus();
       }
+      if (detach && !isPrepared(latest)) {
+        detached = true;
+        status = { ...status, state: 'downloading', latest, error: '', readyVersion: '', progress: { received: 0, total: 0, percent: null } };
+        prepare(latest)
+          .then(() => { status = { ...status, state: 'ready', readyVersion: latest, error: '', progress: null }; })
+          .catch((err) => {
+            status = { ...status, state: err.needsInstaller ? 'needs-installer' : 'error', error: err.message, progress: null };
+            log('下载失败:', err.message);
+          })
+          .finally(() => { busy = false; });
+        return getStatus();
+      }
       await prepare(latest);
-      status = { ...status, state: 'ready', readyVersion: latest, error: '' };
+      status = { ...status, state: 'ready', readyVersion: latest, error: '', progress: null };
       return getStatus();
     } catch (err) {
-      status = { ...status, state: err.needsInstaller ? 'needs-installer' : 'error', error: err.message };
+      status = { ...status, state: err.needsInstaller ? 'needs-installer' : 'error', error: err.message, progress: null };
       log('检查 / 下载失败:', err.message);
       return getStatus();
     } finally {
-      busy = false;
+      if (!detached) busy = false;
     }
   }
 

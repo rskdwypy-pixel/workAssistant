@@ -1518,8 +1518,8 @@ const versionMemo = new Map();
  * 禅道版本号（如 "18.3"）。index.php?mode=getconfig 不用登录就返回；取不到返回 ''。
  * 按禅道地址缓存；网络类失败不缓存，下次再取。
  */
-async function getZentaoVersion() {
-  const base = zentaoBase();
+async function getZentaoVersion(baseOverride) {
+  const base = baseOverride ? String(baseOverride).replace(/\/$/, '') : zentaoBase();
   if (versionMemo.has(base)) return versionMemo.get(base);
   try {
     const resp = await fetch(`${base}/zentao/index.php?mode=getconfig`, { _noSessionRetry: true, headers: { Accept: 'application/json' } });

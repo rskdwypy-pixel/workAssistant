@@ -166,6 +166,7 @@ async function reconcileBeforeChange(nextUrl, nextAccount) {
   const prevUrl = config.zentao.url || '';
   const prevAccount = config.zentao.username || '';
   if (!nextUrl || !nextAccount) return { cleared: false, previous: null }; // 停用 / 清空配置不算换禅道
+  await rememberPrevious(nextUrl, nextAccount);   // 换下来的账号先存进列表（密码这时还在配置里）
   let ch = scopeChange(nextUrl, nextAccount);
   if (!readScope() && prevUrl) {
     // 老数据没有记录：把改动前的配置当作归属，再和新的比
@@ -373,6 +374,34 @@ async function rememberCurrent(profile, { touch = false } = {}) {
   }
 }
 
+/**
+ * 要换掉当前账号 / 地址之前，把当前这个先存进已保存的列表（它的密码这时还在配置里，换掉就找不回来了）。
+ * 登录、设置里保存、配置导入这几个入口换账号时都会走到这里，所以「换下来的账号」之后总能一点切回去。
+ */
+async function rememberPrevious(nextUrl, nextAccount) {
+  try {
+    const { url, username, password } = config.zentao;
+    if (!url || !username || !password) return;
+    const prevUrl = normalizeZentaoUrl(url);
+    const prevId = savedAccounts.idOf(prevUrl, username);
+    if (prevId === savedAccounts.idOf(normalizeZentaoUrl(nextUrl), nextAccount)) return;   // 没换
+    const saved = readAccount();
+    const known = savedAccounts.get(prevId);
+    let version = (known && known.version) || '';
+    if (!version) {
+      try { version = await (await import('./zentaoService.js')).getZentaoVersion(prevUrl); } catch { /* 取不到版本不影响保存 */ }
+    }
+    savedAccounts.upsert({
+      url: prevUrl, username, password,
+      realname: (saved && saved.account === username && saved.realname) || (known && known.realname) || '',
+      roleLabel: (saved && saved.account === username && saved.roleLabel) || (known && known.roleLabel) || '',
+      version
+    });
+  } catch (err) {
+    console.warn('[Account] 记住换下来的账号失败:', err.message);
+  }
+}
+
 /** 已保存的账号（给界面，不含密码），按最近使用排序，当前账号带 current 标记 */
 function listSaved() {
   return savedAccounts.list(config.zentao.url && config.zentao.username ? currentSavedId() : '');
@@ -456,6 +485,7 @@ async function login({ url, username, password, confirmSwitch = false, quick = f
   if (switching) await switchLocalData(zentaoUrl, account);
   else writeScope(zentaoUrl, account);
 
+  await rememberPrevious(zentaoUrl, account);
   updateEnvFile({
     ZENTAO_ENABLED: 'true',
     ZENTAO_URL: zentaoUrl,

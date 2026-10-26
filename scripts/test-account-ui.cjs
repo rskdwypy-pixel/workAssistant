@@ -188,8 +188,20 @@ function setup(s) {
   check('菜单：每个账号显示姓名、账号 · 禅道主机 · 版本', /李四/.test(rows[0].textContent) && /lisi · 10\.128\.1\.8:8088 · 禅道 18\.3/.test(rows[0].textContent), rows[0].textContent);
   check('菜单：「切换账号」改名「添加账号」', /添加账号/.test(menu2.querySelector('[data-am="switch"]').textContent));
   menu2.querySelector('[data-am="switch"]').click();
-  check('添加账号：打开登录卡片，顶部列出已保存的账号（不含当前）', (await tick(60), true) && !!$('loginOverlay').querySelector('.login-saved-row[data-login-switch="a2"]') && !$('loginOverlay').querySelector('[data-login-switch="cur"]'));
+  check('添加账号：打开登录卡片，顶部列出已保存的账号（可点的只有其他账号）', (await tick(60), true) && !!$('loginOverlay').querySelector('.login-saved-row[data-login-switch="a2"]') && !$('loginOverlay').querySelector('[data-login-switch="cur"]'));
+  const curRow = $('loginOverlay').querySelector('.login-saved-row.is-current');
+  check('切换账号页面：当前账号也列出来，标「当前」且不能点', curRow && /张三/.test(curRow.textContent) && /当前/.test(curRow.textContent) && curRow.tagName !== 'BUTTON' && !curRow.dataset.loginSwitch);
+  check('切换账号页面：有其他账号时没有「还没有其他账号」的说明', !/还没有其他账号/.test($('loginOverlay').textContent));
   $('loginOverlay').remove();
+  // 只有当前账号：不是一片空白，说明登录过的账号会保存在这里
+  s.saved = [saved()[0]];
+  $('accountAvatarBtn').click();
+  await tick(60);
+  doc.querySelector('.account-menu [data-am="switch"]').click();
+  await tick(60);
+  check('只有当前账号时：切换账号页面显示当前账号和一句说明（登录过的账号会自动保存在这里）', !!$('loginOverlay').querySelector('.login-saved-row.is-current') && /还没有其他账号/.test($('loginOverlay').textContent) && /自动保存/.test($('loginOverlay').textContent));
+  $('loginOverlay').remove();
+  s.saved = saved();
 
   // 没有其他账号：不显示切换分组
   s.saved = [saved()[0]];
