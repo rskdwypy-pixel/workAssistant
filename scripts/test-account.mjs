@@ -61,7 +61,11 @@ globalThis.fetch = async (input, init = {}) => {
     return zj({ user: { account, realname: names[account], role: 'qa', email: 'x@y', join: '2023-05-15' }, deptPath: [{ name: '产研部' }] });
   }
   const tv = url.match(/task-view-(\d+)\.json/);
-  if (tv) return zj({ task: { id: tv[1], name: `task-${tv[1]}` } });
+  if (tv && zt.failView) return new Response('boom', { status: 500 });
+  if (tv) return Number(tv[1]) >= 900 ? json({ result: 'fail', load: { alert: '抱歉，您访问的对象不存在！', locate: '/zentao/execution-all.json' } }) : zj({ task: { id: tv[1], name: `task-${tv[1]}` } });
+  const bv = url.match(/bug-view-(\d+)\.json/);
+  if (bv && zt.failView) return new Response('boom', { status: 500 });
+  if (bv) return zj({ result: 'fail', message: '抱歉，您访问的对象不存在！' });
   return new Response('not mocked: ' + url, { status: 404 });
 };
 
@@ -173,13 +177,37 @@ try {
   rmSync(join(tmp, 'data-scope.json'), { force: true });
   rc = await acct.reconcileBeforeChange('http://10.0.0.9:8088', 'lisi');
   check('没有归属记录的老数据：按改动前的地址补记，换了地址就清', rc.cleared === true && readTasksFile().length === 0, JSON.stringify(rc));
-  // 已经换过地址、旧数据还留着（没有记录）：抽查标题，对不上就是别的禅道的
-  writeTasks([{ id: 'a', type: 'task', title: 'task-1', zentaoId: '1' }, { id: 'b', type: 'task', title: 'task-2', zentaoId: '2' }, { id: 'c', type: 'task', title: 'task-3', zentaoId: '3' }]);
-  check('抽查：标题和当前禅道一致 → 不是别的禅道', (await acct.probeForeignData()) === false);
-  writeTasks([{ id: 'a', type: 'task', title: '旧禅道的任务甲', zentaoId: '1' }, { id: 'b', type: 'task', title: '旧禅道的任务乙', zentaoId: '2' }, { id: 'c', type: 'task', title: '旧禅道的任务丙', zentaoId: '3' }]);
-  check('抽查：标题对不上 → 判定为别的禅道的数据', (await acct.probeForeignData()) === true);
-  writeTasks([{ id: 'a', type: 'task', title: '只有一条', zentaoId: '1' }]);
-  check('抽查：数据太少不下结论（不清）', (await acct.probeForeignData()) === false);
+  // 已经换过地址、旧数据还留着（没有确切记录）：逐条到当前禅道核对，只清对不上的
+  // 模拟的禅道：task-N 的标题是 `task-N`；编号 >= 900 的任务不存在；bug 一律不存在
+  const items = [
+    { id: 'k1', type: 'task', title: 'task-101', zentaoId: '101' },      // 一致 → 留
+    { id: 'k2', type: 'task', title: 'task-102', zentaoId: '102' },      // 一致 → 留
+    { id: 'x1', type: 'task', title: '旧禅道的任务', zentaoId: '103' },   // 编号在，标题不同（编号重叠的另一个对象）→ 清
+    { id: 'x2', type: 'task', title: '迁移后在旧禅道新建的', zentaoId: '991' }, // 新禅道里不存在 → 清
+    { id: 'x3', type: 'bug', title: '旧禅道的 Bug', zentaoId: '5' }       // 不存在 → 清
+  ];
+  writeTasks(items);
+  let pr = await acct.pruneForeignItems();
+  check('逐条核对：对得上的留下，标题不同 / 不存在的清掉', pr.checked === 5 && pr.removed === 3 && readTasksFile().map(t => t.id).sort().join() === 'k1,k2', JSON.stringify([pr, readTasksFile().map(t => t.id)]));
+  check('清理前备份了 tasks.json（tasks__prune-…）', readdirSync(join(tmp, 'backups')).some(f => f.startsWith('tasks__prune-')));
+  pr = await acct.pruneForeignItems();
+  check('再核对一次：没有要清的，不动', pr.removed === 0 && readTasksFile().length === 2);
+  zt.failView = true;
+  writeTasks(items);
+  pr = await acct.pruneForeignItems();
+  check('核对时查不了（网络 / 会话）：保持不动，不乱删', pr.removed === 0 && readTasksFile().length === 5);
+  zt.failView = false;
+  // 状态确认时的兜底：没有记录 / 旧版本写下的记录（无核对标记）都要核对，核对后补上标记
+  writeTasks(items);
+  writeFileSync(join(tmp, 'data-scope.json'), JSON.stringify({ url: config.zentao.url, account: config.zentao.username }));
+  await acct.ensureDataScope();
+  check('旧版本写下的归属记录（无核对标记）：核对并清掉对不上的，补上标记', readTasksFile().length === 2 && JSON.parse(readFileSync(join(tmp, 'data-scope.json'), 'utf8')).verified === true);
+  writeTasks(items);
+  await acct.ensureDataScope();
+  check('已核对过的归属记录：不再核对（不会反复打禅道）', readTasksFile().length === 5);
+  rmSync(join(tmp, 'data-scope.json'), { force: true });
+  await acct.ensureDataScope();
+  check('完全没有记录的老数据：同样逐条核对', readTasksFile().length === 2);
   rmSync(join(tmp, 'data-scope.json'), { force: true });
   writeTasks([{ id: 'a', type: 'task', title: '旧禅道的任务甲', zentaoId: '1' }, { id: 'b', type: 'task', title: '旧禅道的任务乙', zentaoId: '2' }]);
   r = await call('POST', '/account/login', { url: 'http://10.0.0.1:8088', username: 'lisi', password: 'pw-li', confirmSwitch: true });

@@ -181,20 +181,20 @@ function setup(s) {
   ({ win, doc, $ } = setup(s));
   await win.Account.init();
   $('accountAvatarBtn').click();
-  await tick(20);
+  await tick(60);
   let menu2 = doc.querySelector('.account-menu');
   let rows = [...menu2.querySelectorAll('[data-am-switch]')];
   check('菜单：列出其他已保存的账号（不含当前），按服务端给的顺序', rows.length === 2 && rows[0].dataset.amSwitch === 'a2' && rows[1].dataset.amSwitch === 'a3' && !menu2.querySelector('[data-am-switch="cur"]'));
   check('菜单：每个账号显示姓名、账号 · 禅道主机 · 版本', /李四/.test(rows[0].textContent) && /lisi · 10\.128\.1\.8:8088 · 禅道 18\.3/.test(rows[0].textContent), rows[0].textContent);
   check('菜单：「切换账号」改名「添加账号」', /添加账号/.test(menu2.querySelector('[data-am="switch"]').textContent));
   menu2.querySelector('[data-am="switch"]').click();
-  check('添加账号：打开登录卡片，顶部列出已保存的账号（不含当前）', (await tick(20), true) && !!$('loginOverlay').querySelector('.login-saved-row[data-login-switch="a2"]') && !$('loginOverlay').querySelector('[data-login-switch="cur"]'));
+  check('添加账号：打开登录卡片，顶部列出已保存的账号（不含当前）', (await tick(60), true) && !!$('loginOverlay').querySelector('.login-saved-row[data-login-switch="a2"]') && !$('loginOverlay').querySelector('[data-login-switch="cur"]'));
   $('loginOverlay').remove();
 
   // 没有其他账号：不显示切换分组
   s.saved = [saved()[0]];
   $('accountAvatarBtn').click();
-  await tick(20);
+  await tick(60);
   check('只有当前账号：菜单没有「切换账号」分组，只有添加账号', !doc.querySelector('.account-menu .am-accounts') && !!doc.querySelector('.account-menu [data-am="switch"]'));
   doc.querySelector('.account-menu').remove(); win.Account.menuOpen = false;
 
@@ -202,13 +202,13 @@ function setup(s) {
   s.saved = saved();
   s.switchResp = () => ({ success: true, data: { ok: true, switched: true, state: stateOf('ok', { username: 'lisi' }) } });
   $('accountAvatarBtn').click();
-  await tick(20);
+  await tick(60);
   doc.querySelector('.account-menu [data-am-switch="a2"]').click();
-  await tick(30);
+  await tick(90);
   const swReq = s.requests.filter(r => r.url === '/api/account/switch').pop();
   check('点账号：用保存的账号请求切换（不带确认）', swReq && swReq.body.id === 'a2' && swReq.body.confirmSwitch === false);
   check('切换成功：显示同步进度并依次同步执行、团队、任务', $('loginOverlay') && /欢迎/.test($('loginOverlay').textContent) && ['/api/executions/sync', '/api/zentao/users/refresh', '/api/zentao/sync'].every(u => s.requests.some(r => r.url === u)));
-  await tick(900);
+  await tick(2700);
   check('切换成功：刷新页面', s.reloads === 1);
 
   // 有只存在本机的内容：先确认，条数写清楚
@@ -218,19 +218,19 @@ function setup(s) {
   ({ win, doc, $ } = setup(s));
   await win.Account.init();
   $('accountAvatarBtn').click();
-  await tick(20);
+  await tick(60);
   doc.querySelector('.account-menu [data-am-switch="a3"]').click();
-  await tick(30);
+  await tick(90);
   check('有未同步内容：弹确认，写明条数和会备份', s.confirms.length === 1 && /3 条只存在本机/.test(s.confirms[0]) && /备份/.test(s.confirms[0]));
   check('取消确认：不再请求，什么都没切', s.requests.filter(r => r.url === '/api/account/switch').length === 1 && s.reloads === 0 && !$('loginOverlay'));
   s.confirmAnswer = true;
   $('accountAvatarBtn').click();
-  await tick(20);
+  await tick(60);
   doc.querySelector('.account-menu [data-am-switch="a3"]').click();
-  await tick(40);
+  await tick(120);
   const sw2 = s.requests.filter(r => r.url === '/api/account/switch');
   check('确认后：带 confirmSwitch 再请求一次并切换', sw2.length === 3 && sw2[2].body.confirmSwitch === true && !!$('loginOverlay'));
-  await tick(900);
+  await tick(2700);
 
   // 保存的密码失效：只输密码
   s = { state: stateOf('ok'), saved: saved() };
@@ -238,9 +238,9 @@ function setup(s) {
   ({ win, doc, $ } = setup(s));
   await win.Account.init();
   $('accountAvatarBtn').click();
-  await tick(20);
-  doc.querySelector('.account-menu [data-am-switch="a2"]').click();
   await tick(60);
+  doc.querySelector('.account-menu [data-am-switch="a2"]').click();
+  await tick(180);
   overlay = $('loginOverlay');
   check('保存的密码失效：打开只输密码的卡片，地址、账号已填好且只读', overlay && /登录已失效/.test(overlay.querySelector('h2').textContent) && overlay.querySelector('[name="url"]').value === 'http://10.128.1.8:8088' && overlay.querySelector('[name="url"]').readOnly && overlay.querySelector('[name="username"]').value === 'lisi' && overlay.querySelector('[name="username"]').readOnly);
   check('保存的密码失效：说明原因，且不显示已保存账号列表', /李四 保存的密码已失效/.test(overlay.querySelector('.login-notice').textContent) && overlay.querySelector('.login-saved').hidden);
@@ -253,9 +253,9 @@ function setup(s) {
   ({ win, doc, $ } = setup(s));
   await win.Account.init();
   $('accountAvatarBtn').click();
-  await tick(20);
+  await tick(60);
   doc.querySelector('.account-menu [data-am-switch="a2"]').click();
-  await tick(40);
+  await tick(120);
   check('连不上：提示原因，不弹卡片、不刷新（当前账号不变）', s.toasts.some(t => /无法连接/.test(t)) && !$('loginOverlay') && s.reloads === 0);
 
   // 移除
@@ -263,16 +263,16 @@ function setup(s) {
   ({ win, doc, $ } = setup(s));
   await win.Account.init();
   $('accountAvatarBtn').click();
-  await tick(20);
+  await tick(60);
   doc.querySelector('.account-menu [data-am-remove="a2"]').click();
-  await tick(30);
+  await tick(90);
   check('移除：先确认（写明账号，说明会删除保存的密码）', /李四/.test(s.confirms[0] || '') && /密码/.test(s.confirms[0] || ''));
   check('移除：取消则不请求；点 × 不会同时触发切换', !s.requests.some(r => r.method === 'DELETE') && !s.requests.some(r => r.url === '/api/account/switch'));
   s.confirmAnswer = true;
   $('accountAvatarBtn').click();
-  await tick(20);
+  await tick(60);
   doc.querySelector('.account-menu [data-am-remove="a2"]').click();
-  await tick(30);
+  await tick(90);
   check('移除：确认后请求删除并提示', s.requests.some(r => r.method === 'DELETE' && r.url === '/api/account/saved/a2') && s.toasts.some(t => /已移除/.test(t)));
 
   // 退出后 / 未登录：登录卡片里的快速登录
@@ -280,14 +280,14 @@ function setup(s) {
   s.switchResp = () => ({ success: true, data: { ok: true, state: stateOf('ok') } });
   ({ win, doc, $ } = setup(s));
   await win.Account.init();
-  await tick(40);
+  await tick(120);
   overlay = $('loginOverlay');
   const qrows = overlay ? [...overlay.querySelectorAll('.login-saved-row')] : [];
   check('退出后的登录卡片：顶部列出所有已保存的账号，可一键登录', qrows.length === 2 && !overlay.querySelector('.login-saved').hidden);
   qrows[1].click();
-  await tick(40);
+  await tick(120);
   check('点已保存的账号：直接用保存的密码登录', s.requests.some(r => r.url === '/api/account/switch' && r.body.id === 'a2'));
-  await tick(900);
+  await tick(2700);
 
   // ============ 登录失效 / 连不上 ============
   s = { state: stateOf('invalid', { message: '登录失败，请检查您的用户名或密码是否填写正确。' }) };

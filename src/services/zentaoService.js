@@ -704,30 +704,52 @@ function toMyTask(t) {
  *   gone = 禅道里已删除或不存在；unknown = 查不了（网络、会话等），本地记录保持不动
  */
 async function lookupZentaoObject(kind, id, CH) {
+  return (await lookupZentaoBrief(kind, id, CH)).state;
+}
+
+/** 解析 *-view 的响应；对象不存在在新旧版本里长得不一样 */
+function parseViewResponse(text) {
   try {
-    const resp = await fetch(`${zentaoBase()}/zentao/${kind}-view-${id}.json?onlybody=yes`, {
+    const outer = JSON.parse(text);
+    // 旧版 {status, data:"<json 串>"}；新版直接是 {result, load, ...} 或 {title, task, ...}
+    return typeof outer.data === 'string' ? JSON.parse(outer.data) : (outer.data !== undefined ? outer.data : outer);
+  } catch {
+    // 对象不存在时旧版禅道在失败结果后面又拼了一段跳转 JSON，整体不是合法 JSON，只取第一段
+    const m = text.match(/^\s*\{"status":"[^"]*","data":"((?:[^"\\]|\\.)*)"/);
+    if (!m) return undefined;
+    return JSON.parse(JSON.parse(`"${m[1]}"`));
+  }
+}
+
+/**
+ * 同 lookupZentaoObject，顺带带回标题（核对本地记录是不是这个禅道里的同一个对象）。
+ * @returns {Promise<{state:'alive'|'gone'|'unknown', title?:string}>}
+ */
+async function lookupZentaoBrief(kind, id, CH) {
+  const fetchInner = async (path) => {
+    const resp = await fetch(`${zentaoBase()}/zentao/${path}`, {
       headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'Cookie': CH }
     });
-    if (!resp.ok) return 'unknown';
-    const text = await resp.text();
-    let inner;
-    try {
-      const outer = JSON.parse(text);
-      inner = typeof outer.data === 'string' ? JSON.parse(outer.data) : outer.data;
-    } catch {
-      // 对象不存在时禅道在失败结果后面又拼了一段跳转 JSON，整体不是合法 JSON，只取第一段
-      const m = text.match(/^\s*\{"status":"[^"]*","data":"((?:[^"\\]|\\.)*)"/);
-      if (!m) return 'unknown';
-      inner = JSON.parse(JSON.parse(`"${m[1]}"`));
+    if (!resp.ok) return undefined;
+    return parseViewResponse(await resp.text());
+  };
+  try {
+    const inner = await fetchInner(`${kind}-view-${id}.json?onlybody=yes`);
+    if (inner === undefined || inner === null) return { state: 'unknown' };
+    const notFound = (v) => /不存在/.test(String((v && (v.message || (v.load && v.load.alert))) || ''));
+    if (inner.result === 'fail' && notFound(inner)) return { state: 'gone' };
+    if (notFound(inner)) return { state: 'gone' };
+    let item = inner[kind];
+    // 新版：看板执行下的任务，view 只回「跳转到看板」，要读编辑页的 JSON 才有任务本身（不存在时 task 是 false）
+    if ((!item || !item.id) && kind === 'task' && inner.load && !notFound(inner)) {
+      const edit = await fetchInner(`task-edit-${id}.json?onlybody=yes`);
+      if (edit && 'task' in edit) item = edit.task;
     }
-    if (inner && inner.result === 'fail') {
-      return /不存在/.test(String(inner.message || '')) ? 'gone' : 'unknown';
-    }
-    const item = inner && inner[kind];
-    if (!item || !item.id) return 'unknown';
-    return String(item.deleted) === '1' ? 'gone' : 'alive';
+    if (item === false) return { state: 'gone' };
+    if (!item || !item.id) return { state: 'unknown' };
+    return String(item.deleted) === '1' ? { state: 'gone' } : { state: 'alive', title: decodeZentaoText(item.title || item.name || '') };
   } catch {
-    return 'unknown';
+    return { state: 'unknown' };
   }
 }
 
@@ -738,16 +760,24 @@ async function lookupZentaoObject(kind, id, CH) {
  * 按 ID 拿详情覆盖会把本地任务改成另一个任务。
  * @returns {Promise<string[]>}
  */
-async function findDeletedInZentao(kind, ids, CH, concurrency = 6) {
+async function findDeletedInZentao(kind, ids, CH, concurrency = 3) {
   const gone = [];
+  const unknown = [];
   let next = 0;
   const worker = async () => {
     while (next < ids.length) {
       const id = ids[next++];
-      if (await lookupZentaoObject(kind, id, CH) === 'gone') gone.push(String(id));
+      const state = await lookupZentaoObject(kind, id, CH);
+      if (state === 'gone') gone.push(String(id));
+      else if (state === 'unknown') unknown.push(id);
     }
   };
+  // 并发太高时新版禅道会对大部分请求返回异常（实测 6 并发时 125/146 查不了），宁可慢一点
   await Promise.all(Array.from({ length: Math.min(concurrency, ids.length) }, worker));
+  // 查不了的再串行补查一遍；还是查不了的保持不动
+  for (const id of unknown) {
+    if (await lookupZentaoObject(kind, id, CH) === 'gone') gone.push(String(id));
+  }
   return gone;
 }
 
@@ -3089,6 +3119,7 @@ export {
   getZentaoVersion,
   isModernZentao,
   getTaskView,
+  lookupZentaoBrief,
   // 报告页
   getTeamMembers,
   searchZentao,
