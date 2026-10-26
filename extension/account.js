@@ -26,7 +26,10 @@ const AccountApi = {
   state(refresh) { return this.request(`/api/account${refresh ? '?refresh=1' : ''}`); },
   login(body) { return this.post('/api/account/login', body); },
   logout() { return this.post('/api/account/logout'); },
-  reset(includeData) { return this.post('/api/account/reset', { includeData }); }
+  reset(includeData) { return this.post('/api/account/reset', { includeData }); },
+  saved() { return this.request('/api/account/saved'); },
+  switchTo(id, confirmSwitch) { return this.post('/api/account/switch', { id, confirmSwitch: !!confirmSwitch }); },
+  removeSaved(id) { return this.request(`/api/account/saved/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
 };
 
 const ACCOUNT_SKIP_KEY = 'waLoginSkipped';
@@ -51,6 +54,12 @@ function avatarOf(profile, account) {
   for (const ch of key) h = (h * 31 + ch.codePointAt(0)) % 360;
   return { text: name.trim().charAt(0).toUpperCase(), color: `hsl(${h}, 48%, 46%)` };
 }
+
+/** http://10.128.1.8:8088 → 10.128.1.8:8088 */
+const hostOf = (url) => String(url || '').replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+
+/** 已保存账号的副标题：账号 · 禅道主机 · 版本 */
+const savedSub = (a) => [a.username, hostOf(a.url), a.version ? `禅道 ${a.version}` : ''].filter(Boolean).join(' · ');
 
 const STATUS_TEXT = { ok: '已连接', offline: '无法连接禅道', invalid: '登录已失效' };
 
@@ -189,7 +198,22 @@ const Account = {
     try {
       if (typeof ZentaoSync !== 'undefined') sync = ZentaoSync.formatRelativeTime(await ZentaoSync.getLastSyncTime());
     } catch { /* 没有同步记录 */ }
+    // 其他已保存的账号（按最近使用排序）；取不到不影响菜单
+    let others = [];
+    try {
+      const res = await AccountApi.saved();
+      if (res.success) others = (res.data.accounts || []).filter(x => !x.current);
+    } catch { /* 没有列表就不显示切换分组 */ }
+    if (!document.getElementById('accountArea') || this.menuOpen) return;
     const sub = [p.account, p.roleLabel, p.dept].filter(Boolean).join(' · ');
+    const accountRows = others.map((x) => {
+      const av = avatarOf({ realname: x.realname }, x.username);
+      return `<div class="am-acct" role="menuitem" tabindex="0" data-am-switch="${accountEsc(x.id)}" title="切换到 ${accountEsc(x.realname || x.username)}">
+          <span class="account-avatar" style="background:${av.color}">${accountEsc(av.text)}</span>
+          <span class="am-acct-who"><span class="am-acct-name">${accountEsc(x.realname || x.username)}</span><span class="am-acct-sub">${accountEsc(savedSub(x))}</span></span>
+          <button type="button" class="am-acct-del" data-am-remove="${accountEsc(x.id)}" aria-label="移除 ${accountEsc(x.realname || x.username)}" title="移除这个账号">×</button>
+        </div>`;
+    }).join('');
     const statusLine = s.state === 'ok'
       ? `已连接${sync ? ` · ${sync === '从未同步' ? '还没有同步过' : `${sync}同步`}` : ''}`
       : `${STATUS_TEXT[s.state]}${s.message ? `：${s.message}` : ''}`;
@@ -207,13 +231,18 @@ const Account = {
         <div class="am-k">禅道</div><a class="am-v" href="${accountEsc(s.zentaoUrl)}/zentao/" target="_blank" rel="noopener">${accountEsc(s.zentaoUrl)}</a>
         ${p.email ? `<div class="am-k">邮箱</div><div class="am-v">${accountEsc(p.email)}</div>` : ''}
       </div>
+      ${others.length ? `<div class="am-accounts"><div class="am-accounts-title">切换账号</div><div class="am-accounts-list">${accountRows}</div></div>` : ''}
       <div class="am-actions">
         <button type="button" role="menuitem" data-am="settings"><svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>设置</button>
-        <button type="button" role="menuitem" data-am="switch"><svg viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M21 3l-7 7"/><path d="M8 21H3v-5"/><path d="M3 21l7-7"/></svg>切换账号</button>
+        <button type="button" role="menuitem" data-am="switch"><svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>添加账号</button>
         <button type="button" role="menuitem" data-am="logout" class="is-danger"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>退出登录</button>
       </div>`;
     document.getElementById('accountArea').appendChild(menu);
     menu.addEventListener('click', (e) => this.onMenu(e));
+    menu.addEventListener('keydown', (e) => {
+      const row = e.target.closest && e.target.closest('[data-am-switch]');
+      if (row && (e.key === 'Enter' || e.key === ' ') && e.target === row) { e.preventDefault(); this.closeMenu(); this.switchSaved(row.dataset.amSwitch); }
+    });
     this.menuOpen = true;
     document.getElementById('accountAvatarBtn').setAttribute('aria-expanded', 'true');
     // 打开时顺便刷新一次状态（缓存 60 秒，不会频繁请求禅道）
@@ -227,6 +256,10 @@ const Account = {
   },
 
   async onMenu(e) {
+    const rm = e.target.closest('[data-am-remove]');
+    if (rm) { e.stopPropagation(); this.closeMenu(); return this.removeSaved(rm.dataset.amRemove); }
+    const sw = e.target.closest('[data-am-switch]');
+    if (sw) { this.closeMenu(); return this.switchSaved(sw.dataset.amSwitch); }
     const btn = e.target.closest('[data-am]');
     if (!btn) return;
     const act = btn.dataset.am;
@@ -242,6 +275,68 @@ const Account = {
       storageDel(ACCOUNT_SKIP_KEY);
       this.reload();
     }
+  },
+
+  // ==================== 已保存的账号：快速切换 ====================
+
+  /**
+   * 点已保存的账号 → 后端用保存的密码先验证再切换。
+   * 失败的几种：保存的密码已失效 → 打开只输密码的卡片；连不上 → 提示，当前账号不变；有只存在本机的内容 → 先确认。
+   * @param {string} id
+   * @param {{confirmSwitch?:boolean, overlay?:HTMLElement}} [options]
+   */
+  async switchSaved(id, { confirmSwitch = false, overlay = null } = {}) {
+    if (this.switching) return;
+    this.switching = true;
+    const row = overlay && overlay.querySelector(`[data-login-switch="${CSS.escape ? CSS.escape(id) : id}"]`);
+    if (row) row.classList.add('is-loading');
+    let res;
+    try {
+      res = await AccountApi.switchTo(id, confirmSwitch);
+    } catch (err) {
+      res = { success: false, message: `连不上本地后端：${err.message}`, data: {} };
+    }
+    this.switching = false;
+    if (row) row.classList.remove('is-loading');
+    const data = res.data || {};
+    if (data.needConfirm) {
+      const prev = data.previous || {};
+      const from = prev.url ? `${prev.realname || prev.account}（${prev.account} @ ${hostOf(prev.url)}）` : `${prev.realname || prev.account}`;
+      const ok = await this.confirm('切换账号', `当前有 ${data.unsynced || 0} 条只存在本机、还没同步到禅道的任务 / Bug（属于 ${from}）。切换会清空它们（会先备份任务数据）。继续吗？`, '清空并切换', { danger: true });
+      if (ok) return this.switchSaved(id, { confirmSwitch: true, overlay });
+      return;
+    }
+    if (!res.success) {
+      const kind = data.error && data.error.kind;
+      const list = (await AccountApi.saved().catch(() => ({}))).data;
+      const target = list && (list.accounts || []).find(a => a.id === id);
+      if (kind === 'credentials' && target) {
+        // 保存的密码失效了（多半是在禅道里改过）：地址、账号都填好，只让用户输新密码
+        this.closeLogin();
+        return this.showLogin({ mode: 'relogin', prefill: { url: target.url, username: target.username }, notice: `${target.realname || target.username} 保存的密码已失效（可能在禅道里改过）。请重新输入密码。` });
+      }
+      if (typeof Toast !== 'undefined') Toast.error(res.message || '切换失败');
+      return;
+    }
+    // 切换成功：显示同步进度，完成后刷新
+    this.closeLogin();
+    const holder = document.createElement('div');
+    holder.id = 'loginOverlay';
+    holder.className = 'login-overlay';
+    holder.innerHTML = '<div class="login-card"><div class="login-view" data-view="form" hidden></div><div class="login-view" data-view="progress" hidden></div></div>';
+    document.body.appendChild(holder);
+    await this.afterLogin(holder, data.state);
+  },
+
+  /** 移除一个已保存的账号（先确认；正在使用的后端会拒绝） */
+  async removeSaved(id) {
+    const list = (await AccountApi.saved().catch(() => ({}))).data;
+    const target = list && (list.accounts || []).find(a => a.id === id);
+    const name = target ? `${target.realname || target.username}（${savedSub(target)}）` : '这个账号';
+    const ok = await this.confirm('移除账号', `从已保存的账号里移除 ${name}？保存的密码会一并删除，需要时可以重新登录添加。不会影响禅道里的账号。`, '移除', { danger: true });
+    if (!ok) return;
+    const res = await AccountApi.removeSaved(id);
+    if (typeof Toast !== 'undefined') (res.success ? Toast.success : Toast.error)(res.success ? '已移除' : (res.message || '移除失败'));
   },
 
   /** 登录 / 退出 / 重置后整页刷新：任务、执行、报告等都按新状态重新加载 */
@@ -261,7 +356,7 @@ const Account = {
    * @param {{mode:'first'|'relogin'|'switch', fromButton?:boolean}} options
    *   first：第一次使用 / 退出后（可「稍后再说」）；relogin：密码失效，只需输入密码；switch：换一个账号
    */
-  showLogin({ mode = 'first', fromButton = false } = {}) {
+  showLogin({ mode = 'first', fromButton = false, prefill = null, notice: forcedNotice = '' } = {}) {
     this.closeLogin();
     const s = this.state || {};
     const owner = s.dataOwner;
@@ -273,8 +368,9 @@ const Account = {
     } else if (owner && (mode === 'switch' || (mode === 'first' && s.state === 'unconfigured'))) {
       notice = `本地数据属于 ${ownerName}${ownerName !== owner ? `（${owner}）` : ''}。用其他账号登录会清空本地任务、Bug、报告和附件，改为同步新账号的数据。`;
     }
-    const url = s.zentaoUrl || '';
-    const username = mode === 'switch' ? '' : (s.username || '');
+    if (forcedNotice) notice = forcedNotice;
+    const url = prefill ? prefill.url : (s.zentaoUrl || '');
+    const username = prefill ? prefill.username : (mode === 'switch' ? '' : (s.username || ''));
     const overlay = document.createElement('div');
     overlay.id = 'loginOverlay';
     overlay.className = 'login-overlay';
@@ -286,6 +382,7 @@ const Account = {
           <h2 id="loginTitle">${titles[mode]}</h2>
           <p class="login-sub">禅道助手的任务、Bug、报告都来自禅道</p>
           ${notice ? `<div class="login-notice ${mode === 'relogin' ? 'is-warn' : ''}">${accountEsc(notice)}</div>` : ''}
+          <div class="login-saved" hidden></div>
           <form class="login-form" novalidate>
             <label class="login-field"><span>禅道地址</span>
               <input name="url" type="text" placeholder="http://10.x.x.x:8088" value="${accountEsc(url)}" autocomplete="url" spellcheck="false" ${mode === 'relogin' ? 'readonly' : ''}>
@@ -318,6 +415,29 @@ const Account = {
     });
     const first = [...form.querySelectorAll('input')].find(i => !i.value && !i.readOnly) || form.querySelector('input[name="password"]');
     setTimeout(() => first.focus(), 50);
+    if (mode !== 'relogin') this.fillSavedList(overlay);
+  },
+
+  /** 登录卡片顶部的「已保存的账号」：点一下直接登录（用保存的密码） */
+  async fillSavedList(overlay) {
+    let accounts = [];
+    try {
+      const res = await AccountApi.saved();
+      if (res.success) accounts = (res.data.accounts || []);
+    } catch { return; }
+    // 已登录时当前账号不用列出来（点了也没意义）
+    if (this.state && this.state.state !== 'unconfigured') accounts = accounts.filter(a => !a.current);
+    const box = overlay.querySelector('.login-saved');
+    if (!box || !accounts.length || !overlay.isConnected) return;
+    box.innerHTML = `<div class="login-saved-title">已保存的账号 · 点一下直接登录</div>` + accounts.map((x) => {
+      const av = avatarOf({ realname: x.realname }, x.username);
+      return `<button type="button" class="login-saved-row" data-login-switch="${accountEsc(x.id)}">
+          <span class="account-avatar" style="background:${av.color}">${accountEsc(av.text)}</span>
+          <span class="am-acct-who"><span class="am-acct-name">${accountEsc(x.realname || x.username)}</span><span class="am-acct-sub">${accountEsc(savedSub(x))}</span></span>
+          <span class="login-saved-go">登录</span>
+        </button>`;
+    }).join('');
+    box.hidden = false;
   },
 
   closeLogin() {
@@ -325,6 +445,8 @@ const Account = {
   },
 
   onLoginClick(e, overlay) {
+    const savedRow = e.target.closest('[data-login-switch]');
+    if (savedRow) return this.switchSaved(savedRow.dataset.loginSwitch, { overlay });
     const btn = e.target.closest('[data-login]');
     if (!btn) return;
     const act = btn.dataset.login;

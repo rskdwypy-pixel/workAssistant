@@ -13,6 +13,7 @@
 import { join } from 'path';
 import { existsSync, readFileSync, writeFileSync, rmSync, readdirSync, mkdirSync, copyFileSync } from 'fs';
 import { config, updateEnvFile } from '../config.js';
+import * as savedAccounts from './savedAccounts.js';
 
 const ROLE_LABEL = {
   dev: '研发', qa: '测试', pm: '项目经理', po: '产品经理', td: '研发主管', pd: '产品主管',
@@ -271,6 +272,7 @@ async function getAccountState({ refresh = false } = {}) {
     const profile = await fetchProfile();
     writeAccount({ ...profile, zentaoUrl: z.url, updatedAt: new Date().toISOString() });
     await ensureDataScope();
+    await rememberCurrent(profile);
     value = { state: 'ok', profile, message: '' };
   } catch (err) {
     const c = classifyLoginError(err);
@@ -316,6 +318,70 @@ async function clearLocalData() {
   config.zentao.users = {};
 }
 
+// ==================== 已保存的账号（快速切换）====================
+
+/** 当前正在用的账号在已保存列表里的 id */
+const currentSavedId = () => savedAccounts.idOf(normalizeZentaoUrl(config.zentao.url), config.zentao.username);
+
+/**
+ * 把当前配置里的账号记进已保存列表（登录成功、以及老用户升级后第一次读到登录状态时调用）。
+ * 信息没变且最近刚记过就不重复写盘。
+ */
+async function rememberCurrent(profile, { touch = false } = {}) {
+  try {
+    const { url, username, password } = config.zentao;
+    if (!url || !username || !password) return;
+    const normalized = normalizeZentaoUrl(url);
+    const prev = savedAccounts.get(savedAccounts.idOf(normalized, username));
+    const realname = (profile && profile.realname) || '';
+    const roleLabel = (profile && profile.roleLabel) || '';
+    let version = (prev && prev.version) || '';
+    if (!version) {
+      try { version = await (await import('./zentaoService.js')).getZentaoVersion(); } catch { /* 取不到版本不影响保存 */ }
+    }
+    const fresh = prev && prev.password === password && (prev.realname || '') === realname && (prev.version || '') === version
+      && Date.now() - Date.parse(prev.lastUsedAt || 0) < 10 * 60 * 1000;
+    if (fresh && !touch) return;   // 登录 / 切换（touch）一定要更新最近使用时间；定时刷新状态时不必频繁写盘
+    savedAccounts.upsert({ url: normalized, username, password, realname, roleLabel, version });
+  } catch (err) {
+    console.warn('[Account] 记住账号失败:', err.message);
+  }
+}
+
+/** 已保存的账号（给界面，不含密码），按最近使用排序，当前账号带 current 标记 */
+function listSaved() {
+  return savedAccounts.list(config.zentao.url && config.zentao.username ? currentSavedId() : '');
+}
+
+/**
+ * 移除一个已保存的账号（连同保存的密码）。正在使用的账号不能移除。
+ * @returns {{ok:boolean, code?:'NOT_FOUND'|'CURRENT'}}
+ */
+function removeSaved(id) {
+  if (!savedAccounts.get(id)) return { ok: false, code: 'NOT_FOUND' };
+  if (config.zentao.url && config.zentao.username && id === currentSavedId()) return { ok: false, code: 'CURRENT' };
+  savedAccounts.remove(id);
+  return { ok: true };
+}
+
+/** 本地只存在本机、还没同步到禅道的任务 / Bug 条数（没有禅道编号的） */
+async function countUnsynced() {
+  const { readTasks } = await import('../utils/storage.js');
+  return (((await readTasks()).tasks) || []).filter(t => !t.zentaoId).length;
+}
+
+/**
+ * 用保存的凭据切换到另一个账号：先真实登录验证（密码错 / 连不上在动任何数据之前就返回），
+ * 本地数据都已同步到禅道时直接切，有未同步的内容才要求确认。
+ * @returns 同 login()；账号不在列表里返回 error.kind = 'not_found'
+ */
+async function switchTo({ id, confirmSwitch = false }) {
+  const entry = savedAccounts.get(id);
+  if (!entry) return { ok: false, error: { kind: 'not_found', message: '这个账号已不在已保存的列表里' } };
+  if (!entry.password) return { ok: false, error: { kind: 'credentials', message: '这个账号没有保存密码，请重新输入' } };
+  return login({ url: entry.url, username: entry.username, password: entry.password, confirmSwitch, quick: true });
+}
+
 // ==================== 登录 / 退出 ====================
 
 /**
@@ -323,7 +389,7 @@ async function clearLocalData() {
  * 换成了另一个账号且本地有上一个账号的数据：不保存，返回 needConfirm，确认后（confirmSwitch）清空本地数据再保存
  * @returns {Promise<{ok:boolean, needConfirm?:boolean, previous?:Object, error?:{kind:string,message:string}, state?:Object}>}
  */
-async function login({ url, username, password, confirmSwitch = false }) {
+async function login({ url, username, password, confirmSwitch = false, quick = false }) {
   const z = await import('./zentaoService.js');
   const zentaoUrl = normalizeZentaoUrl(url);
   const account = String(username || '').trim();
@@ -344,11 +410,15 @@ async function login({ url, username, password, confirmSwitch = false }) {
   if (!readScope() && config.zentao.url) writeScope(config.zentao.url, owner || config.zentao.username);
   const ch = scopeChange(zentaoUrl, account);
   const switching = hasData && (ch.changed || (owner && owner !== account));
-  if (switching && !confirmSwitch) {
+  // 快速切换（用保存的账号）：本地内容都已同步到禅道就不打断，清空后重新同步即可（已备份）；有未同步的才确认
+  const unsynced = switching && quick ? await countUnsynced() : 0;
+  const needAsk = switching && !confirmSwitch && !(quick && unsynced === 0);
+  if (needAsk) {
     const saved = readAccount();
     return {
       ok: false,
       needConfirm: true,
+      unsynced,
       previous: {
         account: owner || (ch.previous && ch.previous.account) || '',
         realname: (saved && saved.account === owner && saved.realname) || owner,
@@ -373,6 +443,7 @@ async function login({ url, username, password, confirmSwitch = false }) {
   z.clearCookies();
   invalidateState();
   const state = await getAccountState({ refresh: true });
+  if (state.state === 'ok') await rememberCurrent(state.profile, { touch: true });
   return { ok: state.state === 'ok', switched: !!switching, state, ...(state.state === 'ok' ? {} : { error: { kind: state.state, message: state.message } }) };
 }
 
@@ -404,6 +475,7 @@ const RESET_ENV = {
 async function resetAll({ includeData = false } = {}) {
   const z = await import('./zentaoService.js');
   updateEnvFile(RESET_ENV);
+  savedAccounts.clearAll();   // 保存的账号密码也要清掉：重置就是回到第一次使用
   Object.assign(config.zentao, { enabled: false, url: '', username: '', password: '', createTaskUrl: '' });
   Object.assign(config.ai, { apiKey: '', keys: {}, baseURL: 'https://api.openai.com/v1', model: 'gpt-4o-mini', reportModel: '' });
   Object.assign(config.schedule, { morningHour: 9, eveningHour: 21 });
@@ -429,5 +501,6 @@ async function resetAll({ includeData = false } = {}) {
 export {
   getAccountState, login, logout, resetAll, invalidateState, classifyLoginError, normalizeZentaoUrl,
   clearLocalData, readAccount, RESET_ENV,
-  reconcileBeforeChange, ensureDataScope, probeForeignData
+  reconcileBeforeChange, ensureDataScope, probeForeignData,
+  listSaved, removeSaved, switchTo, rememberCurrent
 };

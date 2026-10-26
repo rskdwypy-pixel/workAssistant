@@ -10,7 +10,7 @@
  *   退出：清密码与会话，保留地址与账号
  *   重置：只清配置（本地数据保留）/ 连本地数据一起清；端口等本机项、备份目录保留
  */
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import crypto from 'crypto';
@@ -90,6 +90,15 @@ const call = (method, path, body) => new Promise((resolve, reject) => {
 const env = () => readFileSync(envFile, 'utf8');
 const writeTasks = (tasks) => writeFileSync(config.paths.tasks, JSON.stringify({ tasks }));
 const readTasksFile = () => JSON.parse(readFileSync(config.paths.tasks, 'utf8')).tasks;
+const del = (path) => new Promise((resolve, reject) => {
+  const req = http.request({ host: '127.0.0.1', port: server.address().port, path: `/api${path}`, method: 'DELETE' }, (res) => {
+    let b = '';
+    res.on('data', c => { b += c; });
+    res.on('end', () => resolve({ status: res.statusCode, ...JSON.parse(b || '{}') }));
+  });
+  req.on('error', reject);
+  req.end();
+});
 
 try {
   // ---------- 未配置 ----------
@@ -176,6 +185,74 @@ try {
   r = await call('POST', '/account/login', { url: 'http://10.0.0.1:8088', username: 'lisi', password: 'pw-li', confirmSwitch: true });
   writeTasks([{ id: 't2', title: '李四的任务', zentaoId: '2' }]);
 
+  // ---------- 已保存的账号：快速切换 ----------
+  r = await call('GET', '/account/saved');
+  let list = r.data.accounts;
+  const key = (a) => `${a.username}@${a.url}`;
+  check('登录过的账号都被记住（含不同地址的同名账号）', ['zhangs@http://10.0.0.1:8088', 'lisi@http://10.0.0.1:8088', 'lisi@http://10.0.0.2:8088'].every(k => list.some(a => key(a) === k)), JSON.stringify(list.map(key)));
+  check('接口里没有密码（任何字段都没有）', !/pw-li|pw-zhang|"password"/i.test(JSON.stringify(r)) && list.every(a => a.hasPassword === true));
+  check('当前账号带 current 标记，且只有一个', list.filter(a => a.current).length === 1 && list.find(a => a.current).username === 'lisi' && list.find(a => a.current).url === 'http://10.0.0.1:8088');
+  check('按最近使用排序（当前账号刚登录过，排最前）', list[0].current === true && list.every((a, i) => i === 0 || String(list[i - 1].lastUsedAt) >= String(a.lastUsedAt)));
+  check('保存了姓名，方便界面显示', list.find(a => a.username === 'zhangs').realname === '张三');
+  const n0 = list.length;
+  await call('POST', '/account/login', { url: 'HTTP://10.0.0.1:8088/zentao/my.html', username: 'lisi', password: 'pw-li' });
+  r = await call('GET', '/account/saved');
+  check('同地址同账号重复登录（大小写 / 页面路径不同）只有一条', r.data.accounts.length === n0);
+  check('accounts.json 权限只有本人可读写', process.platform === 'win32' || (statSync(join(tmp, 'accounts.json')).mode & 0o777) === 0o600);
+
+  // 切换：目标密码已失效（在禅道里改了）→ 动数据之前就拦下，当前状态不变
+  const zhangId = list.find(a => a.username === 'zhangs').id;
+  zt.passwords.zhangs = 'changed-in-zentao';
+  r = await call('POST', '/account/switch', { id: zhangId });
+  check('切换到密码已失效的账号：返回 credentials，当前账号和本地数据都不变', !r.success && r.data.error.kind === 'credentials' && /ZENTAO_USERNAME=lisi/.test(env()) && readTasksFile().length === 1, JSON.stringify(r.data));
+  zt.passwords.zhangs = 'pw-zhang';
+  zt.offline = true;
+  r = await call('POST', '/account/switch', { id: zhangId });
+  check('切换时连不上禅道：返回 offline，当前账号和本地数据都不变', !r.success && r.data.error.kind === 'offline' && /ZENTAO_USERNAME=lisi/.test(env()) && readTasksFile().length === 1, JSON.stringify(r.data));
+  zt.offline = false;
+  r = await call('POST', '/account/switch', { id: 'nope' });
+  check('切换到不存在的账号：404', r.status === 404 && r.data.error.kind === 'not_found');
+
+  // 切换：本地内容都已同步到禅道（都有禅道编号）→ 不打断，直接切并先备份
+  writeTasks([{ id: 't2', title: '李四的任务', zentaoId: '2' }]);
+  const backupsBefore = new Set(existsSync(join(tmp, 'backups')) ? readdirSync(join(tmp, 'backups')) : []);
+  r = await call('POST', '/account/switch', { id: zhangId });
+  check('本地内容都已同步：不用确认，直接切换并清空', r.success && r.data.switched && !r.data.needConfirm && readTasksFile().length === 0 && /ZENTAO_USERNAME=zhangs/.test(env()) && r.data.state.profile.realname === '张三', JSON.stringify(r.data).slice(0, 200));
+  check('切换前备份了 tasks.json（新增一份 tasks__switch-…）', readdirSync(join(tmp, 'backups')).some(f => f.startsWith('tasks__switch-') && !backupsBefore.has(f)));
+  r = await call('GET', '/account/saved');
+  check('切换后当前账号变了，且排到最前', r.data.accounts[0].username === 'zhangs' && r.data.accounts[0].current);
+
+  // 切换：有只存在本机的内容 → 先确认，说明条数；取消什么都不动
+  writeTasks([{ id: 'l1', title: '只在本机的任务' }, { id: 'l2', title: '另一条本机任务' }, { id: 't9', title: '已同步的', zentaoId: '9' }]);
+  const lisiId = r.data.accounts.find(a => a.username === 'lisi' && a.url === 'http://10.0.0.1:8088').id;
+  r = await call('POST', '/account/switch', { id: lisiId });
+  check('有未同步的本地内容：先确认并告知条数，什么都没改', r.data.needConfirm && r.data.unsynced === 2 && /ZENTAO_USERNAME=zhangs/.test(env()) && readTasksFile().length === 3, JSON.stringify(r.data).slice(0, 200));
+  r = await call('POST', '/account/switch', { id: lisiId, confirmSwitch: true });
+  check('确认后切换并清空', r.success && r.data.switched && readTasksFile().length === 0 && /ZENTAO_USERNAME=lisi/.test(env()));
+
+  // 移除
+  r = await del(`/account/saved/${lisiId}`);
+  check('不能移除正在使用的账号（409）', r.status === 409 && /先切换/.test(r.message));
+  const other = (await call('GET', '/account/saved')).data.accounts.find(a => !a.current);
+  r = await del(`/account/saved/${other.id}`);
+  check('移除其他账号：成功，列表和文件里都没有了', r.success && !(await call('GET', '/account/saved')).data.accounts.some(a => a.id === other.id) && !readFileSync(join(tmp, 'accounts.json'), 'utf8').includes(other.id));
+  r = await del(`/account/saved/${other.id}`);
+  check('移除不存在的账号：404', r.status === 404);
+
+  // 老用户升级：.env 里有凭据但还没有 accounts.json → 读到登录状态时自动记住当前账号
+  rmSync(join(tmp, 'accounts.json'), { force: true });
+  await call('GET', '/account?refresh=1');
+  r = await call('GET', '/account/saved');
+  check('升级后当前账号自动进入列表（不用重新登录）', r.data.accounts.length === 1 && r.data.accounts[0].current && r.data.accounts[0].username === 'lisi');
+
+  // 退出不丢列表，重置清空列表（含密码）
+  await call('POST', '/account/logout');
+  r = await call('GET', '/account/saved');
+  check('退出登录后列表还在，仍可一键回来', r.data.accounts.length === 1 && r.data.accounts[0].hasPassword);
+  r = await call('POST', '/account/switch', { id: r.data.accounts[0].id });
+  check('退出状态下点已保存的账号：直接登录', r.success && r.data.state.state === 'ok');
+  writeTasks([{ id: 't2', title: '李四的任务', zentaoId: '2' }]);
+
   // ---------- 退出 ----------
   r = await call('POST', '/account/logout');
   check('退出：清密码，保留地址与账号，回到未配置；本地数据保留', r.data.state === 'unconfigured' && r.data.zentaoUrl === 'http://10.0.0.1:8088' && r.data.username === 'lisi' && /ZENTAO_PASSWORD=\n/.test(env()) && readTasksFile().length === 1);
@@ -202,6 +279,7 @@ try {
   writeFileSync(join(tmp, 'executionLearning.json'), '{}');
   r = await call('POST', '/account/reset', { includeData: true });
   check('重置（含本地数据）：任务、报告、执行、学习记录、附件清空', r.success && readTasksFile().length === 0 && !existsSync(join(tmp, 'reports.json')) && !existsSync(join(tmp, 'executions.json')) && !existsSync(join(tmp, 'executionLearning.json')) && readdirSync(join(tmp, 'attachments')).length === 0 && r.data.cleared.some(x => /本地任务/.test(x)));
+  check('重置：保存的账号和密码一并清掉', (await call('GET', '/account/saved')).data.accounts.length === 0 && !/pw-li|pw-zhang/.test(existsSync(join(tmp, 'accounts.json')) ? readFileSync(join(tmp, 'accounts.json'), 'utf8') : ''));
   check('重置（含本地数据）：备份目录保留', existsSync(join(tmp, 'backups', 'tasks__x.json')));
 } catch (err) {
   check(`异常：${err.stack}`, false);

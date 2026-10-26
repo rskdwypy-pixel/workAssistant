@@ -2947,6 +2947,32 @@ a.am-v:hover { text-decoration: underline; }
 .am-actions button.is-danger { color: #dc2626; }
 .am-actions svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
+/* 已保存的账号：头像菜单里的切换列表、登录卡片里的快速登录 */
+.am-accounts { border-top: 1px solid var(--border); padding-top: 8px; margin: 0 -8px; }
+.am-accounts-title { font-size: 12px; color: var(--text-muted); padding: 0 8px 4px; }
+.am-accounts-list { max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; }
+.am-acct { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; cursor: pointer; }
+.am-acct:hover, .am-acct:focus-visible { background: var(--bg-base); outline: none; }
+.am-acct .account-avatar { width: 30px; height: 30px; font-size: 13px; flex: none; }
+.am-acct-who { display: flex; flex-direction: column; min-width: 0; flex: 1; text-align: left; }
+.am-acct-name { font-size: 13px; font-weight: 500; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-acct-sub { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-acct-del { border: none; background: none; color: var(--text-muted); font-size: 16px; line-height: 1; width: 22px; height: 22px; border-radius: 6px; cursor: pointer; opacity: 0; }
+.am-acct:hover .am-acct-del, .am-acct:focus-within .am-acct-del, .am-acct-del:focus-visible { opacity: 1; }
+.am-acct-del:hover { background: rgba(239, 68, 68, .12); color: #dc2626; }
+.login-saved { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.login-saved[hidden] { display: none; }
+.login-saved-title { font-size: 12px; color: var(--text-muted); }
+.login-saved-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg-surface); cursor: pointer; font-family: inherit; color: inherit; width: 100%;
+}
+.login-saved-row:hover, .login-saved-row:focus-visible { border-color: var(--primary); background: rgba(99, 102, 241, .05); outline: none; }
+.login-saved-row .account-avatar { width: 32px; height: 32px; font-size: 14px; flex: none; }
+.login-saved-go { font-size: 12px; color: var(--primary); flex: none; }
+.login-saved-row.is-loading { opacity: .6; cursor: wait; }
+.login-saved-row.is-loading .login-saved-go::after { content: '…'; }
+
 .login-overlay {
   position: fixed; inset: 0; z-index: 1500; display: flex; align-items: center; justify-content: center; padding: 16px;
   background: rgba(15, 23, 42, .45); backdrop-filter: blur(6px);
