@@ -319,7 +319,7 @@ const EffortDrawer = {
     const opt = efField(f, 'taskId').selectedOptions && efField(f, 'taskId').selectedOptions[0];
     const left = opt && opt.dataset.left !== undefined ? Number(opt.dataset.left) : NaN;
     const used = Number(efField(f, 'consumed').value) || 0;
-    if (!isNaN(left)) efField(f, 'left').value = String(Math.max(0, Math.round((left - used) * 10) / 10));
+    if (!isNaN(left)) efField(f, 'left').value = String(left > 0 ? Math.max(0, Math.round((left - used) * 10) / 10) : 4); // 任务没有剩余工时时默认 4
   },
 
   fillRest() {

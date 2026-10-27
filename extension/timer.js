@@ -26,6 +26,8 @@ const WorkTimer = {
   },
   /** 剩余工时的建议值：当前剩余 − 这次消耗，不小于 0，保留 1 位小数 */
   suggestLeft(left, consumed) {
+    // 任务本身没有剩余工时（没填预计 / 已清零）时默认 4，免得不小心记成“做完了”
+    if (!(Number(left) > 0)) return 4;
     return Math.max(0, Math.round(((Number(left) || 0) - consumed) * 10) / 10);
   },
   ymd(ms) {
