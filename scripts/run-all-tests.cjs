@@ -31,6 +31,7 @@ const SUITES = [
   'test-timer.mjs',
   'test-progress-from-effort.mjs',
   'test-timer-ui',
+  'test-auto-sync-ui',
   'test-task-intake.mjs',
   'test-task-modal-flow',
   'test-task-card-bindings',
