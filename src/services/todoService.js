@@ -5,7 +5,7 @@
  *
  * 每个数据源独立取，某个源失败（如禅道没连上）只记进 errors，不影响其它分组。
  * 任务 / Bug / 需求按紧急度排序：逾期 > 今天到期 > 3 天内 > 优先级；禅道待办只列未完成的（未开始 / 进行中），按 优先级 → 状态 → 日期排。
- * 「与我相关」：需求 = 与我相关（指派 / 我提的 / 我评审的 / 抄送）里，指派给我的，或评审中的；
+ * 需求 = 指派给我的，或我是评审人且还在评审中的（我提的 / 只是抄送的不进待办）；
  *               禅道待办 = 禅道里我自己的个人待办（和插件自己聚合的任务 / Bug 是两套东西，这里直接显示禅道的）。
  */
 import { getAllTasks } from './taskManager.js';
@@ -63,13 +63,18 @@ function storyItem(s) {
   };
 }
 
-/** 待办里的需求：未关闭，且 指派给我 或 处于评审中（评审中的排前面） */
+/**
+ * 待办里的需求：未关闭，且只留和“我要处理”有关的两类——
+ *   · 指派给我的；
+ *   · 我是评审人、且整条需求还在评审中的（待我评审，排最前）。
+ * 我提的、只是抄送给我的需求不进待办（它们在「需求」标签页里都能看到）。
+ */
 function pickStories(stories, me) {
   const mine = String(me || '').toLowerCase();
-  const reviewing = (s) => s.status === 'reviewing';
+  const toReview = (s) => s.status === 'reviewing' && Array.isArray(s.rels) && s.rels.includes('reviewedBy');
   return stories
-    .filter(s => s.status !== 'closed' && (reviewing(s) || (mine && String(s.assignedToAccount || '').toLowerCase() === mine)))
-    .sort((a, b) => (reviewing(a) ? 0 : 1) - (reviewing(b) ? 0 : 1) || (a.pri || 3) - (b.pri || 3) || Number(b.id) - Number(a.id));
+    .filter(s => s.status !== 'closed' && (toReview(s) || (mine && String(s.assignedToAccount || '').toLowerCase() === mine)))
+    .sort((a, b) => (toReview(a) ? 0 : 1) - (toReview(b) ? 0 : 1) || (a.pri || 3) - (b.pri || 3) || Number(b.id) - Number(a.id));
 }
 
 const TODO_TYPE_LABEL = { custom: '自定义', cycle: '周期', task: '任务', bug: 'Bug', story: '需求' };

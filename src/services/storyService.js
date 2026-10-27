@@ -62,7 +62,7 @@ function statusMeta(s) {
 
 /** 能反映「这条需求变没变」的签名：列表项和详情用同一个算法，缓存的详情是否还有效靠它判断 */
 function storySig(s) {
-  return [s.status, s.stage, s.assignedTo, s.lastEditedDate, s.pri, s.title].map(v => String(v ?? '')).join('|');
+  return [s.status, s.stage, s.assignedTo, s.lastEditedDate, s.pri, s.title, (s.rels || []).join(',')].map(v => String(v ?? '')).join('|');
 }
 
 const storyCache = createCache('stories');
@@ -73,6 +73,7 @@ function slimStory(s, users = {}) {
   const st = statusMeta(s.status);
   return {
     sig: storySig(s),
+    rels: Array.isArray(s.rels) ? s.rels : [],   // 我与它的关系：assignedTo 指派给我 / openedBy 我提的 / reviewedBy 我是评审人 / mailto 抄送给我
     lastEditedDate: String(s.lastEditedDate || ''),
     openedDate: String(s.openedDate || ''),
     id: String(s.id),
@@ -96,7 +97,7 @@ function slimStory(s, users = {}) {
 
 /** 从禅道拉当前账号相关的需求（四种关联并行拉，去重、去已删除、新的在前） */
 async function fetchStoriesRemote() {
-  const results = await Promise.all(MY_STORY_LISTS.map(t => fetchMyList('story', t).then(r => ({ r }), error => ({ error }))));
+  const results = await Promise.all(MY_STORY_LISTS.map(t => fetchMyList('story', t).then(r => ({ r: { ...r, type: t } }), error => ({ error }))));
   const ok = results.filter(x => x.r);
   if (!ok.length) throw (results[0] && results[0].error) || new Error('无法从禅道获取需求');
   const picked = new Map();
@@ -106,7 +107,8 @@ async function fetchStoriesRemote() {
     for (const s of r.items) {
       if (!s || !s.id || String(s.deleted) === '1') continue;
       const id = String(s.id);
-      if (!picked.has(id)) picked.set(id, s);
+      if (!picked.has(id)) picked.set(id, { ...s, rels: [] });
+      picked.get(id).rels.push(r.type);
     }
   }
   return [...picked.values()].map(s => slimStory(s, users)).sort((a, b) => Number(b.id) - Number(a.id));

@@ -27,20 +27,23 @@ const items = [
 ].sort(bySeverity).map(i => i.id).join('');
 check('排序：逾期 > 今天 > 3 天内 > 优先级', items === 'cbead', items);
 
-// 需求筛选：指派给我 或 评审中；已关闭的不要
-const st = (id, status, assignedToAccount, pri = 3) => ({ id: String(id), status, assignedToAccount, pri });
+// 需求筛选：指派给我，或 我是评审人且还在评审中；我提的 / 只是抄送的 / 别人的不要；已关闭的不要
+const st = (id, status, assignedToAccount, rels = [], pri = 3) => ({ id: String(id), status, assignedToAccount, rels, pri });
 const picked = pickStories([
-  st(1, 'active', 'lijc'),            // 指派给我
-  st(2, 'active', 'zhangsan'),        // 别人的、非评审 → 不要
-  st(3, 'reviewing', 'zhangsan'),     // 评审中（不是我的）→ 要
-  st(4, 'closed', 'lijc'),            // 已关闭 → 不要
-  st(5, 'reviewing', 'lijc', 1),      // 评审中且指派给我 → 要，排最前
-  st(6, 'draft', 'LIJC'),             // 账号大小写不敏感 → 要
-  st(7, 'changing', 'zhangsan')       // 变更中不算评审中 → 不要
+  st(1, 'active', 'lijc', ['assignedTo']),                 // 指派给我 → 要
+  st(2, 'active', 'zhangsan', ['openedBy']),               // 我提的、别人负责 → 不要
+  st(3, 'reviewing', 'zhangsan', ['reviewedBy']),          // 我是评审人、评审中 → 要
+  st(4, 'closed', 'lijc', ['assignedTo']),                 // 已关闭 → 不要
+  st(5, 'reviewing', 'lijc', ['assignedTo', 'reviewedBy'], 1), // 评审中且指派给我、我也是评审人 → 要，排最前
+  st(6, 'draft', 'LIJC', ['assignedTo']),                  // 账号大小写不敏感 → 要
+  st(7, 'changing', 'zhangsan', ['reviewedBy']),           // 变更中不算评审中 → 不要
+  st(8, 'reviewing', 'zhangsan', ['mailto']),              // 评审中但只是抄送给我 → 不要
+  st(9, 'reviewing', 'zhangsan', ['openedBy']),            // 评审中但是我提的、不是评审人 → 不要
+  { id: '10', status: 'reviewing', assignedToAccount: 'zhangsan' }   // 老缓存没有关系信息 → 不要
 ], 'lijc');
-check('需求：只留 指派给我 或 评审中，已关闭的不要', picked.map(s => s.id).sort().join() === '1,3,5,6', picked.map(s => s.id).join());
-check('需求：评审中的排前面，同组按优先级', picked[0].id === '5' && picked[1].id === '3', picked.map(s => s.id).join());
-check('需求：没配账号时只留评审中的', pickStories([st(1, 'active', 'lijc'), st(2, 'reviewing', 'x')], '').map(s => s.id).join() === '2');
+check('需求：只留 指派给我 或 我是评审人且评审中；抄送 / 我提的 / 别人的 / 已关闭的不要', picked.map(s => s.id).sort().join() === '1,3,5,6', picked.map(s => s.id).join());
+check('需求：待我评审的排前面，同组按优先级', picked[0].id === '5' && picked[1].id === '3', picked.map(s => s.id).join());
+check('需求：没配账号时只留待我评审的', pickStories([st(1, 'active', 'lijc', ['assignedTo']), st(2, 'reviewing', 'x', ['reviewedBy'])], '').map(s => s.id).join() === '2');
 
 const t = await getTodos(new Date('2026-10-23T10:00:00'));
 check('getTodos：返回 groups / total / errors', Array.isArray(t.groups) && typeof t.total === 'number' && Array.isArray(t.errors));

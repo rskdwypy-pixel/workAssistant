@@ -29,7 +29,7 @@ const TODO_DUE_LABEL = { overdue: '已逾期', today: '今天', soon: '3 天内'
 const TODO_CARDS = [
   { key: 'task', icon: '📋', title: '任务', empty: '没有未完成的任务' },
   { key: 'bug', icon: '🐛', title: 'Bug', empty: '没有待处理的 Bug' },
-  { key: 'story', icon: '📝', title: '我的需求', empty: '没有指派给你或评审中的需求' },
+  { key: 'story', icon: '📝', title: '我的需求', empty: '没有指派给你或待你评审的需求' },
   { key: 'todo', icon: '🗒️', title: '禅道待办', empty: '没有未完成的个人待办，点右上角“新建”添加' }
 ];
 

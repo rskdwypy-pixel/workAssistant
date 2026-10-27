@@ -140,7 +140,7 @@ const addTarget = (doc, parentSel, html) => { const p = doc.querySelector(parent
   // ── 空卡片 / 缺分组 ──
   ({ win, doc, st } = setup({ today: 'x', total: 0, errors: [], groups: [{ key: 'task', label: '任务', items: [] }] }));
   win.TodoPage.show(); await tick(20);
-  check('取不到的来源也显示空卡片和提示', doc.querySelectorAll('.todo-card').length === 4 && /没有指派给你或评审中的需求/.test(doc.getElementById('todoBody').textContent));
+  check('取不到的来源也显示空卡片和提示', doc.querySelectorAll('.todo-card').length === 4 && /没有指派给你或待你评审的需求/.test(doc.getElementById('todoBody').textContent));
   check('全空：不显示角标', !doc.querySelector('.tab-badge'));
 
   ({ win, doc, st } = setup({ ...DATA, errors: ['需求：禅道未启用或未配置'] }));
