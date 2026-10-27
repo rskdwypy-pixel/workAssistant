@@ -67,7 +67,7 @@ async function setup(s, { preset } = {}) {
   const W = win.WorkTimer;
   check('格式化 00:23:11 / 超过 100 小时', W.format(23 * 60000 + 11000) === '00:23:11' && W.format(0) === '00:00:00' && W.format(101 * 3600000) === '101:00:00' && W.format(-5) === '00:00:00');
   check('消耗工时：25 分钟=0.4，90 分钟=1.5，不到 3 分钟按最小 0.1，超过 24 小时封顶 24', W.hours(25 * 60000) === 0.4 && W.hours(90 * 60000) === 1.5 && W.hours(60000) === 0.1 && W.hours(0) === 0.1 && W.hours(30 * 3600000) === 24);
-  check('剩余建议：剩 5h − 消耗 1.5h = 3.5h；不会出现负数；非数字当 0', W.suggestLeft(5, 1.5) === 3.5 && W.suggestLeft(1, 3) === 0 && W.suggestLeft('x', 1) === 0);
+  check('剩余建议：剩 5h − 消耗 1.5h = 3.5h；不会出现负数；任务没有剩余工时（0 / 非数字）默认 4', W.suggestLeft(5, 1.5) === 3.5 && W.suggestLeft(1, 3) === 0 && W.suggestLeft('x', 1) === 4 && W.suggestLeft(0, 2) === 4);
 
   // ---------- 开始计时 ----------
   check('没有计时：显示 ⏱ 按钮，不显示计时条', !$('#timerBtn').hidden && $('#timerPill').hidden);
