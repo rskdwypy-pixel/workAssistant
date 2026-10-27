@@ -13,11 +13,12 @@
  * 局限：只覆盖「我相关的任务」。别人的任务上我记过工时、而我既不是负责人也没创建 / 完成过它，不会出现——
  * 等确认禅道有「我的日志」汇总接口后可以补齐。
  */
-import { fetchMyList, getTaskEfforts, recordTaskEstimate, editTaskEstimate, deleteTaskEstimate, isConfigured, getZentaoCookies, cookiesToString, getTeamMembers, listExecutionTasks } from './zentaoService.js';
+import { fetchMyList, getTaskEfforts, recordTaskEstimate, progressFromEffort, editTaskEstimate, deleteTaskEstimate, isConfigured, getZentaoCookies, cookiesToString, getTeamMembers, listExecutionTasks } from './zentaoService.js';
 import { createCache, singleFlight } from './zentaoCache.js';
 import { decodeZentaoText } from '../utils/text.js';
 import { isRestDay } from '../utils/workCalendar.js';
 import { config } from '../config.js';
+import { updateTasks } from '../utils/storage.js';
 
 const MY_TASK_LISTS = ['assignedTo', 'openedBy', 'finishedBy', 'closedBy', 'canceledBy'];
 const FILLABLE_STATUS = new Set(['wait', 'doing', 'pause']);
@@ -213,8 +214,26 @@ async function addEffort({ taskId, date, consumed, left, work, finish } = {}) {
   if (!/^\d+$/.test(String(taskId || ''))) throw new Error('请选择任务');
   const v = normalizeEffortInput({ date, consumed, left, work, finish });
   const r = await recordTaskEstimate(taskId, { work: v.work, consumed: v.consumed, left: v.left, date: v.date });
-  if (r && r.success) invalidateTask(taskId);
+  if (r && r.success) {
+    invalidateTask(taskId);
+    await syncLocalProgress(taskId, r.consumed, v.left).catch(() => {});
+  }
   return r;
+}
+
+/** 记完工时就按 已消耗/(已消耗+剩余) 更新本地任务的进度，不用等下次同步（禅道也是这个算法） */
+async function syncLocalProgress(taskId, consumedTotal, left) {
+  if (consumedTotal == null) return;
+  await updateTasks((data) => {
+    const t = data.tasks.find(x => x.type !== 'bug' && String(x.zentaoId || '') === String(taskId));
+    if (!t) return data;
+    t.consumed = Number(consumedTotal);
+    t.left = Number(left);
+    t.progress = progressFromEffort(consumedTotal, left);
+    if (t.progress >= 100) t.status = 'done';
+    else if (t.status === 'todo') t.status = 'in_progress';
+    return data;
+  });
 }
 
 /** 读出这条工时（必须是我自己的）。找不到 / 不是我的就抛错 */

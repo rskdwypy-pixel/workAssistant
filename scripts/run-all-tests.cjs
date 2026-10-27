@@ -29,6 +29,7 @@ const SUITES = [
   'test-workload.mjs',
   'test-workload-ui',
   'test-timer.mjs',
+  'test-progress-from-effort.mjs',
   'test-timer-ui',
   'test-task-intake.mjs',
   'test-task-modal-flow',

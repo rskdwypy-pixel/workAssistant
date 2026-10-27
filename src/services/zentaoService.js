@@ -933,9 +933,18 @@ async function refreshZentaoUsers() {
  * 禅道任务进度：已完成/关闭 = 100；禅道给了进度就用；有预计工时就按消耗折算；
  * 都没有（未填预计工时）返回 null，表示「禅道算不出来」，同步时保留本地进度
  */
+/** 禅道算进度的公式：已消耗 /（已消耗 + 剩余），剩余 0 即 100 */
+export function progressFromEffort(consumed, left) {
+  const c = Number(consumed) || 0, l = Number(left) || 0;
+  if (c <= 0) return 0;
+  if (l <= 0) return 100;
+  return Math.min(99, Math.round((c / (c + l)) * 100));
+}
+
 function zentaoProgress(t) {
   if (['done', 'closed'].includes(t.status)) return 100;
   if (Number(t.progress) > 0) return Number(t.progress);
+  if (Number(t.consumed) > 0 && t.left != null && t.left !== '') return progressFromEffort(t.consumed, t.left);
   if (Number(t.estimate) > 0) return Math.min(100, Math.round((Number(t.consumed) / Number(t.estimate)) * 100));
   return null;
 }
