@@ -703,28 +703,6 @@ async function getMyTasks() {
   }
 }
 
-/**
- * 禅道「地盘 → 我的待办」（个人待办 todo）：自动翻页，新旧版同一个地址
- * （my-todo-类型-用户-状态-排序-总数-每页-页码；用户 0 = 当前登录人，类型 / 状态 all = 全部，筛选在调用方做）
- * @returns {Promise<Array>} 禅道原始待办（id、name、type、idvalue、date、begin、end、pri、status、desc…）
- */
-async function getMyTodos() {
-  const CH = cookiesToString(await getZentaoCookies());
-  const items = [];
-  for (let page = 1; page <= 20; page++) {
-    const resp = await fetch(`${zentaoBase()}/zentao/my-todo-all-0-all-date_desc-0-${MY_LIST_PAGE_SIZE}-${page}.json`, {
-      headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'Cookie': CH }
-    });
-    const inner = await readZentaoJson(resp);
-    const list = inner && inner.todos;
-    const pageItems = Array.isArray(list) ? list : Object.values(list || {});
-    items.push(...pageItems);
-    const pageTotal = Number(inner?.pager?.pageTotal) || 1;
-    if (page >= pageTotal || pageItems.length === 0) break;
-  }
-  return items;
-}
-
 /** 禅道的时间字段：空 / 零值（0000-00-00 00:00:00）当没有 */
 function zentaoTime(v) {
   const s = String(v || '').trim();
@@ -3269,7 +3247,9 @@ export {
   clearCookies,
   describeZentaoTransportError,
   zentaoFetch,
-  getMyTodos,
+  readZentaoJson,
+  uploadEditorImage,
+  zentaoBase,
   createTask,
   toZentaoDate,
   getTasks,

@@ -30,7 +30,7 @@ const TODO_CARDS = [
   { key: 'task', icon: '📋', title: '任务', empty: '没有未完成的任务' },
   { key: 'bug', icon: '🐛', title: 'Bug', empty: '没有待处理的 Bug' },
   { key: 'story', icon: '📝', title: '我的需求', empty: '没有指派给你或评审中的需求' },
-  { key: 'todo', icon: '🗒️', title: '禅道待办', empty: '禅道里没有未完成的个人待办' }
+  { key: 'todo', icon: '🗒️', title: '禅道待办', empty: '没有未完成的个人待办，点右上角“新建”添加' }
 ];
 
 const WaHighlight = {
@@ -122,8 +122,34 @@ const TodoPage = {
     }
   },
 
+  showDone: false,
+
+  /** 优先级小标签 + 状态 + 下一步按钮：禅道待办一条 */
+  renderZtItem(it) {
+    const act = typeof ZtTodo !== 'undefined' ? ZtTodo.nextAction(it.status) : { to: 'doing', label: '开始', title: '' };
+    const done = it.status === 'done' || it.status === 'closed';
+    return `<div class="todo-item todo-zt pri-${it.pri >= 1 && it.pri <= 4 ? it.pri : 3}${done ? ' is-done' : ''}" role="button" tabindex="0" data-kind="todo" data-id="${tdEsc(it.id)}" data-status="${tdEsc(it.status)}">
+      <span class="zt-pri p${it.pri}" title="优先级 ${tdEsc(it.pri)}">P${tdEsc(it.pri)}</span>
+      <span class="todo-title">${it.private ? '🔒 ' : ''}${tdEsc(it.title)}</span>
+      ${it.due ? `<span class="todo-due due-${tdEsc(it.due)}">${TODO_DUE_LABEL[it.due]}</span>` : ''}
+      <span class="todo-meta">${tdEsc(it.meta)}</span>
+      ${it.status === 'closed' || it.cycle && done ? '' : `<button type="button" class="zt-quick" data-zt-to="${act.to}" data-zt-id="${tdEsc(it.id)}" title="${tdEsc(act.title)}">${act.label}</button>`}
+    </div>`;
+  },
+
   renderCard(card, group) {
     const items = (group && group.items) || [];
+    if (card.key === 'todo') {
+      const doneItems = (group && group.doneItems) || [];
+      const shown = this.showDone ? [...items, ...doneItems] : items;
+      return `<section class="todo-card todo-${card.key}" data-card="${card.key}">
+        <div class="todo-card-head"><span class="todo-card-title">${card.icon} ${tdEsc(card.title)}</span><span class="todo-count">${items.length}</span>
+          <span class="todo-head-spacer"></span>
+          ${doneItems.length ? `<button type="button" class="zt-link-btn" data-zt-toggle-done>${this.showDone ? '隐藏已完成' : `显示已完成 (${doneItems.length})`}</button>` : ''}
+          <button type="button" class="zt-add" data-zt-add title="在禅道里新建一条个人待办">＋ 新建</button></div>
+        <div class="todo-list">${shown.length ? shown.map(it => this.renderZtItem(it)).join('') : `<div class="todo-empty">${tdEsc(card.empty)}</div>`}</div>
+      </section>`;
+    }
     return `<section class="todo-card todo-${card.key}" data-card="${card.key}">
       <div class="todo-card-head"><span class="todo-card-title">${card.icon} ${tdEsc(card.title)}</span><span class="todo-count">${items.length}</span></div>
       <div class="todo-list">${items.length ? items.map(it => `
@@ -151,7 +177,18 @@ const TodoPage = {
     }
     body.innerHTML = html;
     this.renderGap(d);
-    body.querySelectorAll('.todo-item').forEach(b => b.addEventListener('click', () => this.go(b.dataset.kind, b.dataset.id)));
+    body.querySelectorAll('.todo-item').forEach(b => {
+      b.addEventListener('click', (e) => { if (!e.target.closest('.zt-quick')) this.go(b.dataset.kind, b.dataset.id); });
+      b.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === b) { e.preventDefault(); this.go(b.dataset.kind, b.dataset.id); } });
+    });
+    body.querySelectorAll('.zt-quick').forEach(b => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (typeof ZtTodo !== 'undefined') ZtTodo.quickStatus(b.dataset.ztId, b.dataset.ztTo);
+    }));
+    const add = body.querySelector('[data-zt-add]');
+    if (add) add.addEventListener('click', () => { if (typeof ZtTodo !== 'undefined') ZtTodo.open(); });
+    const tg = body.querySelector('[data-zt-toggle-done]');
+    if (tg) tg.addEventListener('click', () => { this.showDone = !this.showDone; this.render(); });
   },
 
   /** 工时缺填提醒：最近几个工作日里一小时都没填的；点一下跳到工作日历并打开最近那天的抽屉 */
@@ -194,8 +231,8 @@ const TodoPage = {
       if (typeof StoryPage !== 'undefined' && StoryPage.reveal) StoryPage.reveal();
       WaHighlight.flashWhenReady(sel('#storyList [data-id="__ID__"]'));
     } else if (kind === 'todo') {
-      // 禅道个人待办在插件里没有对应页面，直接在禅道里打开
-      if (typeof openInZentao === 'function') openInZentao('todo', id);
+      // 禅道个人待办：弹窗里看 / 改（描述、状态、指派等都在里面）
+      if (typeof ZtTodo !== 'undefined') ZtTodo.open({ id });
     } else if (kind === 'doc') {
       sw('doc');
       if (typeof DocPage !== 'undefined' && DocPage.reveal) DocPage.reveal();

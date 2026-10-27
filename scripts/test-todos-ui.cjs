@@ -29,8 +29,9 @@ const DATA = {
     { key: 'story', label: '我的需求', items: [
       { kind: 'story', id: '172', title: '需求测试', pri: 3, due: '', meta: '评审中' } ] },
     { key: 'todo', label: '禅道待办', items: [
-      { kind: 'todo', id: '9', title: '给客户回电话', pri: 3, due: '', meta: '未开始 · 今天 10:30' },
-      { kind: 'todo', id: '10', title: '整理周报', pri: 3, due: '', meta: '进行中 · 待定' } ] }
+      { kind: 'todo', id: '9', title: '给客户回电话', pri: 1, due: '', status: 'wait', private: true, meta: '未开始 · 今天 10:30' },
+      { kind: 'todo', id: '10', title: '整理周报', pri: 3, due: '', status: 'doing', meta: '进行中 · 待定' } ],
+      doneItems: [ { kind: 'todo', id: '11', title: '订会议室', pri: 3, due: '', status: 'done', meta: '已完成 · 10-20' } ] }
   ]
 };
 
@@ -43,6 +44,9 @@ function setup(data) {
   win.DocPage = { reveal: () => st.revealed.push('doc') };
   st.opened = [];
   win.openInZentao = (type, id) => st.opened.push(`${type}:${id}`);
+  st.zt = { opened: [], quick: [] };
+  win.ZtTodo = { nextAction: (s) => (s === 'wait' ? { to: 'doing', label: '开始', title: '' } : s === 'doing' ? { to: 'done', label: '完成', title: '' } : { to: 'wait', label: '重做', title: '' }),
+    open: (o) => st.zt.opened.push(o && o.id ? o.id : 'new'), quickStatus: (id, to) => st.zt.quick.push(`${id}:${to}`) };
   win.ReportPage = { month: null };
   win.EffortDrawer = { open: (d) => { st.drawer = d; } };
   win.Element.prototype.scrollIntoView = function () { st.scrolled = (st.scrolled || 0) + 1; };
@@ -94,7 +98,18 @@ const addTarget = (doc, parentSel, html) => { const p = doc.querySelector(parent
   check('需求目标闪烁（不再直接弹详情）', doc.querySelector('#storyList [data-id="172"]').classList.contains('wa-flash'));
 
   doc.querySelector('[data-kind="todo"][data-id="9"]').click();
-  check('点禅道待办 → 在禅道里打开（插件里没有对应页面，不切标签页）', st.opened.join() === 'todo:9' && !st.modes.length);
+  check('点禅道待办 → 弹窗查看 / 编辑（不切标签页）', st.zt.opened.join() === '9' && !st.modes.length);
+  const first = doc.querySelector('[data-card="todo"] .todo-item');
+  check('禅道待办：优先级标签 P1、私人 🔒、下一步按钮“开始”', first.querySelector('.zt-pri.p1').textContent === 'P1' && first.textContent.includes('🔒') && first.querySelector('.zt-quick').textContent === '开始');
+  check('禅道待办：进行中的按钮是“完成”', doc.querySelector('[data-id="10"] .zt-quick').textContent === '完成');
+  doc.querySelector('[data-id="9"] .zt-quick').click();
+  check('点“开始”：改状态，不打开弹窗', st.zt.quick.join() === '9:doing' && st.zt.opened.join() === '9');
+  doc.querySelector('[data-card="todo"] [data-zt-add]').click();
+  check('“＋ 新建”：打开空白弹窗', st.zt.opened.pop() === 'new');
+  check('已完成的默认不显示，按钮上有数量', !doc.querySelector('[data-id="11"]') && /显示已完成 \(1\)/.test(doc.querySelector('[data-zt-toggle-done]').textContent));
+  doc.querySelector('[data-zt-toggle-done]').click();
+  check('点“显示已完成”：列出已完成的（划线、按钮“重做”），条数仍只算未完成的', doc.querySelector('[data-id="11"].is-done .zt-quick').textContent === '重做' && doc.querySelector('[data-card="todo"] .todo-count').textContent === '2');
+  doc.querySelector('[data-zt-toggle-done]').click();
 
   // 列表重绘换了新节点（先缓存后最新）：对新节点再闪一次
   doc.querySelector('[data-kind="story"][data-id="172"]').click();

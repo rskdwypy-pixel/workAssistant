@@ -4,14 +4,14 @@
  *   getTodos()  → { groups:[{key,label,items:[...]}], total, today, errors:[] }
  *
  * 每个数据源独立取，某个源失败（如禅道没连上）只记进 errors，不影响其它分组。
- * 任务 / Bug / 需求按紧急度排序：逾期 > 今天到期 > 3 天内 > 优先级；禅道待办只列未完成的（未开始 / 进行中），同样按日期紧急度，再按时间。
+ * 任务 / Bug / 需求按紧急度排序：逾期 > 今天到期 > 3 天内 > 优先级；禅道待办只列未完成的（未开始 / 进行中），按 优先级 → 状态 → 日期排。
  * 「与我相关」：需求 = 与我相关（指派 / 我提的 / 我评审的 / 抄送）里，指派给我的，或评审中的；
  *               禅道待办 = 禅道里我自己的个人待办（和插件自己聚合的任务 / Bug 是两套东西，这里直接显示禅道的）。
  */
 import { getAllTasks } from './taskManager.js';
 import { getBugs } from './bugManager.js';
 import { listStories } from './storyService.js';
-import { getMyTodos } from './zentaoService.js';
+import { listTodos } from './zentaoTodo.js';
 import { getEffortGaps } from './effortService.js';
 import { config } from '../config.js';
 
@@ -72,41 +72,53 @@ function pickStories(stories, me) {
     .sort((a, b) => (reviewing(a) ? 0 : 1) - (reviewing(b) ? 0 : 1) || (a.pri || 3) - (b.pri || 3) || Number(b.id) - Number(a.id));
 }
 
-const TODO_TYPE_LABEL = { custom: '自定义', cycle: '周期', task: '任务', bug: 'Bug', story: '需求', testtask: '测试单', feedback: '反馈', review: '评审' };
-/** 禅道待办的日期：2030-01-01（长期）和空都当“没有日期” */
-const TODO_NO_DATE = (d) => !/^\d{4}-\d{2}-\d{2}/.test(d) || d.startsWith('2030-01-01') || d.startsWith('0000');
-/** "1030" / "10:30" → "10:30"；"2400" / 空 → ''（没设时间） */
-function todoTime(v) {
-  const m = String(v ?? '').match(/^(\d{1,2}):?(\d{2})$/);
-  if (!m || m[1] === '24') return '';
-  return `${m[1].padStart(2, '0')}:${m[2]}`;
+const TODO_TYPE_LABEL = { custom: '自定义', cycle: '周期', task: '任务', bug: 'Bug', story: '需求' };
+const TODO_STATUS_RANK = { doing: 0, wait: 1, done: 2, closed: 3 };
+const TODO_STATUS_LABEL = { wait: '未开始', doing: '进行中', done: '已完成', closed: '已关闭' };
+
+/** 禅道待办的显示顺序：优先级(1 最高) → 状态(进行中 > 未开始 > 已完成 > 已关闭) → 日期(有日期的先、待定的后) → 开始时间 */
+function sortTodos(list) {
+  return [...list].sort((a, b) => (a.pri || 3) - (b.pri || 3)
+    || (TODO_STATUS_RANK[a.status] ?? 9) - (TODO_STATUS_RANK[b.status] ?? 9)
+    || (a.date ? 0 : 1) - (b.date ? 0 : 1)
+    || String(a.date).localeCompare(String(b.date))
+    || (a.begin || '99:99').localeCompare(b.begin || '99:99'));
 }
 
-function todoItem(t, today) {
-  const date = String(t.date || '').slice(0, 10);
-  const noDate = TODO_NO_DATE(date);
-  const begin = todoTime(t.begin), end = todoTime(t.end);
-  const when = noDate ? '待定' : date === today ? '今天' : date.slice(5);
-  const time = begin ? (end && end !== begin ? `${begin}-${end}` : begin) : '';
-  const linked = t.type && t.type !== 'custom' && t.idvalue && String(t.idvalue) !== '0';
-  const title = String(t.name || '').trim() || (linked ? `${TODO_TYPE_LABEL[t.type] || t.type} #${t.idvalue}` : '(无标题)');
+/** 禅道图片地址的白名单（代理接口只放行这些，防止被拿去访问别的地址） */
+const ZENTAO_IMG_PATH = /^\/zentao\/(file-read-\d+(\.\w+)?|data\/upload\/[\w./%-]+)(\?[\w=&.%-]*)?$/;
+const isZentaoImagePath = (p) => ZENTAO_IMG_PATH.test(String(p || ''));
+
+/**
+ * 描述里的图片：禅道存的是 /zentao/file-read-N.png，新版需要登录才能看，浏览器直接请求不一定带登录状态；
+ * 所以给插件页面显示时改成走本地后端代理（带会话取图），保存时再还原成禅道的原地址。
+ */
+function withAbsoluteImages(html, origin) {
+  if (!origin) return html;
+  return String(html || '').replace(/(<img[^>]+src=["'])(\/zentao\/[^"']+)/gi, (m, pre, path) => (
+    isZentaoImagePath(path.replace(/&amp;/g, '&')) ? `${pre}${origin}/api/zentao-todos/file?path=${encodeURIComponent(path.replace(/&amp;/g, '&'))}` : m));
+}
+function withRelativeImages(html, origin) {
+  if (!origin) return html;
+  const esc = origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return String(html || '').replace(new RegExp(`(<img[^>]+src=["'])${esc}/api/zentao-todos/file\\?path=([^"']+)`, 'gi'), (m, pre, enc) => {
+    try { const p = decodeURIComponent(enc); return isZentaoImagePath(p) ? `${pre}${p}` : m; } catch { return m; }
+  });
+}
+
+/** 禅道待办 → 待办页的一条（kind: 'todo'）。meta 里放 日期 / 时间 / 类型 / 指派给谁 */
+function todoItem(t, today, users = {}) {
+  const when = !t.date ? '待定' : t.date === today ? '今天' : t.date.slice(5);
+  const time = t.begin ? (t.end && t.end !== t.begin ? `${t.begin}-${t.end}` : t.begin) : '';
+  const linked = t.type !== 'custom' && t.type !== 'cycle' && t.objectId;
+  const title = t.name || (linked ? `${TODO_TYPE_LABEL[t.type] || t.type} #${t.objectId}` : '(无标题)');
+  const me = String(config.zentao.username || '').toLowerCase();
+  const other = t.assignedTo && t.assignedTo.toLowerCase() !== me && t.assignedTo !== 'closed' ? (users[t.assignedTo] || t.assignedTo) : '';
   return {
-    kind: 'todo', id: String(t.id), title,
-    pri: Number(t.pri) || 3, due: noDate ? '' : dueState(date, today), dueDate: noDate ? '' : date, begin,
-    meta: [t.status === 'doing' ? '进行中' : '未开始', [when, time].filter(Boolean).join(' '), TODO_TYPE_LABEL[t.type] && t.type !== 'custom' ? TODO_TYPE_LABEL[t.type] : ''].filter(Boolean).join(' · ')
+    kind: 'todo', id: t.id, title, pri: t.pri, due: t.date ? dueState(t.date, today) : '', dueDate: t.date,
+    status: t.status, type: t.type, private: t.private, assignedTo: t.assignedTo, cycle: t.cycle,
+    meta: [TODO_STATUS_LABEL[t.status], [when, time].filter(Boolean).join(' '), t.type !== 'custom' ? TODO_TYPE_LABEL[t.type] : '', other ? `指派给 ${other}` : ''].filter(Boolean).join(' · ')
   };
-}
-
-/** 禅道待办只留未完成的；按 逾期 > 今天 > 3 天内 > 其余（有日期的先、待定的后），同档按日期、开始时间、优先级 */
-function pickTodos(raw, today) {
-  return raw
-    .filter(t => t && (t.status === 'wait' || t.status === 'doing') && String(t.deleted ?? '0') !== '1')
-    .map(t => todoItem(t, today))
-    .sort((a, b) => (DUE_RANK[a.due] - DUE_RANK[b.due])
-      || (a.dueDate ? 0 : 1) - (b.dueDate ? 0 : 1)
-      || String(a.dueDate).localeCompare(String(b.dueDate))
-      || (a.begin || '99:99').localeCompare(b.begin || '99:99')
-      || (a.pri || 3) - (b.pri || 3));
 }
 
 async function getTodos(now = new Date()) {
@@ -138,9 +150,15 @@ async function getTodos(now = new Date()) {
     groups.push({ key: 'story', label: '我的需求', items });
   } catch (e) { errors.push(`需求：${e.message}`); }
 
-  // 禅道个人待办：未完成的（取不到只提示，不影响其它分组）
+  // 禅道个人待办：未完成的进卡片，已完成 / 已关闭的放在 doneItems（卡片上“显示已完成”才看）
   try {
-    groups.push({ key: 'todo', label: '禅道待办', items: pickTodos(await getMyTodos(), today) });
+    const sorted = sortTodos(await listTodos());
+    const open = sorted.filter(t => t.status === 'wait' || t.status === 'doing');
+    groups.push({
+      key: 'todo', label: '禅道待办',
+      items: open.map(t => todoItem(t, today, config.zentao.users || {})),
+      doneItems: sorted.filter(t => t.status === 'done' || t.status === 'closed').map(t => todoItem(t, today, config.zentao.users || {})).slice(0, 50)
+    });
   } catch (e) { errors.push(`禅道待办：${e.message}`); }
 
   // 工时缺填提醒：最近几个工作日里不满标准工时的（取不到就不提醒，不算错误）
@@ -151,4 +169,4 @@ async function getTodos(now = new Date()) {
   return { today, total, groups, errors, effortGaps };
 }
 
-export { getTodos, dueState, bySeverity, pickStories, pickTodos, todoItem };
+export { getTodos, dueState, bySeverity, pickStories, sortTodos, todoItem, withAbsoluteImages, withRelativeImages, isZentaoImagePath };

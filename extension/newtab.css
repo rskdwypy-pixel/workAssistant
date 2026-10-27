@@ -3761,3 +3761,40 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
 .ob-x:hover { background: var(--bg-base); color: var(--text-primary); }
 .ob-saved { margin: 0; font-size: 12px; color: #15803d; line-height: 1.5; word-break: break-all; }
 .ob-steps { padding-right: 28px; }
+
+/* ===== 禅道个人待办（待办页的卡片 + 弹窗） ===== */
+.todo-head-spacer { flex: 1; }
+.todo-zt { cursor: pointer; }
+.todo-zt.is-done .todo-title { text-decoration: line-through; color: var(--text-muted); }
+.todo-zt:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.zt-pri { flex: none; min-width: 24px; text-align: center; padding: 0 5px; border-radius: 6px; font-size: 11px; font-weight: 700; line-height: 18px; background: var(--bg-base); color: var(--text-secondary); }
+.zt-pri.p1 { background: rgba(239, 68, 68, .14); color: var(--danger); }
+.zt-pri.p2 { background: rgba(245, 158, 11, .16); color: #b45309; }
+.zt-quick { flex: none; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-secondary); border-radius: 12px; padding: 1px 10px; font-size: 12px; cursor: pointer; font-family: inherit; }
+.zt-quick:hover { border-color: var(--primary); color: var(--primary); }
+.zt-add { border: 1px solid var(--primary); background: transparent; color: var(--primary); border-radius: 12px; padding: 1px 10px; font-size: 12px; cursor: pointer; font-family: inherit; }
+.zt-add:hover { background: rgba(99, 102, 241, .1); }
+.zt-link-btn { border: 0; background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; font-family: inherit; }
+.zt-link-btn:hover { color: var(--primary); }
+.zt-overlay { position: fixed; inset: 0; z-index: 1600; background: rgba(15, 23, 42, .45); backdrop-filter: blur(4px); display: flex; justify-content: center; align-items: flex-start; padding: 6vh 16px 0; overflow-y: auto; }
+.zt-box { width: min(620px, 100%); background: var(--bg-surface); border-radius: 14px; box-shadow: 0 24px 64px rgba(15, 23, 42, .3); padding: 20px 22px; color: var(--text-primary); font-size: 13px; margin-bottom: 6vh; }
+.zt-box h3 { margin: 0 0 12px; font-size: 16px; }
+.zt-muted { color: var(--text-muted); font-weight: 400; font-size: 12px; }
+.zt-loading { padding: 24px 0; text-align: center; color: var(--text-muted); }
+.zt-note { padding: 8px 10px; border-radius: 8px; background: rgba(99, 102, 241, .1); color: var(--text-secondary); margin-bottom: 10px; line-height: 1.6; }
+.zt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 10px; align-items: end; }
+.zt-box label { display: flex; flex-direction: column; gap: 4px; color: var(--text-secondary); font-size: 12px; }
+.zt-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; color: var(--text-secondary); font-size: 12px; }
+.zt-row[hidden], .zt-name-row[hidden] { display: none; }
+.zt-box .zt-check { flex-direction: row; align-items: center; gap: 6px; padding-bottom: 7px; }
+.zt-box input[type="text"], .zt-box input[type="search"], .zt-box input[type="date"], .zt-box input[type="time"], .zt-box select { padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; font-family: inherit; font-size: 13px; background: var(--bg-surface); color: var(--text-primary); }
+.zt-box input:focus, .zt-box select:focus, .zt-desc:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(99, 102, 241, .15); }
+.zt-desc { min-height: 110px; max-height: 40vh; overflow-y: auto; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-surface); color: var(--text-primary); font-size: 13px; line-height: 1.7; word-break: break-word; }
+.zt-desc:empty::before { content: attr(data-placeholder); color: var(--text-muted); }
+.zt-desc img { max-width: 100%; height: auto; border-radius: 6px; }
+.zt-desc p { margin: 0 0 6px; }
+.zt-uploading { color: var(--text-muted); font-size: 12px; }
+.zt-error { min-height: 18px; color: #dc2626; font-size: 12px; line-height: 1.5; }
+.zt-actions { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.zt-spacer { flex: 1; }
+.zt-danger { color: #dc2626; }
