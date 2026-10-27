@@ -1,17 +1,17 @@
 /**
- * 我的待办：任务 / Bug / 与我相关的需求 / 与我相关的文档，四块各自成组。
+ * 我的待办：任务 / Bug / 与我相关的需求 / 禅道个人待办（地盘 → 我的待办），四块各自成组。
  *
  *   getTodos()  → { groups:[{key,label,items:[...]}], total, today, errors:[] }
  *
  * 每个数据源独立取，某个源失败（如禅道没连上）只记进 errors，不影响其它分组。
- * 任务 / Bug / 需求按紧急度排序：逾期 > 今天到期 > 3 天内 > 优先级；文档列出全部，最近修改的在前。
+ * 任务 / Bug / 需求按紧急度排序：逾期 > 今天到期 > 3 天内 > 优先级；禅道待办只列未完成的（未开始 / 进行中），同样按日期紧急度，再按时间。
  * 「与我相关」：需求 = 与我相关（指派 / 我提的 / 我评审的 / 抄送）里，指派给我的，或评审中的；
- *               文档 = 全部（最近修改的在前）。
+ *               禅道待办 = 禅道里我自己的个人待办（和插件自己聚合的任务 / Bug 是两套东西，这里直接显示禅道的）。
  */
 import { getAllTasks } from './taskManager.js';
 import { getBugs } from './bugManager.js';
 import { listStories } from './storyService.js';
-import { listDocs, listLibs } from './docService.js';
+import { getMyTodos } from './zentaoService.js';
 import { getEffortGaps } from './effortService.js';
 import { config } from '../config.js';
 
@@ -72,11 +72,41 @@ function pickStories(stories, me) {
     .sort((a, b) => (reviewing(a) ? 0 : 1) - (reviewing(b) ? 0 : 1) || (a.pri || 3) - (b.pri || 3) || Number(b.id) - Number(a.id));
 }
 
-function docItem(d, libName) {
+const TODO_TYPE_LABEL = { custom: '自定义', cycle: '周期', task: '任务', bug: 'Bug', story: '需求', testtask: '测试单', feedback: '反馈', review: '评审' };
+/** 禅道待办的日期：2030-01-01（长期）和空都当“没有日期” */
+const TODO_NO_DATE = (d) => !/^\d{4}-\d{2}-\d{2}/.test(d) || d.startsWith('2030-01-01') || d.startsWith('0000');
+/** "1030" / "10:30" → "10:30"；"2400" / 空 → ''（没设时间） */
+function todoTime(v) {
+  const m = String(v ?? '').match(/^(\d{1,2}):?(\d{2})$/);
+  if (!m || m[1] === '24') return '';
+  return `${m[1].padStart(2, '0')}:${m[2]}`;
+}
+
+function todoItem(t, today) {
+  const date = String(t.date || '').slice(0, 10);
+  const noDate = TODO_NO_DATE(date);
+  const begin = todoTime(t.begin), end = todoTime(t.end);
+  const when = noDate ? '待定' : date === today ? '今天' : date.slice(5);
+  const time = begin ? (end && end !== begin ? `${begin}-${end}` : begin) : '';
+  const linked = t.type && t.type !== 'custom' && t.idvalue && String(t.idvalue) !== '0';
+  const title = String(t.name || '').trim() || (linked ? `${TODO_TYPE_LABEL[t.type] || t.type} #${t.idvalue}` : '(无标题)');
   return {
-    kind: 'doc', id: String(d.id), title: d.title, pri: 3, due: '', dueDate: '',
-    meta: [libName, String(d.editedDate || '').slice(0, 10)].filter(Boolean).join(' · ')
+    kind: 'todo', id: String(t.id), title,
+    pri: Number(t.pri) || 3, due: noDate ? '' : dueState(date, today), dueDate: noDate ? '' : date, begin,
+    meta: [t.status === 'doing' ? '进行中' : '未开始', [when, time].filter(Boolean).join(' '), TODO_TYPE_LABEL[t.type] && t.type !== 'custom' ? TODO_TYPE_LABEL[t.type] : ''].filter(Boolean).join(' · ')
   };
+}
+
+/** 禅道待办只留未完成的；按 逾期 > 今天 > 3 天内 > 其余（有日期的先、待定的后），同档按日期、开始时间、优先级 */
+function pickTodos(raw, today) {
+  return raw
+    .filter(t => t && (t.status === 'wait' || t.status === 'doing') && String(t.deleted ?? '0') !== '1')
+    .map(t => todoItem(t, today))
+    .sort((a, b) => (DUE_RANK[a.due] - DUE_RANK[b.due])
+      || (a.dueDate ? 0 : 1) - (b.dueDate ? 0 : 1)
+      || String(a.dueDate).localeCompare(String(b.dueDate))
+      || (a.begin || '99:99').localeCompare(b.begin || '99:99')
+      || (a.pri || 3) - (b.pri || 3));
 }
 
 async function getTodos(now = new Date()) {
@@ -108,15 +138,10 @@ async function getTodos(now = new Date()) {
     groups.push({ key: 'story', label: '我的需求', items });
   } catch (e) { errors.push(`需求：${e.message}`); }
 
-  // 文档：全部文档，最近修改的在前
+  // 禅道个人待办：未完成的（取不到只提示，不影响其它分组）
   try {
-    const [docs, libs] = await Promise.all([listDocs({ maxAge: 60 * 1000 }), listLibs().catch(() => [])]);
-    const libName = new Map(libs.map(l => [l.id, l.name]));
-    const items = [...docs]
-      .sort((a, b) => String(b.editedDate).localeCompare(String(a.editedDate)))
-      .map(d => docItem(d, libName.get(d.lib) || ''));
-    groups.push({ key: 'doc', label: '文档', items });
-  } catch (e) { errors.push(`文档：${e.message}`); }
+    groups.push({ key: 'todo', label: '禅道待办', items: pickTodos(await getMyTodos(), today) });
+  } catch (e) { errors.push(`禅道待办：${e.message}`); }
 
   // 工时缺填提醒：最近几个工作日里不满标准工时的（取不到就不提醒，不算错误）
   let effortGaps = [];
@@ -126,4 +151,4 @@ async function getTodos(now = new Date()) {
   return { today, total, groups, errors, effortGaps };
 }
 
-export { getTodos, dueState, bySeverity, pickStories };
+export { getTodos, dueState, bySeverity, pickStories, pickTodos, todoItem };

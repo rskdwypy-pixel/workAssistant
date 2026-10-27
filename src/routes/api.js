@@ -2242,7 +2242,7 @@ router.post('/zentao/open', async (req, res) => {
   try {
     if (!(await loadZentaoConfigOrError(res))) return;
     const { type, id, browserSid } = req.body || {};
-    if (!['task', 'bug', 'doc', 'story'].includes(type) || !/^\d+$/.test(String(id))) {
+    if (!['task', 'bug', 'doc', 'story', 'todo'].includes(type) || !/^\d+$/.test(String(id))) {
       return res.status(400).json({ success: false, message: '参数不正确' });
     }
     const z = await import('../services/zentaoService.js');

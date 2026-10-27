@@ -28,9 +28,9 @@ const DATA = {
       { kind: 'bug', id: 'b-1', title: '登录超时', pri: 2, due: 'today', meta: '未确认' } ] },
     { key: 'story', label: '我的需求', items: [
       { kind: 'story', id: '172', title: '需求测试', pri: 3, due: '', meta: '评审中' } ] },
-    { key: 'doc', label: '文档', items: [
-      { kind: 'doc', id: '9', title: '接口说明', pri: 3, due: '', meta: '产品主库 · 2026-10-20' },
-      { kind: 'doc', id: '10', title: '部署手册', pri: 3, due: '', meta: '产品主库 · 2026-10-19' } ] }
+    { key: 'todo', label: '禅道待办', items: [
+      { kind: 'todo', id: '9', title: '给客户回电话', pri: 3, due: '', meta: '未开始 · 今天 10:30' },
+      { kind: 'todo', id: '10', title: '整理周报', pri: 3, due: '', meta: '进行中 · 待定' } ] }
   ]
 };
 
@@ -41,6 +41,8 @@ function setup(data) {
   win.TabSwitcher = { switchMode: (m) => st.modes.push(m) };
   win.StoryPage = { reveal: () => st.revealed.push('story') };
   win.DocPage = { reveal: () => st.revealed.push('doc') };
+  st.opened = [];
+  win.openInZentao = (type, id) => st.opened.push(`${type}:${id}`);
   win.ReportPage = { month: null };
   win.EffortDrawer = { open: (d) => { st.drawer = d; } };
   win.Element.prototype.scrollIntoView = function () { st.scrolled = (st.scrolled || 0) + 1; };
@@ -61,12 +63,12 @@ const addTarget = (doc, parentSel, html) => { const p = doc.querySelector(parent
   check('没有顶部总览卡', !doc.querySelector('.todo-hero') && !doc.querySelector('.todo-chip'));
   check('没有刷新按钮', !doc.getElementById('todoRefresh'));
   const cards = [...doc.querySelectorAll('#todoBody .todo-card')].map(x => x.dataset.card);
-  check('四张卡片按 任务、Bug、需求、文档 的顺序平铺（CSS 网格排成两排）', cards.join() === 'task,bug,story,doc', cards.join());
+  check('四张卡片按 任务、Bug、需求、禅道待办 的顺序平铺（CSS 网格排成两排）', cards.join() === 'task,bug,story,todo', cards.join());
   const css = fs.readFileSync(path.join(EXT, 'newtab.css'), 'utf8');
   const grid = (css.match(/\.todo-grid \{[^}]*\}/) || [''])[0];
   check('网格是 2 列 × 2 行，每排各占一半高度', /grid-template-columns:\s*1fr 1fr/.test(grid) && /grid-template-rows:\s*1fr 1fr/.test(grid));
   check('不再有按列分组的容器', !doc.querySelector('.todo-col'));
-  check('卡片头部显示条数', doc.querySelector('[data-card="task"] .todo-count').textContent === '2' && doc.querySelector('[data-card="doc"] .todo-count').textContent === '2');
+  check('卡片头部显示条数', doc.querySelector('[data-card="task"] .todo-count').textContent === '2' && doc.querySelector('[data-card="todo"] .todo-count').textContent === '2');
   check('逾期 / 今天有标记', doc.querySelector('.due-overdue') && doc.querySelector('.due-today'));
   check('页头统计：待处理 6 / 逾期+今天 2', doc.getElementById('todoStatTotal').textContent === '6' && doc.getElementById('todoStatUrgent').textContent === '2');
   const badge = doc.querySelector('.tab-badge');
@@ -91,24 +93,20 @@ const addTarget = (doc, parentSel, html) => { const p = doc.querySelector(parent
   await tick(250);
   check('需求目标闪烁（不再直接弹详情）', doc.querySelector('#storyList [data-id="172"]').classList.contains('wa-flash'));
 
-  doc.querySelector('[data-kind="doc"][data-id="9"]').click();
-  check('点文档 → 切到文档标签页并清掉过滤', st.modes.pop() === 'doc' && st.revealed.includes('doc'));
-  addTarget(doc, 'body', '<div id="docList"><button class="doc-item" data-id="9">文档</button></div>');
-  await tick(250);
-  check('文档目标闪烁', doc.querySelector('#docList [data-id="9"]').classList.contains('wa-flash'));
+  doc.querySelector('[data-kind="todo"][data-id="9"]').click();
+  check('点禅道待办 → 在禅道里打开（插件里没有对应页面，不切标签页）', st.opened.join() === 'todo:9' && !st.modes.length);
 
   // 列表重绘换了新节点（先缓存后最新）：对新节点再闪一次
-  const oldEl = doc.querySelector('#docList [data-id="9"]');
-  doc.querySelector('[data-kind="doc"][data-id="9"]').click();
+  doc.querySelector('[data-kind="story"][data-id="172"]').click();
   await tick(150);
-  oldEl.remove();
-  doc.getElementById('docList').insertAdjacentHTML('beforeend', '<button class="doc-item" data-id="9">新节点</button>');
+  doc.querySelector('#storyList [data-id="172"]').remove();
+  doc.getElementById('storyList').insertAdjacentHTML('beforeend', '<button class="story-card" data-id="172">新节点</button>');
   await tick(250);
-  check('重绘后的新节点也会闪', doc.querySelector('#docList [data-id="9"]').classList.contains('wa-flash'));
+  check('重绘后的新节点也会闪', doc.querySelector('#storyList [data-id="172"]').classList.contains('wa-flash'));
 
   // 闪烁会自己结束
   await tick(2200);
-  check('闪烁约 2 秒后自动结束', !doc.querySelector('#docList [data-id="9"]').classList.contains('wa-flash'));
+  check('闪烁约 2 秒后自动结束', !doc.querySelector('#storyList [data-id="172"]').classList.contains('wa-flash'));
 
   // ── 工时缺填提醒 ──
   ({ win, doc, st } = setup({ ...DATA, today: '2026-10-23', effortGaps: [{ date: '2026-10-22', hours: 0, standard: 8 }, { date: '2026-10-20', hours: 0, standard: 8 }] }));

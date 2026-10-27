@@ -2,11 +2,11 @@
  * 我的待办（与任务、Bug、需求、文档、报告同级的标签页）
  *
  *   TodoApi      后端 /api/todos 的封装
- *   TodoPage     四张卡片排成两排：第一排 任务 | Bug，第二排 需求 | 文档（每排各占一半高度）；
+ *   TodoPage     四张卡片排成两排：第一排 任务 | Bug，第二排 需求 | 禅道待办（每排各占一半高度）；
  *                点一条跳到对应标签页，并让那一条高亮闪烁
  *   WaHighlight  滚动到目标并闪烁（目标可能还在加载，会等它出现；列表重绘后会对新节点再闪一次）
  *
- * 任务 / Bug 来自本地库，需求 / 文档来自禅道（本地缓存）；某个来源失败只提示，不影响其它卡片。
+ * 任务 / Bug 来自本地库，需求来自禅道（本地缓存），禅道待办是禅道「地盘 → 我的待办」里的个人待办（实时读取）；某个来源失败只提示，不影响其它卡片。
  * 标签上的角标 = 待办总数（有逾期 / 今天到期的变红），没有就不显示。
  * 页面顶部有「工时待补」提醒（最近几个工作日不满标准工时），点一下去工作日历补填。
  * 没有刷新按钮：刷新浏览器页面即可；每次切到这个标签页都会重新汇总。
@@ -30,7 +30,7 @@ const TODO_CARDS = [
   { key: 'task', icon: '📋', title: '任务', empty: '没有未完成的任务' },
   { key: 'bug', icon: '🐛', title: 'Bug', empty: '没有待处理的 Bug' },
   { key: 'story', icon: '📝', title: '我的需求', empty: '没有指派给你或评审中的需求' },
-  { key: 'doc', icon: '📁', title: '文档', empty: '还没有文档' }
+  { key: 'todo', icon: '🗒️', title: '禅道待办', empty: '禅道里没有未完成的个人待办' }
 ];
 
 const WaHighlight = {
@@ -144,7 +144,7 @@ const TodoPage = {
     if (ta) ta.textContent = String(this.totalCount(d));
     if (tu) tu.textContent = String(this.urgentCount(d));
     const byKey = new Map(d.groups.map(g => [g.key, g]));
-    // 按顺序平铺，由 CSS 网格排成两排：任务 | Bug / 需求 | 文档
+    // 按顺序平铺，由 CSS 网格排成两排：任务 | Bug / 需求 | 禅道待办
     let html = TODO_CARDS.map(c => this.renderCard(c, byKey.get(c.key))).join('');
     if (d.errors && d.errors.length) {
       html += `<div class="todo-errors">部分来源没取到：${d.errors.map(tdEsc).join('；')}</div>`;
@@ -193,6 +193,9 @@ const TodoPage = {
       // 去掉可能把它藏起来的过滤（状态 / 产品 / 搜索词）
       if (typeof StoryPage !== 'undefined' && StoryPage.reveal) StoryPage.reveal();
       WaHighlight.flashWhenReady(sel('#storyList [data-id="__ID__"]'));
+    } else if (kind === 'todo') {
+      // 禅道个人待办在插件里没有对应页面，直接在禅道里打开
+      if (typeof openInZentao === 'function') openInZentao('todo', id);
     } else if (kind === 'doc') {
       sw('doc');
       if (typeof DocPage !== 'undefined' && DocPage.reveal) DocPage.reveal();
