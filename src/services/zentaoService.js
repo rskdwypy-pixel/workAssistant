@@ -682,6 +682,12 @@ async function fetchMyList(kind, type = 'assignedTo', cookieHeader) {
     const pageTotal = Number(inner?.pager?.pageTotal) || 1;
     if (page >= pageTotal || pageItems.length === 0) break;
   }
+  // 禅道的 my-story-mailto 不按“抄送给我”过滤，会把所有需求都返回（实测 155 条里只有 0 条真的抄送了我），
+  // 这里用需求自己的抄送字段把关；Bug 的 mailto 列表是准的，不受影响
+  if (kind === 'story' && type === 'mailto') {
+    const me = String(config.zentao.username || '').toLowerCase();
+    return { items: items.filter(s => String(s.mailto || '').split(',').some(a => a.trim().toLowerCase() === me)), users };
+  }
   return { items, users };
 }
 
