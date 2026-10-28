@@ -1992,6 +1992,19 @@ router.post('/zentao/bug/create', async (req, res) => {
   }
 });
 
+/** GET /api/zentao/project/products?projectId= - 项目可提 Bug 的产品（无迭代项目用） */
+router.get('/zentao/project/products', async (req, res) => {
+  try {
+    if (!(await loadZentaoConfigOrError(res))) return;
+    const { projectId } = req.query;
+    if (!projectId) return res.status(400).json({ success: false, message: '缺少 projectId' });
+    const { getProjectProducts } = await import('../services/zentaoService.js');
+    res.json(await getProjectProducts(projectId));
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 /** POST /api/zentao/bug/activate */
 router.post('/zentao/bug/activate', async (req, res) => {
   try {

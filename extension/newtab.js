@@ -7656,7 +7656,12 @@ const BugManager = {
     // 项目选择改变时保存
     const bugProject = document.getElementById('bugProject');
     if (bugProject) {
-      bugProject.addEventListener('change', () => this.saveDraftDebounced());
+      const bugExecution = document.getElementById('bugExecution');
+      if (bugExecution) bugExecution.addEventListener('change', () => this.refreshProductOptions());
+      bugProject.addEventListener('change', () => {
+        this.refreshExecutionOptions();
+        this.saveDraftDebounced();
+      });
     }
 
     // Bug 详情弹窗关闭按钮
@@ -8850,6 +8855,11 @@ const BugManager = {
       console.log('[BugManager] 设置后的 bugType.value:', bugType.value);
     }
 
+    // 手动打开时没有预设执行，清掉上一次 AI 快速提交留下的
+    delete modal.dataset.executionId;
+    delete modal.dataset.executionName;
+    this.refreshExecutionOptions();
+
     modal.style.display = 'flex';
   },
 
@@ -8990,9 +9000,58 @@ const BugManager = {
     // 保存执行信息到 modal 的 dataset 中，提交时使用
     modal.dataset.executionId = executionId || '';
     modal.dataset.executionName = executionName || '';
+    this.refreshExecutionOptions(executionId);
 
     // 显示弹窗
     modal.style.display = 'flex';
+  },
+
+  /** 按所选项目刷新「所属执行」下拉；preferId 优先选中，否则选第一个（收藏执行已排在前面） */
+  refreshExecutionOptions(preferId = '') {
+    const select = document.getElementById('bugExecution');
+    if (!select) return;
+    const projectId = document.getElementById('bugProject').value;
+    const list = (this.executionList || []).filter(e => projectId && String(e.projectId) === String(projectId));
+    select.innerHTML = projectId ? '<option value="">不指定执行（直接提交到项目）</option>' : '<option value="">请先选择项目</option>';
+    list.forEach(e => {
+      const option = document.createElement('option');
+      option.value = e.id;
+      option.textContent = e.name || `执行${e.id}`;
+      select.appendChild(option);
+    });
+    if (list.length) {
+      select.value = preferId && list.some(e => String(e.id) === String(preferId)) ? String(preferId) : String(list[0].id);
+    }
+    this.refreshProductOptions();
+  },
+
+  /** 没有选执行时（无迭代项目）需要自己选产品，选项取自项目的建 Bug 表单 */
+  async refreshProductOptions() {
+    const group = document.getElementById('bugProductGroup');
+    const select = document.getElementById('bugProduct');
+    if (!group || !select) return;
+    const projectId = document.getElementById('bugProject').value;
+    const executionId = document.getElementById('bugExecution').value;
+    if (!projectId || executionId) {
+      group.style.display = 'none';
+      return;
+    }
+    group.style.display = '';
+    select.innerHTML = '<option value="">加载中...</option>';
+    try {
+      const r = await (await fetch(`${API_BASE_URL}/api/zentao/project/products?projectId=${encodeURIComponent(projectId)}`)).json();
+      if (document.getElementById('bugProject').value !== projectId) return; // 期间换了项目
+      const products = (r && r.products) || [];
+      select.innerHTML = products.length ? '' : '<option value="">无可用产品</option>';
+      products.forEach(p => {
+        const option = document.createElement('option');
+        option.value = p.id;
+        option.textContent = p.name;
+        select.appendChild(option);
+      });
+    } catch (e) {
+      select.innerHTML = '<option value="">获取产品失败</option>';
+    }
   },
 
   async loadProjectOptions() {
@@ -9029,6 +9088,8 @@ const BugManager = {
           }
         });
       }
+
+      this.executionList = (executionsResult.success && executionsResult.data) || [];
 
       // 转换为数组并排序
       const allProjects = Array.from(projectsMap.values()).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
@@ -9284,8 +9345,9 @@ const BugManager = {
     console.log('[BugManager] 表单数据:', { projectId, title, severity, type, assignedToList, ccList, steps: steps?.substring(0, 50) });
 
     // 从 modal 获取执行信息（如果有）
-    const executionId = modal?.dataset.executionId;
-    const executionName = modal?.dataset.executionName;
+    const executionSelect = document.getElementById('bugExecution');
+    const executionId = (executionSelect && executionSelect.value) || modal?.dataset.executionId;
+    const executionName = (executionSelect && executionSelect.value && executionSelect.selectedOptions[0]?.textContent) || modal?.dataset.executionName;
     console.log('[BugManager] 执行信息:', executionId, executionName);
 
     // 验证必填项
@@ -9337,8 +9399,20 @@ const BugManager = {
         // 初始化 syncResponse，默认为失败（未同步到禅道）
         let syncResponse = { success: false, reason: 'not_attempted' };
 
-        // 检查是否有执行ID
-        if (!executionId) {
+        const productSelect = document.getElementById('bugProduct');
+        if (!executionId && projectId && productSelect && productSelect.value) {
+          // ========== 无迭代项目：不带执行，直接按项目 + 产品提交 ==========
+          ProgressToast.show('正在创建禅道 Bug...');
+          bugData.productId = productSelect.value;
+          bugData.productName = productSelect.selectedOptions[0]?.textContent || '';
+          syncResponse = await new Promise(resolve => {
+            const timeout = setTimeout(() => resolve({ success: false, reason: 'timeout', data: null }), 60000);
+            chrome.runtime.sendMessage({ action: 'executeBugInZentaoPage', baseUrl, productId: bugData.productId, bugData }, (response) => {
+              clearTimeout(timeout);
+              resolve(response);
+            });
+          });
+        } else if (!executionId) {
           console.warn('[BugManager] ⚠ 未选择执行，将 Bug 保存到本地，稍后可手动同步');
           ProgressToast.hide();
           Toast.info('未选择执行，Bug 已保存到本地。请在选择执行后点击同步按钮同步到禅道。');
@@ -9815,6 +9889,7 @@ const BugManager = {
 
     // 清空表单
     document.getElementById('bugProject').value = '';
+    this.refreshExecutionOptions();
     document.getElementById('bugTitle').value = '';
     document.getElementById('bugSeverity').value = '3';
     document.getElementById('bugType').value = 'codeerror';

@@ -92,9 +92,12 @@ const TaskLinkDialog = {
     try { this.me = (typeof ConfigStore !== 'undefined' && ConfigStore.flat().zentaoUsername) || ''; } catch { this.me = ''; }
   },
 
-  execOptions(selected) {
+  /** @param {string[]} [linked] 需求所属产品关联的执行：排在最前并标注，避免把任务建到别的项目里 */
+  execOptions(selected, linked) {
     if (!this.executions.length) return '<option value="">（还没有同步执行，请先在任务页同步）</option>';
-    return this.executions.map(e => `<option value="${tlEsc(e.id)}"${String(e.id) === String(selected) ? ' selected' : ''}>${e.isFavorite || e.favorite ? '★ ' : ''}${tlEsc(e.name || '执行 ' + e.id)}</option>`).join('');
+    const isLinked = (e) => !!(linked && linked.includes(String(e.id)));
+    const ordered = linked && linked.length ? [...this.executions.filter(isLinked), ...this.executions.filter(e => !isLinked(e))] : this.executions;
+    return ordered.map(e => `<option value="${tlEsc(e.id)}"${String(e.id) === String(selected) ? ' selected' : ''}>${isLinked(e) ? '🔗 ' : ''}${e.isFavorite || e.favorite ? '★ ' : ''}${tlEsc((e.projectName ? e.projectName + ' / ' : '') + (e.name || '执行 ' + e.id))}${isLinked(e) ? '（需求所属产品）' : ''}</option>`).join('');
   },
   defaultExec() {
     const d = this.executions.find(e => e.isDefault) || this.executions.find(e => e.isFavorite || e.favorite) || this.executions[0];
@@ -125,12 +128,19 @@ const TaskLinkDialog = {
       this.q('[data-tl-foot]').innerHTML = '<span class="af-spacer"></span><button type="button" class="btn-secondary" data-tl="close">关闭</button>';
       return;
     }
+    // 默认：Bug 自己所在的执行 > Bug 所属产品关联的执行 > 全局默认；避免任务建到别的项目
+    const info = (link && link.success && link.data) || {};
+    const known = (id) => this.executions.some(e => String(e.id) === String(id));
+    const linked = Array.isArray(info.executionIds) ? info.executionIds : null;
+    const ownExec = info.executionId && known(info.executionId) ? info.executionId : '';
+    const execSel = ownExec || (linked || []).find(known) || this.defaultExec();
+    this.ctx.linkedExecs = linked;
     const steps = tlStripHtml(bug.steps);
     const desc = [steps, `来源：Bug #${bug.zentaoId}`].filter(Boolean).join('\n\n');
     const acct = (Array.isArray(bug.assignedTo) ? bug.assignedTo[0] : String(bug.assignedTo || '').split(/[\s,]+/)[0]) || '';
     this.q('[data-tl-body]').innerHTML = `
       <div class="tl-form">
-        <label>创建到执行<select data-f="executionId">${this.execOptions(this.defaultExec())}</select></label>
+        <label>创建到执行<select data-f="executionId">${this.execOptions(execSel, linked && ownExec ? [ownExec, ...linked.filter(x => x !== ownExec)] : (linked || (ownExec ? [ownExec] : null)))}</select></label>
         <label>任务标题<input type="text" data-f="name" maxlength="255" value="${tlEsc(`【Bug#${bug.zentaoId}】${bug.title || ''}`)}"></label>
         <div class="tl-row">
           <label>类型<select data-f="type">${this.typeOptions('devel')}</select></label>
@@ -166,7 +176,9 @@ const TaskLinkDialog = {
     const [ex] = await Promise.all([TaskLinkApi.storyTasks(story.id).catch(() => null), this.loadCommon()]);
     this.ctx.existing = (ex && ex.success && ex.data && Array.isArray(ex.data.tasks)) ? ex.data.tasks : [];
     this.ctx.linkedExecs = (ex && ex.success && ex.data && Array.isArray(ex.data.executionIds)) ? ex.data.executionIds : null;   // null：没拿到，不提示
-    this.ctx.executionId = this.defaultExec();
+    // 默认选需求所属产品关联的执行（任务必须建在需求所属的执行里）；都没关联才退回全局默认
+    const linkedFirst = (this.ctx.linkedExecs || []).find(id => this.executions.some(e => String(e.id) === String(id)));
+    this.ctx.executionId = linkedFirst || this.defaultExec();
     this.ctx.rows = this.templateRows();
     this.renderStory();
   },
@@ -188,7 +200,7 @@ const TaskLinkDialog = {
     this.q('[data-tl-body]').innerHTML = `
       <div class="tl-form">
         ${existing}
-        <label>创建到执行<select data-f="executionId">${this.execOptions(c.executionId)}</select></label>
+        <label>创建到执行<select data-f="executionId">${this.execOptions(c.executionId, c.linkedExecs)}</select></label>
         ${this.linkWarn()}
         <div class="tl-ai"><button type="button" class="btn-secondary" data-tl="suggest">✨ AI 拆分建议</button><span class="tl-muted" data-tl-ai-msg>${tlEsc(c.aiMsg || '根据需求内容给出拆分，填进下面的表格，你可以随意改')}</span></div>
         <div class="tl-grid-head"><span>标题</span><span>类型</span><span>指派给</span><span>预计</span><span>截止</span><span></span></div>
@@ -206,8 +218,8 @@ const TaskLinkDialog = {
     const c = this.ctx;
     if (!c.linkedExecs || !c.executionId) return '<p class="tl-muted">需求要先在禅道里关联到这个执行（激活状态），任务才会挂在需求下。</p>';
     return c.linkedExecs.includes(String(c.executionId))
-      ? '<p class="tl-muted">✓ 需求已关联到这个执行。</p>'
-      : '<p class="tl-warn">这个需求还没有关联到所选执行：任务能建，但不会挂在需求下。请先在禅道的执行里「关联需求」，或换一个已关联的执行。</p>';
+      ? '<p class="tl-muted">✓ 这是需求所属产品关联的执行。</p>'
+      : '<p class="tl-warn">所选执行不属于这个需求所在的产品（可能是另一个项目）。请换一个带「🔗」的执行。</p>';
   },
 
   /** AI 拆分建议：填进表格（保留手填的执行和已输入的内容不丢——只替换任务行）。没配 AI / 出错会得到通用模板，不影响使用 */
@@ -254,6 +266,11 @@ const TaskLinkDialog = {
     const f = (k) => this.q(`[data-f="${k}"]`).value;
     const body = { executionId: f('executionId'), name: f('name').trim(), type: f('type'), assignedTo: f('assignedTo'), pri: Number(f('pri')), estimate: f('estimate'), deadline: f('deadline'), desc: f('desc') };
     if (!body.executionId) return this.msg('请先选择执行');
+    const lk = this.ctx.linkedExecs;
+    if (lk && lk.length && !lk.includes(String(body.executionId)) && typeof Confirm !== 'undefined') {
+      const ok = await Confirm.show('执行与 Bug 不一致', '所选执行不属于这个 Bug 所在的产品：任务会建到另一个项目里。确定要这样创建吗？', '仍然创建', '返回修改');
+      if (!ok) return;
+    }
     if (!body.name) return this.msg('请填写任务标题');
     this.msg('正在创建…', false); this.setBusy(true);
     let r;
@@ -269,6 +286,10 @@ const TaskLinkDialog = {
     this.collectRows();
     const c = this.ctx;
     if (!c.executionId) return this.msg('请先选择执行');
+    if (c.linkedExecs && c.linkedExecs.length && !c.linkedExecs.includes(String(c.executionId)) && typeof Confirm !== 'undefined') {
+      const ok = await Confirm.show('执行与需求不一致', '所选执行不属于这个需求所在的产品：任务会建到另一个项目里，且不会挂在需求下。确定要这样创建吗？', '仍然创建', '返回修改');
+      if (!ok) return;
+    }
     const names = c.rows.map(r => r.name.trim());
     if (names.some(n => !n)) return this.msg('有任务没填标题（不要的行请删除）');
     if (new Set(names).size !== names.length) return this.msg('有标题完全相同的任务，请先改名');

@@ -73,12 +73,17 @@ export async function getExecutionMeta(executionId, CH) {
   return meta;
 }
 
-/** Bug 是否已转过任务 */
+/** Bug 是否已转过任务，以及它所在的执行 / 产品关联的执行（给转任务弹窗选默认值） */
 export async function getBugLink(bugId, CH) {
   const d = await getZentaoJson(`bug-view-${bugId}.json?onlybody=yes`, CH);
   const b = (d && d.bug) || {};
   const toTask = String(b.toTask || '0');
-  return { exists: !!b.id, toTask: toTask === '0' ? '' : toTask, status: b.status || '', title: b.title || '' };
+  const exec = String(b.execution || '0');
+  return {
+    exists: !!b.id, toTask: toTask === '0' ? '' : toTask, status: b.status || '', title: b.title || '',
+    executionId: exec === '0' ? '' : exec,                                   // Bug 自己所在的执行
+    executionIds: await getProductExecutionIds(b.product, CH)                // Bug 所属产品关联的执行
+  };
 }
 
 /**
@@ -88,15 +93,25 @@ export async function getBugLink(bugId, CH) {
 export async function getStoryTasks(storyId, CH) {
   const d = await getZentaoJson(`story-view-${storyId}.json?onlybody=yes`, CH);
   const tasks = (d && d.tasks) || {};
-  const execs = (d && d.executions) || {};
-  const idsOf = (v) => (Array.isArray(v) ? v.map((x) => (x && typeof x === 'object' ? x.id : x)) : Object.keys(v || {}));
   return {
     tasks: Object.values(tasks).flat().map((t) => ({
       id: String(t.id), name: t.name, assignedTo: t.assignedTo, status: t.status,
       execution: String(t.execution), consumed: t.consumed, left: t.left
     })),
-    executionIds: idsOf(execs).map(String)
+    // 注意：story-view 的 executions 是「所有执行」，不能当关联用；这里取需求所属产品关联的执行
+    executionIds: await getProductExecutionIds(d && d.story && d.story.product, CH)
   };
+}
+
+/** 产品关联的执行 ID（拿不到返回 null，界面就不做限制提示） */
+async function getProductExecutionIds(productId, CH) {
+  if (!productId) return null;
+  try {
+    const resp = await fetch(`${base()}/zentao/product-ajaxGetExecutions-${productId}.html`, { headers: { Cookie: CH, 'X-Requested-With': 'XMLHttpRequest' } });
+    const html = await resp.text();
+    if (!/<select/i.test(html)) return null;
+    return [...html.matchAll(/value='(\d+)'/g)].map((m) => m[1]).filter((id) => id !== '0');
+  } catch { return null; }
 }
 
 /**

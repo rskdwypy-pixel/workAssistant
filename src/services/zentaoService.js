@@ -2195,6 +2195,19 @@ async function getExecutionProductId(executionId) {
   }
 }
 
+/** 项目可提 Bug 的产品列表（无迭代项目没有执行，产品要从项目的建 Bug 表单里取） */
+async function getProjectProducts(projectId) {
+  try {
+    const cookies = await getZentaoCookies();
+    const inner = await getZentaoJson(`bug-create-0-0-projectID=${projectId}.json`, cookiesToString(cookies));
+    const products = (inner && inner.products) || {};
+    const list = Object.keys(products).filter(Boolean).map((id) => ({ id: String(id), name: products[id] }));
+    return { success: true, products: list };
+  } catch (err) {
+    return { success: false, reason: err.message, products: [] };
+  }
+}
+
 /** 组装创建 Bug 的表单（与浏览器注入脚本保持完全一致） */
 function buildBugForm(bugData, productId, executionId, projectId) {
   const fd = new FormData();
@@ -2295,16 +2308,24 @@ async function createBug(bugData) {
     const executionId = bugData.executionId || '';
     const projectId = bugData.projectId || '';
     let productId = bugData.productId;
-    if (!productId) {
+    if (!productId && executionId) {
       const p = await getExecutionProductId(executionId);
       productId = p.productId;
+    }
+    // 无迭代项目没有执行：只有项目下恰好一个产品时才能自动确定，多个产品需要调用方指定
+    if (!productId && !executionId && projectId) {
+      const { products } = await getProjectProducts(projectId);
+      if (products.length === 1) productId = products[0].id;
+      else if (products.length > 1) return { success: false, message: '该项目关联多个产品，请选择所属产品' };
     }
     if (!productId) return { success: false, message: '缺少 productId' };
 
     const isKanban = bugData.regionId && bugData.laneId && bugData.columnId;
     const endpoint = isKanban
       ? `${base}/zentao/bug-create-${productId}-0-regionID=${bugData.regionId},laneID=${bugData.laneId},columnID=${bugData.columnId},executionID=${executionId}.html?onlybody=yes`
-      : `${base}/zentao/bug-create-${productId}-0-executionID=${executionId}.html`;
+      : executionId
+        ? `${base}/zentao/bug-create-${productId}-0-executionID=${executionId}.html`
+        : `${base}/zentao/bug-create-${productId}-0-projectID=${projectId}.html`;
 
     console.log('[ZentaoService] 创建 Bug:', bugData.title, isKanban ? '(看板)' : '(普通)', endpoint);
 
@@ -3281,6 +3302,7 @@ export {
   editTask,
   getExecutionProductId,
   createBug,
+  getProjectProducts,
   activateBug,
   resolveBug,
   closeBug,
