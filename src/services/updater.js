@@ -5,7 +5,7 @@
  *   versions/<版本>/  current.txt  previous.txt  extension/  bin/  data/
  *
  * 流程：
- *   1. 检查：启动 1 分钟后、之后每 6 小时，看 GitHub Releases 的最新版本号
+ *   1. 检查：启动 1 分钟后、之后每 1 小时，看 GitHub Releases 的最新版本号
  *   2. 下载：新版本的安装包 + .sha256 + .sig，校验哈希和 Ed25519 签名（公钥见 releaseKey.js），
  *      解压到 versions/<新版本>/；新版本需要更高的 Node 时不装，提示重新运行安装命令
  *   3. 安装：等后台空闲（3 分钟没有请求，且不在早晚提醒 / 日报 / 周报的时间段），
@@ -31,7 +31,7 @@ const GITHUB_RELEASES = 'https://github.com/rskdwypy-pixel/workAssistant/release
 const ROOT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 const CHECK_DELAY_MS = 60 * 1000;
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const CHECK_INTERVAL_MS = 1 * 60 * 60 * 1000;
 const APPLY_RETRY_MS = 5 * 60 * 1000;
 const IDLE_MS = 3 * 60 * 1000;
 const HEALTHY_AFTER_MS = 30 * 1000;
