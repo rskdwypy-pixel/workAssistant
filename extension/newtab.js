@@ -9065,7 +9065,19 @@ const BugManager = {
         fetch(`${API_BASE_URL}/api/executions`)
       ]);
       const projectsResult = await projectsResp.json();
-      const executionsResult = await executionsResp.json();
+      let executionsResult = await executionsResp.json();   // 本机缓存（带收藏标记）
+
+      // 执行以禅道按当前账号权限实时返回的为准，缓存只用来保留收藏排序；禅道连不上就用缓存
+      try {
+        const liveResult = await (await fetch(`${API_BASE_URL}/api/zentao/executions`)).json();
+        if (liveResult.success && Array.isArray(liveResult.data) && liveResult.data.length) {
+          const favs = new Set(((executionsResult && executionsResult.data) || []).filter(e => e.isFavorite).map(e => String(e.id)));
+          const rank = (e) => (favs.has(String(e.id)) ? 0 : (e.status === 'closed' ? 2 : 1));
+          executionsResult = { success: true, data: liveResult.data.slice().sort((a, b) => rank(a) - rank(b)) };
+        }
+      } catch (e) {
+        console.warn('[BugManager] 实时获取执行列表失败，使用本机缓存:', e.message);
+      }
 
       // 收集所有项目
       const projectsMap = new Map(); // 使用 Map 去重

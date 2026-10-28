@@ -20,7 +20,8 @@ const TaskLinkApi = {
   storyTasks(id) { return this.request(`/api/stories/${encodeURIComponent(id)}/tasks`); },
   storySuggest(id) { return this.post(`/api/stories/${encodeURIComponent(id)}/tasks/suggest`, {}); },
   storySplit(id, body) { return this.post(`/api/stories/${encodeURIComponent(id)}/tasks`, body); },
-  executions() { return this.request('/api/executions'); }
+  executions() { return this.request('/api/executions'); },                  // 本机缓存（带收藏 / 默认标记）
+  liveExecutions() { return this.request('/api/zentao/executions'); }        // 禅道按当前账号权限实时返回的全部执行
 };
 
 const tlEsc = (s) => (typeof escapeHtml === 'function' ? escapeHtml(String(s ?? '')) : String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
@@ -84,21 +85,34 @@ const TaskLinkDialog = {
   },
 
   async loadCommon() {
+    // 执行列表以禅道实时返回的为准（你有权限的全部执行）；本机缓存只用来带上收藏 / 默认标记，禅道连不上时才整个退回缓存
+    let cached = [], live = [];
     try {
       const r = await TaskLinkApi.executions();
-      this.executions = (r && r.success && Array.isArray(r.data)) ? r.data : [];
-    } catch { this.executions = []; }
+      cached = (r && r.success && Array.isArray(r.data)) ? r.data : [];
+    } catch { cached = []; }
+    try {
+      const r = await TaskLinkApi.liveExecutions();
+      live = (r && r.success && Array.isArray(r.data)) ? r.data : [];
+    } catch { live = []; }
+    if (live.length) {
+      const flags = new Map(cached.map(e => [String(e.id), e]));
+      const rank = (e) => (e.isFavorite ? 0 : (e.status === 'closed' ? 2 : 1));   // 收藏 > 进行中等 > 已关闭
+      this.executions = live.map(e => ({ ...e, isFavorite: !!(flags.get(String(e.id)) || {}).isFavorite, isDefault: !!(flags.get(String(e.id)) || {}).isDefault }))
+        .sort((a, b) => rank(a) - rank(b));
+    } else {
+      this.executions = cached;
+    }
     try { this.users = (typeof ZentaoBrowserClient !== 'undefined' && await ZentaoBrowserClient.getUsers()) || {}; } catch { this.users = {}; }
     try { this.me = (typeof ConfigStore !== 'undefined' && ConfigStore.flat().zentaoUsername) || ''; } catch { this.me = ''; }
   },
 
   /** @param {string[]} [linked] 需求所属产品关联的执行：排在最前并标注，避免把任务建到别的项目里 */
-  execOptions(selected, linked, tag = '需求所属产品', extra = null) {
-    if (!this.executions.length && !extra) return '<option value="">（还没有同步执行，请先在任务页同步）</option>';
+  execOptions(selected, linked, tag = '需求所属产品') {
+    if (!this.executions.length) return '<option value="">（还没有同步执行，请先在任务页同步）</option>';
     const isLinked = (e) => !!(linked && linked.includes(String(e.id)));
     const ordered = linked && linked.length ? [...this.executions.filter(isLinked), ...this.executions.filter(e => !isLinked(e))] : this.executions;
-    // extra：Bug 自己所在、但不在本地执行列表里的执行（例如项目型看板），也要能选
-    const head = (extra ? `<option value="${tlEsc(extra.id)}"${String(extra.id) === String(selected) ? ' selected' : ''}>🔗 ${tlEsc(extra.label)}</option>` : '')
+    const head = ''
       + (selected === '' ? '<option value="" selected>（请选择执行）</option>' : '');
     return head + ordered.map(e => `<option value="${tlEsc(e.id)}"${String(e.id) === String(selected) && selected !== '' ? ' selected' : ''}>${isLinked(e) ? '🔗 ' : ''}${e.isFavorite || e.favorite ? '★ ' : ''}${tlEsc((e.projectName ? e.projectName + ' / ' : '') + (e.name || '执行 ' + e.id))}${isLinked(e) ? `（${tag}）` : ''}</option>`).join('');
   },
@@ -135,18 +149,17 @@ const TaskLinkDialog = {
     const info = (link && link.success && link.data) || {};
     const known = (id) => this.executions.some(e => String(e.id) === String(id));
     const byProject = info.projectId ? this.executions.filter(e => String(e.projectId) === String(info.projectId)).map(e => String(e.id)) : [];
-    const ownExec = info.executionId || '';
+    const ownExec = info.executionId && known(info.executionId) ? info.executionId : '';   // 不在你有权限的执行里（如看板型项目的隐藏执行）就不用
     const candidates = [...new Set([...(ownExec ? [ownExec] : []), ...byProject, ...(Array.isArray(info.executionIds) ? info.executionIds : [])])];
     const linked = candidates.length ? candidates : null;
     const execSel = ownExec || byProject[0] || (Array.isArray(info.executionIds) ? info.executionIds.find(known) : '') || '';
-    const extra = ownExec && !known(ownExec) ? { id: ownExec, label: `执行 #${ownExec}（Bug 所在，不在本地执行列表）` } : null;
     this.ctx.linkedExecs = linked;
     const steps = tlStripHtml(bug.steps);
     const desc = [steps, `来源：Bug #${bug.zentaoId}`].filter(Boolean).join('\n\n');
     const acct = (Array.isArray(bug.assignedTo) ? bug.assignedTo[0] : String(bug.assignedTo || '').split(/[\s,]+/)[0]) || '';
     this.q('[data-tl-body]').innerHTML = `
       <div class="tl-form">
-        <label>创建到执行<select data-f="executionId">${this.execOptions(execSel, linked, 'Bug 所在', extra)}</select></label>
+        <label>创建到执行<select data-f="executionId">${this.execOptions(execSel, linked, 'Bug 所在')}</select></label>
         <label>任务标题<input type="text" data-f="name" maxlength="255" value="${tlEsc(`【Bug#${bug.zentaoId}】${bug.title || ''}`)}"></label>
         <div class="tl-row">
           <label>类型<select data-f="type">${this.typeOptions('devel')}</select></label>
