@@ -93,11 +93,14 @@ const TaskLinkDialog = {
   },
 
   /** @param {string[]} [linked] 需求所属产品关联的执行：排在最前并标注，避免把任务建到别的项目里 */
-  execOptions(selected, linked, tag = '需求所属产品') {
-    if (!this.executions.length) return '<option value="">（还没有同步执行，请先在任务页同步）</option>';
+  execOptions(selected, linked, tag = '需求所属产品', extra = null) {
+    if (!this.executions.length && !extra) return '<option value="">（还没有同步执行，请先在任务页同步）</option>';
     const isLinked = (e) => !!(linked && linked.includes(String(e.id)));
     const ordered = linked && linked.length ? [...this.executions.filter(isLinked), ...this.executions.filter(e => !isLinked(e))] : this.executions;
-    return ordered.map(e => `<option value="${tlEsc(e.id)}"${String(e.id) === String(selected) ? ' selected' : ''}>${isLinked(e) ? '🔗 ' : ''}${e.isFavorite || e.favorite ? '★ ' : ''}${tlEsc((e.projectName ? e.projectName + ' / ' : '') + (e.name || '执行 ' + e.id))}${isLinked(e) ? `（${tag}）` : ''}</option>`).join('');
+    // extra：Bug 自己所在、但不在本地执行列表里的执行（例如项目型看板），也要能选
+    const head = (extra ? `<option value="${tlEsc(extra.id)}"${String(extra.id) === String(selected) ? ' selected' : ''}>🔗 ${tlEsc(extra.label)}</option>` : '')
+      + (selected === '' ? '<option value="" selected>（请选择执行）</option>' : '');
+    return head + ordered.map(e => `<option value="${tlEsc(e.id)}"${String(e.id) === String(selected) && selected !== '' ? ' selected' : ''}>${isLinked(e) ? '🔗 ' : ''}${e.isFavorite || e.favorite ? '★ ' : ''}${tlEsc((e.projectName ? e.projectName + ' / ' : '') + (e.name || '执行 ' + e.id))}${isLinked(e) ? `（${tag}）` : ''}</option>`).join('');
   },
   defaultExec() {
     const d = this.executions.find(e => e.isDefault) || this.executions.find(e => e.isFavorite || e.favorite) || this.executions[0];
@@ -128,19 +131,22 @@ const TaskLinkDialog = {
       this.q('[data-tl-foot]').innerHTML = '<span class="af-spacer"></span><button type="button" class="btn-secondary" data-tl="close">关闭</button>';
       return;
     }
-    // 默认：Bug 自己所在的执行 > Bug 所属产品关联的执行 > 全局默认；避免任务建到别的项目
+    // 默认：Bug 自己所在的执行 > Bug 所在项目下的执行 > Bug 所属产品关联的执行；都没有就让用户自己选，不退回全局默认
     const info = (link && link.success && link.data) || {};
     const known = (id) => this.executions.some(e => String(e.id) === String(id));
-    const linked = Array.isArray(info.executionIds) ? info.executionIds : null;
-    const ownExec = info.executionId && known(info.executionId) ? info.executionId : '';
-    const execSel = ownExec || (linked || []).find(known) || this.defaultExec();
+    const byProject = info.projectId ? this.executions.filter(e => String(e.projectId) === String(info.projectId)).map(e => String(e.id)) : [];
+    const ownExec = info.executionId || '';
+    const candidates = [...new Set([...(ownExec ? [ownExec] : []), ...byProject, ...(Array.isArray(info.executionIds) ? info.executionIds : [])])];
+    const linked = candidates.length ? candidates : null;
+    const execSel = ownExec || byProject[0] || (Array.isArray(info.executionIds) ? info.executionIds.find(known) : '') || '';
+    const extra = ownExec && !known(ownExec) ? { id: ownExec, label: `执行 #${ownExec}（Bug 所在，不在本地执行列表）` } : null;
     this.ctx.linkedExecs = linked;
     const steps = tlStripHtml(bug.steps);
     const desc = [steps, `来源：Bug #${bug.zentaoId}`].filter(Boolean).join('\n\n');
     const acct = (Array.isArray(bug.assignedTo) ? bug.assignedTo[0] : String(bug.assignedTo || '').split(/[\s,]+/)[0]) || '';
     this.q('[data-tl-body]').innerHTML = `
       <div class="tl-form">
-        <label>创建到执行<select data-f="executionId">${this.execOptions(execSel, linked && ownExec ? [ownExec, ...linked.filter(x => x !== ownExec)] : (linked || (ownExec ? [ownExec] : null)))}</select></label>
+        <label>创建到执行<select data-f="executionId">${this.execOptions(execSel, linked, 'Bug 所在', extra)}</select></label>
         <label>任务标题<input type="text" data-f="name" maxlength="255" value="${tlEsc(`【Bug#${bug.zentaoId}】${bug.title || ''}`)}"></label>
         <div class="tl-row">
           <label>类型<select data-f="type">${this.typeOptions('devel')}</select></label>

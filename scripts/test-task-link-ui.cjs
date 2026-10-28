@@ -28,7 +28,7 @@ function setup(state) {
     const body = init.body ? JSON.parse(init.body) : null;
     state.reqs.push({ u, method, body });
     const reply = (b) => ({ ok: true, status: 200, json: async () => b });
-    if (u === '/api/executions') return reply({ success: true, data: [{ id: '61', name: '真机拨测看板', isFavorite: true }, { id: '180', name: '工作日志', isDefault: true }] });
+    if (u === '/api/executions') return reply({ success: true, data: [{ id: '61', name: '真机拨测看板', projectId: '39', isFavorite: true }, { id: '180', name: '工作日志', isDefault: true }] });
     if (/\/api\/bugs\/\d+\/task-link$/.test(u)) return reply({ success: true, data: state.bugLink || { exists: true, toTask: '' } });
     if (/\/api\/bugs\/\d+\/to-task$/.test(u)) return reply(state.bugResult || { success: true, taskId: '900', linked: true, message: '任务已创建（#900）' });
     if (/\/api\/stories\/\d+\/tasks$/.test(u) && method === 'GET') return reply({ success: true, data: { tasks: state.existing || [], executionIds: state.linkedExecs || [] } });
@@ -45,13 +45,13 @@ const $$ = (win, sel) => [...win.document.querySelectorAll(sel)];
 (async () => {
   try {
     // ---- Bug 转任务 ----
-    let st = {}, win = setup(st);
+    let st = { bugLink: { exists: true, toTask: '', executionId: '180', executionIds: [] } }, win = setup(st);
     await win.__TL.openForBug({ zentaoId: '88', title: '登录超时', steps: '<p>步骤一</p><p>步骤二</p>', severity: 2, assignedTo: 'lijc' });
     await tick(20);
     check('Bug：标题带【Bug#编号】前缀', $(win, '[data-f="name"]').value === '【Bug#88】登录超时');
     check('Bug：严重程度 2 → 优先级 2', $(win, '[data-f="pri"]').value === '2');
     check('Bug：描述 = 去标签的步骤 + 来源编号', $(win, '[data-f="desc"]').value === '步骤一\n步骤二\n\n来源：Bug #88' || /步骤一\n步骤二/.test($(win, '[data-f="desc"]').value) && /来源：Bug #88/.test($(win, '[data-f="desc"]').value), JSON.stringify($(win, '[data-f="desc"]').value));
-    check('Bug：默认执行取"默认执行"，指派默认自己', $(win, '[data-f="executionId"]').value === '180' && $(win, '[data-f="assignedTo"]').value === 'lijc');
+    check('Bug：默认执行取 Bug 自己所在的执行，指派默认自己', $(win, '[data-f="executionId"]').value === '180' && $(win, '[data-f="assignedTo"]').value === 'lijc');
     const subBtn = $(win, '[data-tl="submit"]');
     subBtn.click();
     check('Bug：提交过程中按钮置灰、文案变"创建中…"，再点不会重复提交', subBtn.disabled && subBtn.textContent === '创建中…' && (subBtn.click(), true));
@@ -71,13 +71,24 @@ const $$ = (win, sel) => [...win.document.querySelectorAll(sel)];
     st = { bugLink: { exists: true, toTask: '', executionId: '180', executionIds: ['61'] } }; win = setup(st);
     await win.__TL.openForBug({ zentaoId: '92', title: 'Bug 自己所在执行' }); await tick(20);
     check('Bug：Bug 自己所在的执行优先', $(win, '[data-f="executionId"]').value === '180');
+    st = { bugLink: { exists: true, toTask: '', executionId: '47', executionIds: ['61'] } }; win = setup(st);
+    await win.__TL.openForBug({ zentaoId: '94', title: 'Bug 的执行不在本地列表' }); await tick(20);
+    check('Bug：Bug 所在执行不在本地列表（如 47）→ 仍默认选它，并能在下拉里看到', $(win, '[data-f="executionId"]').value === '47' && /#47/.test($(win, '[data-f="executionId"]').selectedOptions[0].textContent));
+    st = { bugLink: { exists: true, toTask: '', executionId: '', projectId: '39', executionIds: [] } }; win = setup(st);
+    await win.__TL.openForBug({ zentaoId: '96', title: '没有执行但有项目' }); await tick(20);
+    check('Bug：没有执行但有项目 → 默认选该项目下的执行(61)', $(win, '[data-f="executionId"]').value === '61');
+    st = { bugLink: { exists: true, toTask: '', executionId: '', projectId: '999', executionIds: [] } };
+    win = setup(st); win.fetch = win.fetch; await win.__TL.openForBug({ zentaoId: '95', title: '只有项目' }); await tick(20);
+    check('Bug：没有执行也没有项目下的执行、产品也无候选 → 不退回全局默认，要用户自己选', $(win, '[data-f="executionId"]').value === '' && /请选择执行/.test($(win, '[data-f="executionId"]').selectedOptions[0].textContent));
+    $(win, '[data-tl="submit"]').click(); await tick(20);
+    check('Bug：没选执行就提交 → 提示请先选择执行，不发请求', /请先选择执行/.test($(win, '[data-tl-msg]').textContent) && !st.reqs.some(r => r.method === 'POST'));
     st = { bugLink: { exists: true, toTask: '', executionId: '', executionIds: ['61'] } }; win = setup(st);
     await win.__TL.openForBug({ zentaoId: '93', title: 'x' }); await tick(20);
     $(win, '[data-f="executionId"]').value = '180'; let asked2 = 0; win.Confirm = { show: async () => { asked2++; return false; } };
     $(win, '[data-tl="submit"]').click(); await tick(20);
     check('Bug：选了产品之外的执行 → 提交前确认，取消则不发请求', asked2 === 1 && !st.reqs.some(r => r.method === 'POST'));
 
-    st = { bugResult: { success: false, message: '该 Bug 已转为任务 #5', code: 'ALREADY_LINKED' } }; win = setup(st);
+    st = { bugLink: { exists: true, toTask: '', executionId: '180', executionIds: [] }, bugResult: { success: false, message: '该 Bug 已转为任务 #5', code: 'ALREADY_LINKED' } }; win = setup(st);
     await win.__TL.openForBug({ zentaoId: '90', title: 't' }); await tick(20);
     $(win, '[data-tl="submit"]').click(); await tick(20);
     check('Bug：后端拒绝时弹窗保持打开并显示原因', !win.__TL.el.hidden && /已转为任务 #5/.test($(win, '[data-tl-msg]').textContent));

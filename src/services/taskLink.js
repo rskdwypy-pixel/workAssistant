@@ -82,6 +82,7 @@ export async function getBugLink(bugId, CH) {
   return {
     exists: !!b.id, toTask: toTask === '0' ? '' : toTask, status: b.status || '', title: b.title || '',
     executionId: exec === '0' ? '' : exec,                                   // Bug 自己所在的执行
+    projectId: String(b.project || '0') === '0' ? '' : String(b.project),    // Bug 所在的项目（没有执行时用来找项目下的执行）
     executionIds: await getProductExecutionIds(b.product, CH)                // Bug 所属产品关联的执行
   };
 }
