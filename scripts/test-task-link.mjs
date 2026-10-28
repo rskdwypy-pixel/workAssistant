@@ -28,6 +28,7 @@ globalThis.fetch = async (input, init = {}) => {
   if ((m = url.match(/bug-view-(\d+)\.json/))) return wrap({ bug: zt.bugs[m[1]] || {} });
   if ((m = url.match(/task-view-(\d+)\.json/))) { const t = zt.tasks.find(x => x.id === m[1]); return wrap({ task: t ? { id: t.id, story: zt.noLink ? '0' : t.story, fromBug: zt.noLink ? '0' : t.fromBug } : {} }); }
   if ((m = url.match(/story-view-(\d+)\.json/))) return wrap({ story: { id: m[1], title: '需求标题', product: '20', spec: '<p>支持正则匹配</p>', verify: '<p>验收点</p>' }, executions: { 8: '/需求', 61: '/真机拨测看板', 99: '/无关执行' }, tasks: { 61: zt.tasks.map(t => ({ id: t.id, name: t.name, assignedTo: 'lijc', status: 'wait', execution: '61', consumed: '0', left: '1' })) } });
+  if ((m = url.match(/execution-story-(\d+)\.json/))) return wrap({ title: '研发需求列表', stories: m[1] === '61' ? { 120: { id: '120' }, 121: { id: '121' } } : {} });
   if (url.includes('product-ajaxGetExecutions-20')) return new Response("<select name='execution'><option value='' title=''></option><option value='0' selected='selected' title=''></option><option value='61' title='真机拨测项目/真机拨测看板'></option></select>");
   if (url.includes('task-ajaxGetTasks')) return new Response(zt.tasks.map(t => `<tr data-id='t${t.id}' data-status='wait' data-assignedTo='lijc'><td><a href='task-view-${t.id}.json'>${t.name}</a></td></tr>`).join(''));
   if ((m = url.match(/task-create-(\d+)-(.*)\.html$/)) && method === 'POST') {
@@ -130,7 +131,7 @@ try {
   const s1 = await call('POST', '/stories/120/tasks', { executionId: '61', tasks: [{ name: '设计', type: 'design' }, { name: '开发' }, { name: '' }] });
   check('接口：需求拆任务逐个创建，空标题那条失败不影响前面', s1.success && s1.data.created === 2 && s1.data.failed === 1 && s1.data.results[2].code === 'INVALID', JSON.stringify(s1.data && s1.data.results.map(r => r.success)));
   const lst = await call('GET', '/stories/120/tasks');
-  check('接口：需求下任务列表 + 产品关联的执行（不是需求详情里的全部执行）', lst.data.tasks.length === 2 && JSON.stringify(lst.data.executionIds) === '["61"]', JSON.stringify(lst.data.executionIds));
+  check('接口：需求下任务列表 + 产品关联的执行（不是需求详情里的全部执行）', lst.data.tasks.length === 2 && JSON.stringify(lst.data.executionIds) === '["61"]' && lst.data.exact === true, JSON.stringify(lst.data));
   const d1 = await call('POST', '/stories/120/tasks', { executionId: '61', tasks: [{ name: '同名' }, { name: '同名' }] });
   check('接口：同一次标题重复 → 400，什么都没建', d1.status === 400 && zt.tasks.length === 2);
   check('接口：空列表 / 超过 20 条 → 400', (await call('POST', '/stories/120/tasks', { executionId: '61', tasks: [] })).status === 400 && (await call('POST', '/stories/120/tasks', { executionId: '61', tasks: Array.from({ length: 21 }, (_, i) => ({ name: 't' + i })) })).status === 400);

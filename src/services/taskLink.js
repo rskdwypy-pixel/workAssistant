@@ -98,9 +98,29 @@ export async function getStoryTasks(storyId, CH) {
       id: String(t.id), name: t.name, assignedTo: t.assignedTo, status: t.status,
       execution: String(t.execution), consumed: t.consumed, left: t.left
     })),
-    // 注意：story-view 的 executions 是「所有执行」，不能当关联用；这里取需求所属产品关联的执行
-    executionIds: await getProductExecutionIds(d && d.story && d.story.product, CH)
+    ...(await locateStoryExecutions(storyId, d && d.story && d.story.product, CH))
   };
+}
+
+/**
+ * 需求挂在哪些执行里。story-view 的 executions 是「所有执行」，不能用；
+ * 做法：取需求所属产品关联的候选执行，逐个查执行的需求列表里有没有这个需求。
+ * 一个都没查到（比如需求还没挂到任何执行）就退回候选本身，exact=false。
+ */
+async function locateStoryExecutions(storyId, productId, CH) {
+  const candidates = await getProductExecutionIds(productId, CH);
+  if (!candidates) return { executionIds: null, exact: false };
+  const hits = [];
+  await Promise.all(candidates.slice(0, 30).map(async (id) => {
+    try {
+      const e = await getZentaoJson(`execution-story-${id}.json`, CH);
+      const st = (e && e.stories) || {};
+      const ids = Array.isArray(st) ? st.map((x) => String(x.id)) : Object.keys(st);
+      if (ids.includes(String(storyId))) hits.push(id);
+    } catch { /* 这个执行查不了就当没有 */ }
+  }));
+  const ordered = candidates.filter((id) => hits.includes(id));
+  return ordered.length ? { executionIds: ordered, exact: true } : { executionIds: candidates, exact: false };
 }
 
 /** 产品关联的执行 ID（拿不到返回 null，界面就不做限制提示） */

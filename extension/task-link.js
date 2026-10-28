@@ -93,11 +93,11 @@ const TaskLinkDialog = {
   },
 
   /** @param {string[]} [linked] 需求所属产品关联的执行：排在最前并标注，避免把任务建到别的项目里 */
-  execOptions(selected, linked) {
+  execOptions(selected, linked, tag = '需求所属产品') {
     if (!this.executions.length) return '<option value="">（还没有同步执行，请先在任务页同步）</option>';
     const isLinked = (e) => !!(linked && linked.includes(String(e.id)));
     const ordered = linked && linked.length ? [...this.executions.filter(isLinked), ...this.executions.filter(e => !isLinked(e))] : this.executions;
-    return ordered.map(e => `<option value="${tlEsc(e.id)}"${String(e.id) === String(selected) ? ' selected' : ''}>${isLinked(e) ? '🔗 ' : ''}${e.isFavorite || e.favorite ? '★ ' : ''}${tlEsc((e.projectName ? e.projectName + ' / ' : '') + (e.name || '执行 ' + e.id))}${isLinked(e) ? '（需求所属产品）' : ''}</option>`).join('');
+    return ordered.map(e => `<option value="${tlEsc(e.id)}"${String(e.id) === String(selected) ? ' selected' : ''}>${isLinked(e) ? '🔗 ' : ''}${e.isFavorite || e.favorite ? '★ ' : ''}${tlEsc((e.projectName ? e.projectName + ' / ' : '') + (e.name || '执行 ' + e.id))}${isLinked(e) ? `（${tag}）` : ''}</option>`).join('');
   },
   defaultExec() {
     const d = this.executions.find(e => e.isDefault) || this.executions.find(e => e.isFavorite || e.favorite) || this.executions[0];
@@ -176,6 +176,7 @@ const TaskLinkDialog = {
     const [ex] = await Promise.all([TaskLinkApi.storyTasks(story.id).catch(() => null), this.loadCommon()]);
     this.ctx.existing = (ex && ex.success && ex.data && Array.isArray(ex.data.tasks)) ? ex.data.tasks : [];
     this.ctx.linkedExecs = (ex && ex.success && ex.data && Array.isArray(ex.data.executionIds)) ? ex.data.executionIds : null;   // null：没拿到，不提示
+    this.ctx.linkedExact = !!(ex && ex.success && ex.data && ex.data.exact);
     // 默认选需求所属产品关联的执行（任务必须建在需求所属的执行里）；都没关联才退回全局默认
     const linkedFirst = (this.ctx.linkedExecs || []).find(id => this.executions.some(e => String(e.id) === String(id)));
     this.ctx.executionId = linkedFirst || this.defaultExec();
@@ -200,7 +201,7 @@ const TaskLinkDialog = {
     this.q('[data-tl-body]').innerHTML = `
       <div class="tl-form">
         ${existing}
-        <label>创建到执行<select data-f="executionId">${this.execOptions(c.executionId, c.linkedExecs)}</select></label>
+        <label>创建到执行<select data-f="executionId">${this.execOptions(c.executionId, c.linkedExecs, c.linkedExact ? '需求所在执行' : '需求所属产品')}</select></label>
         ${this.linkWarn()}
         <div class="tl-ai"><button type="button" class="btn-secondary" data-tl="suggest">✨ AI 拆分建议</button><span class="tl-muted" data-tl-ai-msg>${tlEsc(c.aiMsg || '根据需求内容给出拆分，填进下面的表格，你可以随意改')}</span></div>
         <div class="tl-grid-head"><span>标题</span><span>类型</span><span>指派给</span><span>预计</span><span>截止</span><span></span></div>
@@ -218,7 +219,7 @@ const TaskLinkDialog = {
     const c = this.ctx;
     if (!c.linkedExecs || !c.executionId) return '<p class="tl-muted">需求要先在禅道里关联到这个执行（激活状态），任务才会挂在需求下。</p>';
     return c.linkedExecs.includes(String(c.executionId))
-      ? '<p class="tl-muted">✓ 这是需求所属产品关联的执行。</p>'
+      ? `<p class="tl-muted">✓ ${c.linkedExact ? '需求已挂在这个执行里。' : '这是需求所属产品关联的执行。'}</p>`
       : '<p class="tl-warn">所选执行不属于这个需求所在的产品（可能是另一个项目）。请换一个带「🔗」的执行。</p>';
   },
 
