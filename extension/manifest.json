@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "禅道助手",
-  "version": "1.13.4",
+  "version": "1.13.5",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqqCcWvQyyur+8SckE+7zhLZYtmLx73fzhVsgayvUYdkhspo5W/TTsC3rgyzg30SuEyS3wrsKbqXJTZi31P5UG9/NI5YJVk0RKMlRvogNQOs6tPFTiZWp0c/6J7k4ZSMRwPZ0mEMUUCBCKSlRhszbrGCKhCC0LzvHAasJqlBkNUFaloZRAG64j4IzqE/TsS65l3OO5ElIe3uPkOXS2UwlTtTampH72AT8vWQeMZJ+vBPQ5PaEmT6Is3f7KEDqzdWjZR4+MKnmFa+TxF5XJOoLUqEDxDJMK8TJTOh3qNR+bTtIsg42TSuzKLt9zZL2JjbyFT9owfGH1lEhp0QMeDn9+wIDAQAB",
   "description": "禅道助手 - 禅道任务、Bug、日报周报的个人工作台",
   "icons": {
