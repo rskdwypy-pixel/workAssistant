@@ -238,6 +238,7 @@
         <button class="tab-btn" data-mode="bug">🐛 Bug</button>
         <button class="tab-btn" data-mode="story">📝 需求</button>
         <button class="tab-btn" data-mode="doc">📁 文档</button>
+        <button class="tab-btn" data-mode="memo">🗒️ 便签</button>
         <button class="tab-btn" data-mode="report">📅 工作日历</button>
         <!-- 右上角：读取账号时显示加载提示；已登录显示头像（点开是用户信息与设置）；未登录显示「登录禅道」和设置图标 -->
         <div class="account-area" id="accountArea">
@@ -261,6 +262,9 @@
 
       <!-- 文档模式（内容由 docs.js 渲染） -->
       <div class="mode-content mode-card" id="docMode"></div>
+
+      <!-- 备忘录模式（内容由 memo.js 渲染） -->
+      <div class="mode-content mode-card" id="memoMode"></div>
 
       <!-- 需求模式（内容由 stories.js 渲染） -->
       <div class="mode-content mode-card" id="storyMode"></div>
@@ -1262,7 +1266,7 @@
           <!-- ========== 关于 ========== -->
           <section class="set-panel" id="p-about" role="tabpanel" aria-label="关于">
             <h4>关于</h4>
-            <p class="set-desc" id="aboutVersionDesc">禅道助手 v1.13.5</p>
+            <p class="set-desc" id="aboutVersionDesc">禅道助手 v1.14.0</p>
 
             <div class="set-row">
               <div class="sr-label">版本</div>
@@ -1389,6 +1393,7 @@
   <!-- 旧的 BugMode 翻转按钮已移除，现在使用 Tab 切换 -->
 
   <script src="newtab.js"></script>
+  <script src="memo.js"></script>
   <script src="settings-ui.js"></script>
 </body>
 

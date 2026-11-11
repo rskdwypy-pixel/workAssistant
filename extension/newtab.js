@@ -7332,6 +7332,8 @@ const TabSwitcher = {
       if (typeof ReportPage !== 'undefined') ReportPage.show();
     } else if (mode === 'doc') {
       if (typeof DocPage !== 'undefined') DocPage.show();
+    } else if (mode === 'memo') {
+      if (typeof MemoPage !== 'undefined') MemoPage.show();
     } else if (mode === 'story') {
       if (typeof StoryPage !== 'undefined') StoryPage.show();
     } else if (mode === 'todo') {

@@ -48,3 +48,6 @@ dist/
 
 # 抓包资料（含内网会话 cookie，切勿提交到公开仓库）
 docs/zentao-*capture*/
+
+# 运行时缓存（禅道文档库/动态等接口缓存）
+data/cache/
