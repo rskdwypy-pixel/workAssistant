@@ -126,16 +126,14 @@ async function createMemo(input = {}) {
     deleted: false,
     syncLibId: String(syncLibId || '')
   };
-  await updateMemos(data => {
-    const memos = [...(data.memos || []), memo];
-    return { ...data, memos };
-  });
-  // 创建后标记 dirty（同步时检查 syncLibId，不依赖全局 syncState.enabled）
-  await updateMemos(d => {
-    const memos = (d.memos || []).map(m => m.id === memo.id ? { ...m, syncDirty: true } : m);
+  // 只有能解析出同步目标库时才标记待同步；纯本地便签不标，避免永远挂着「待同步」角标
+  const data = await updateMemos(d => {
+    const target = resolveLib(memo, d.syncState || {});
+    memo.syncDirty = !!target;
+    const memos = [...(d.memos || []), memo];
     return { ...d, memos };
   });
-  memo.syncDirty = true;
+  memo.syncDirty = !!(data && resolveLib(memo, data.syncState || {}));
   return memo;
 }
 
@@ -167,12 +165,11 @@ async function deleteMemo(id) {
   await updateMemos(data => {
     const memos = (data.memos || []).map(m => {
       if (m.id !== id) return m;
-      const syncEnabled = data.syncState && data.syncState.enabled;
-      if (syncEnabled && m.docId) {
-        // 启用同步且有文档 → 标记删除 + dirty，等 syncUpload 调禅道删除
+      // 有 docId = 禅道上确实有这份文档，删除要同步过去（不依赖全局 enabled，否则会留下孤儿文档）
+      if (m.docId) {
         result = { ...m, deleted: true, syncDirty: true };
       } else {
-        // 未启用同步或无文档 → 直接软删
+        // 从未同步过 → 直接软删
         result = { ...m, deleted: true };
       }
       return result;
@@ -196,6 +193,48 @@ async function togglePin(id) {
 // ==================== 加密同步 ====================
 
 /**
+ * 解析一条便签的目标文档库：便签自己的 syncLibId > 全局默认库 defaultLibId > 旧版 enable 写入的 libId
+ */
+function resolveLib(memo, syncState = {}) {
+  return String((memo && memo.syncLibId) || syncState.defaultLibId || syncState.libId || '');
+}
+
+
+/**
+ * 上传单条便签到禅道（新建 / 更新 / 删除文档）
+ * @returns {{ok:boolean, docId?:string, deleted?:boolean, error?:string}}
+ */
+async function uploadOne(memo, userId, syncState = {}) {
+  const targetLib = resolveLib(memo, syncState);
+  if (!targetLib) return { ok: false, error: '没有设置同步文档库' };
+
+  if (memo.deleted) {
+    if (memo.docId) {
+      await docService.deleteDoc(memo.docId);
+      return { ok: true, deleted: true };
+    }
+    return { ok: true }; // 没有远端文档，视为删除成功
+  }
+
+  const body = encryptMemo({
+    content: memo.content,
+    tags: memo.tags,
+    pinned: memo.pinned,
+    refs: memo.refs,
+    createdAt: memo.createdAt,
+    updatedAt: memo.updatedAt
+  }, userId);
+
+  if (memo.docId) {
+    await docService.editDoc({ id: memo.docId, title: memo.title, body });
+    return { ok: true, docId: memo.docId };
+  }
+  const r = await docService.createDoc({ lib: targetLib, module: '0', title: memo.title, body, contentType: 'markdown' });
+  if (!r.id) throw new Error('禅道没有返回文档 ID');
+  return { ok: true, docId: r.id };
+}
+
+/**
  * 上行：遍历 syncDirty 的备忘录 → 加密 → 逐条创建/更新禅道文档
  * @returns {{uploaded:number, deleted:number, failed:number, errors:Array}}
  */
@@ -203,9 +242,10 @@ async function syncUpload() {
   const data = await readMemoData();
   const dirty = (data.memos || []).filter(m => m.syncDirty);
   if (dirty.length === 0) return { uploaded: 0, deleted: 0, failed: 0, errors: [] };
-  // 检查是否有 dirty 的便签设置了 syncLibId
-  const hasSyncLib = dirty.some(m => m.syncLibId);
-  if (!hasSyncLib) return { skipped: true, reason: '没有设置同步文档库' };
+  // 目标库解析链：便签自己的 syncLibId > defaultLibId > 旧版 libId；一个都解析不出才跳过
+  if (!dirty.some(m => resolveLib(m, data.syncState || {}))) {
+    return { skipped: true, reason: '没有设置同步文档库' };
+  }
 
   let userId;
   try {
@@ -214,43 +254,19 @@ async function syncUpload() {
     return { skipped: true, reason: err.message };
   }
 
-  const libId = data.syncState.libId;
   const errors = [];
+  const docIds = new Map(); // id → 新分配的 docId
   let uploaded = 0, deletedCount = 0;
 
   for (const memo of dirty) {
     try {
-      // 每条备忘录可以用自己的 syncLibId，没设就用全局的
-      const targetLib = memo.syncLibId || libId;
-      if (!targetLib) {
-        errors.push({ id: memo.id, title: memo.title, error: '没有设置同步文档库' });
-        continue;
-      }
-      if (memo.deleted) {
-        // 删除同步：调禅道删除文档
-        if (memo.docId) {
-          await docService.deleteDoc(memo.docId);
-          deletedCount++;
-        }
+      const r = await uploadOne(memo, userId, data.syncState || {});
+      if (r.ok) {
+        if (r.deleted) deletedCount++;
+        else uploaded++;
+        if (r.docId) docIds.set(memo.id, r.docId);
       } else {
-        // 内容同步：加密 → 上传
-        const body = encryptMemo({
-          content: memo.content,
-          tags: memo.tags,
-          pinned: memo.pinned,
-          refs: memo.refs,
-          createdAt: memo.createdAt,
-          updatedAt: memo.updatedAt
-        }, userId);
-
-        if (memo.docId) {
-          await docService.editDoc({ id: memo.docId, title: memo.title, body });
-        } else {
-          const r = await docService.createDoc({ lib: targetLib, module: '0', title: memo.title, body, contentType: 'markdown' });
-          if (!r.id) throw new Error('禅道没有返回文档 ID');
-          memo.docId = r.id;
-        }
-        uploaded++;
+        errors.push({ id: memo.id, title: memo.title, error: r.error });
       }
     } catch (err) {
       errors.push({ id: memo.id, title: memo.title, error: err.message });
@@ -264,8 +280,62 @@ async function syncUpload() {
       if (errorIds.has(m.id)) return m; // 失败的保留 dirty
       const next = m.syncDirty ? { ...m, syncDirty: false } : m;
       // 上传成功且分配了新 docId → 写回本地
-      const src = dirty.find(dm => dm.id === m.id);
-      if (src && src.docId && !m.docId) next.docId = src.docId;
+      if (docIds.has(m.id) && !m.docId) next.docId = docIds.get(m.id);
+      return next;
+    });
+    return {
+      ...d, memos,
+      syncState: { ...d.syncState, lastSyncAt: new Date().toISOString(), lastSyncResult: errors.length > 0 ? 'partial' : 'ok' }
+    };
+  });
+
+  return { uploaded, deleted: deletedCount, failed: errors.length, errors };
+}
+
+/**
+ * 单条同步：只处理指定的一条便签（卡片上的「同步」按钮）
+ * @returns {{uploaded:number, deleted:number, failed:number, errors:Array}}
+ */
+async function syncOne(id) {
+  const data = await readMemoData();
+  const memo = (data.memos || []).find(m => m.id === id && !m.deleted);
+  if (!memo) {
+    const err = new Error('备忘录不存在');
+    err.code = 'MEMO_NOT_FOUND';
+    throw err;
+  }
+  if (!resolveLib(memo, data.syncState || {})) {
+    return { skipped: true, reason: '没有设置同步文档库' };
+  }
+
+  let userId;
+  try {
+    userId = await getCurrentUserId();
+  } catch (err) {
+    return { skipped: true, reason: err.message };
+  }
+
+  const errors = [];
+  let uploaded = 0, deletedCount = 0, newDocId = null;
+  try {
+    const r = await uploadOne(memo, userId, data.syncState || {});
+    if (r.ok) {
+      if (r.deleted) deletedCount++;
+      else uploaded++;
+      newDocId = r.docId || null;
+    } else {
+      errors.push({ id: memo.id, title: memo.title, error: r.error });
+    }
+  } catch (err) {
+    errors.push({ id: memo.id, title: memo.title, error: err.message });
+  }
+
+  const errorIds = new Set(errors.map(e => e.id));
+  await updateMemos(d => {
+    const memos = (d.memos || []).map(m => {
+      if (m.id !== id || errorIds.has(m.id)) return m;
+      const next = { ...m, syncDirty: false };
+      if (newDocId && !m.docId) next.docId = newDocId;
       return next;
     });
     return {
@@ -283,8 +353,16 @@ async function syncUpload() {
  */
 async function syncDownload() {
   const data = await readMemoData();
-  const hasSyncLib = (data.memos || []).some(m => m.syncLibId);
-  if (!hasSyncLib) return { skipped: true, reason: '没有设置同步文档库' };
+  const syncState = data.syncState || {};
+  // 未配置任何同步目标、也没有待上传内容 → 纯本地用户，不必每次都扫禅道
+  const memoLibs = new Set(
+    (data.memos || []).map(m => String(m.syncLibId || '')).filter(Boolean)
+      .concat([String(syncState.defaultLibId || ''), String(syncState.libId || '')]).filter(Boolean)
+  );
+  const hasDirty = (data.memos || []).some(m => m.syncDirty);
+  if (memoLibs.size === 0 && !hasDirty) {
+    return { skipped: true, reason: '没有设置同步文档库' };
+  }
 
   let userId;
   try {
@@ -296,9 +374,15 @@ async function syncDownload() {
   // 列出所有文档（跨所有库），按 docId 匹配（每条备忘录可以同步到不同库）
   const docs = await docService.listDocs({});
 
+  // 预筛后再拉正文：便签文档只可能在自己配置过的库里，或与便签一样是 markdown 型；
+  // 不加筛选的话禅道里每一篇文档都要 getDoc 一次，文档多时每轮同步要打几百个请求
+  const candidates = docs.filter(d =>
+    memoLibs.has(String(d.lib || '')) || String(d.type || '') === 'markdown'
+  );
+
   // 逐条拉取正文并解密
   const remoteMemos = [];
-  for (const doc of docs) {
+  for (const doc of candidates) {
     try {
       const detail = await docService.getDoc(doc.id);
       if (!detail.raw || !isMemoEncrypted(detail.raw)) continue; // 非备忘录文档跳过
@@ -387,11 +471,14 @@ async function getSyncState() {
 
 async function setSyncState(state) {
   return await updateMemos(d => {
-    const prevEnabled = d.syncState && d.syncState.enabled;
-    const nextSyncState = { ...(d.syncState || { enabled: false }), ...state };
+    const prev = d.syncState || {};
+    const nextSyncState = { ...prev, ...state };
     const memos = d.memos || [];
-    // 启用同步时，把所有 docId 为空且未删除的备忘录标记为 dirty（之前未启用同步时创建的）
-    if (nextSyncState.enabled && !prevEnabled) {
+    // 启用同步或（重新）指定了默认文档库时，把所有还没上传过的备忘录标记为 dirty，
+    // 让之前纯本地的便签在下次上行时自动入库（换机恢复、后配默认库都靠这一步）
+    const enabledTurnedOn = nextSyncState.enabled && !prev.enabled;
+    const libChanged = 'defaultLibId' in state && String(state.defaultLibId || '') !== String(prev.defaultLibId || '');
+    if (enabledTurnedOn || libChanged) {
       const memos2 = memos.map(m => {
         if (!m.deleted && !m.docId) return { ...m, syncDirty: true };
         return m;
@@ -433,7 +520,7 @@ async function setSyncLib(id, libId) {
 
 export {
   listMemos, getMemo, createMemo, updateMemo, deleteMemo, togglePin,
-  syncUpload, syncDownload,
+  syncUpload, syncDownload, syncOne,
   getSyncState, setSyncState, listMemoLibs, setSyncLib,
   getCurrentUserId, invalidateUserId
 };

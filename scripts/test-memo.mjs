@@ -72,7 +72,7 @@ const existing = await listMemos();
 for (const m of existing) {
   try { await deleteMemo(m.id); } catch {}
 }
-await setSyncState({ enabled: false });
+await setSyncState({ enabled: false, defaultLibId: '' });
 
 // 同步状态默认未启用
 const syncState = await getSyncState();
@@ -86,7 +86,21 @@ check('新建：标题正确', m1.title === '测试备忘录 1');
 // 列表
 const list1 = await listMemos();
 check('列表：包含新建的备忘录', list1.some(m => m.id === m1.id));
-check('列表：syncDirty 为 true（创建后标记 dirty）', list1.find(m => m.id === m1.id).syncDirty === true);
+// 未配置任何同步目标 → 纯本地便签，不标 dirty（否则永远挂着「待同步」）
+check('新建：未配同步目标不标 dirty', list1.find(m => m.id === m1.id).syncDirty === false);
+
+// 显式带 syncLibId 创建 → 标 dirty
+const m3 = await createMemo({ title: '同步目标测试', content: 'x', tags: [], syncLibId: '77' });
+check('新建：显式 syncLibId 标 dirty', m3.syncDirty === true);
+await deleteMemo(m3.id);
+
+// 配置默认库后，之前纯本地的便签自动标 dirty（等上行入库）
+await setSyncState({ defaultLibId: '185' });
+const list1b = await listMemos();
+check('同步配置：设默认库后纯本地便签自动标 dirty', list1b.find(m => m.id === m1.id).syncDirty === true);
+check('同步配置：defaultLibId 已保存', (await getSyncState()).defaultLibId === '185');
+// 恢复未配置，继续本地 CRUD 测试
+await setSyncState({ defaultLibId: '' });
 
 // 编辑
 const m1upd = await updateMemo(m1.id, { content: '更新后的内容' });

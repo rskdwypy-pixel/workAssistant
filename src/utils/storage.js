@@ -71,6 +71,9 @@ async function readJSON(filePath) {
 async function writeJSON(filePath, data) {
   const tmpPath = `${filePath}.tmp`;
   try {
+    // 目录不存在时（全新安装 / 直接跑脚本）写入会 ENOENT 静默丢数据，先建目录
+    await ensureDir(join(filePath, '..'));
+
     // 如果文件存在，先备份
     if (existsSync(filePath)) {
       await createBackup(filePath);

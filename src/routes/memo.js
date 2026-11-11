@@ -7,6 +7,7 @@
  *   PUT    /api/memos/:id              编辑 {title, content, tags}
  *   DELETE /api/memos/:id              删除（软删 + 同步时调禅道删除）
  *   POST   /api/memos/:id/pin          置顶 / 取消（切换）
+ *   POST   /api/memos/:id/sync         单条同步（上传这一条 / 同步它的删除）
  *
  *   GET    /api/memos/sync/state       同步配置与状态
  *   GET    /api/memos/sync/libs        可选文档库列表（弹窗用，复用 docService.listLibs）
@@ -104,7 +105,14 @@ router.get('/memos/:id', async (req, res) => {
 router.post('/memos', async (req, res) => {
   try {
     const b = req.body || {};
-    res.json({ success: true, data: await memoService.createMemo({ title: b.title, content: b.content, tags: b.tags }) });
+    res.json({ success: true, data: await memoService.createMemo({ title: b.title, content: b.content, tags: b.tags, syncLibId: b.syncLibId }) });
+  } catch (err) { fail(res, err); }
+});
+
+/** 单条同步（卡片上的「同步」按钮） */
+router.post('/memos/:id/sync', async (req, res) => {
+  try {
+    res.json({ success: true, data: await memoService.syncOne(req.params.id) });
   } catch (err) { fail(res, err); }
 });
 

@@ -2108,6 +2108,22 @@ async function importAllConfig() {
         }
       }
 
+      // 便签默认同步文档库（存后端 data/memo.json 的 syncState，便签上行时用）
+      const memoSyncLibEl = document.getElementById('memoSyncLib');
+      if (memoSyncLibEl) {
+        try {
+          const r = await fetch(`${API_BASE_URL}/api/memos/sync/config`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ defaultLibId: memoSyncLibEl.value || '' })
+          });
+          const j = await r.json();
+          if (!j.success) throw new Error(j.message || '保存失败');
+        } catch (err) {
+          Toast.error('便签同步文档库保存失败：' + err.message);
+        }
+      }
+
       // 提示词与配置同属「设置」，一次保存一起写盘
       try {
         await savePrompts();
@@ -5758,6 +5774,8 @@ function loadSettings() {
   // 加载禅道配置状态（异步回填，完成后会刷新基线）
   loadZentaoConfigStatus();
   if (typeof ReportMembersPicker !== 'undefined') ReportMembersPicker.load();
+  // 加载便签默认同步文档库（异步回填，完成后会刷新基线）
+  loadMemoSyncConfig();
 
   // 交给设置页 UI 层：回到默认分组并记录「已保存」基线
   if (window.settingsUI) window.settingsUI.onOpen();
@@ -5792,6 +5810,50 @@ async function loadZentaoConfigStatus() {
     console.log('[前端] 获取禅道配置状态失败（可能后端未启动）');
   } finally {
     // 异步回填完成后重设基线，避免刚打开设置就被判定为「未保存的修改」
+    if (window.settingsUI) window.settingsUI.refreshBaseline();
+  }
+}
+
+// 加载便签默认同步文档库：当前值来自 /api/memos/sync/config，可选项来自 /api/memos/sync/libs（要登录禅道才有）
+async function loadMemoSyncConfig() {
+  const select = document.getElementById('memoSyncLib');
+  if (!select) return;
+  try {
+    // 先拿当前配置（不依赖禅道在线），再拿可选库列表（要禅道在线）
+    let defaultLibId = '';
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/memos/sync/config`);
+      const j = await r.json();
+      if (j.success && j.data) defaultLibId = String(j.data.defaultLibId || '');
+    } catch {}
+
+    const libsResp = await fetch(`${API_BASE_URL}/api/memos/sync/libs`);
+    const libsJson = await libsResp.json();
+    const libs = (libsJson.success && Array.isArray(libsJson.data)) ? libsJson.data : [];
+
+    select.innerHTML = '';
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = '不启用（便签仅存本机）';
+    select.appendChild(none);
+    libs.forEach(l => {
+      const opt = document.createElement('option');
+      opt.value = String(l.id);
+      opt.textContent = `${l.name}（${l.spaceLabel || l.space || ''}）`;
+      select.appendChild(opt);
+    });
+    select.value = defaultLibId;
+    // 配置里存的库可能已不在可选列表（被删 / 无权限），补一项避免悄悄改配置
+    if (defaultLibId && select.value !== defaultLibId) {
+      const missing = document.createElement('option');
+      missing.value = defaultLibId;
+      missing.textContent = `当前配置的库（ID ${defaultLibId}，列表中不可见）`;
+      select.appendChild(missing);
+      select.value = defaultLibId;
+    }
+  } catch (err) {
+    select.innerHTML = '<option value="">读取失败（后端未启动？）</option>';
+  } finally {
     if (window.settingsUI) window.settingsUI.refreshBaseline();
   }
 }

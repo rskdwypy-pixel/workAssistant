@@ -56,6 +56,12 @@ const MemoApi = {
     if (!j.success) throw new Error(j.message || '设置失败');
     return j.data;
   },
+  async syncOne(id) {
+    const r = await fetch(`${MEMO_API_BASE}/api/memos/${id}/sync`, { method: 'POST' });
+    const j = await r.json();
+    if (!j.success) throw new Error(j.message || '同步失败');
+    return j.data;
+  },
   async syncLibs() {
     const r = await fetch(`${MEMO_API_BASE}/api/memos/sync/libs`);
     const j = await r.json();
@@ -147,6 +153,20 @@ function showModal(html, onMount) {
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) overlay.remove();
   });
+  // Esc 关闭最上层的便签弹窗（不影响别的模块）
+  const onKey = (e) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      overlay.remove();
+      document.removeEventListener('keydown', onKey, true);
+    }
+  };
+  document.addEventListener('keydown', onKey, true);
+  const origRemove = overlay.remove.bind(overlay);
+  overlay.remove = () => {
+    document.removeEventListener('keydown', onKey, true);
+    origRemove();
+  };
   return overlay;
 }
 
@@ -174,6 +194,8 @@ const MemoPage = {
   memos: [],
   keyword: '',
   activeTag: '',
+  libNameMap: {},   // libId → 库名（卡片/预览里显示库名而不是裸 ID）
+  _searchTimer: null,
 
   show() {
     if (!this.container) {
@@ -182,12 +204,34 @@ const MemoPage = {
       this.startAutoSync();
     }
     this.loadList();
+    this.loadLibNames();
     this.syncDownload();
   },
 
   startAutoSync() {
     if (this.autoSyncTimer) return;
-    this.autoSyncTimer = setInterval(() => this.syncDownload(), 5 * 60 * 1000);
+    this.autoSyncTimer = setInterval(() => {
+      // 便签页不可见（切到其他标签页 / 浏览器最小化）时不打禅道，回来时 show() 会再拉一次
+      if (document.hidden || !this.container || !this.container.offsetParent) return;
+      this.syncDownload();
+    }, 5 * 60 * 1000);
+  },
+
+  async loadLibNames() {
+    try {
+      const libs = await MemoApi.syncLibs();
+      const map = {};
+      (libs || []).forEach(l => { map[String(l.id)] = l.name || ''; });
+      this.libNameMap = map;
+      // 库名是异步到的，列表已经画过一轮的话补画一次，别让「同步：185」留在界面上
+      if (this.memos.length) this.renderList();
+    } catch {
+      // 拿不到库名就按原样显示
+    }
+  },
+
+  libNameOf(id) {
+    return this.libNameMap[String(id)] || (id ? `库 ${id}` : '');
   },
 
   async syncDownload() {
@@ -219,15 +263,23 @@ const MemoPage = {
       <div class="memo-header">
         <input type="text" class="memo-search" placeholder="搜索便签..." value="${esc(this.keyword)}">
         <div class="memo-tags-cloud" id="memoTagsCloud"></div>
-        <button class="memo-new-btn">＋ 新建</button>
+        <div class="memo-header-actions">
+          <button class="memo-sync-all-btn" title="与禅道双向同步全部便签">⇅ 同步</button>
+          <button class="memo-new-btn">＋ 新建</button>
+        </div>
       </div>
       <div class="memo-list" id="memoList"></div>
     `;
     this.container.querySelector('.memo-search').addEventListener('input', (e) => {
-      this.keyword = e.target.value;
-      this.loadList();
+      // 防抖：停顿 300ms 才查一次，避免每个按键都打一次后端
+      clearTimeout(this._searchTimer);
+      this._searchTimer = setTimeout(() => {
+        this.keyword = e.target.value;
+        this.loadList();
+      }, 300);
     });
     this.container.querySelector('.memo-new-btn').addEventListener('click', () => this.openEditor());
+    this.container.querySelector('.memo-sync-all-btn').addEventListener('click', () => this.syncAll());
   },
 
   renderList() {
@@ -240,23 +292,10 @@ const MemoPage = {
     list.innerHTML = this.memos.map(m => this.renderCard(m)).join('');
     list.querySelectorAll('.memo-card').forEach(card => {
       const id = card.dataset.id;
-      // 双击 → 预览
-      card.addEventListener('dblclick', (e) => {
+      // 单击卡片 → 预览（按钮区域除外）；不再劫持右键菜单
+      card.addEventListener('click', (e) => {
         if (e.target.closest('.memo-card-actions')) return;
         this.previewMemo(id);
-      });
-      // 右键 → 预览
-      card.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        this.previewMemo(id);
-      });
-      card.querySelector('.memo-sync-single').addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.syncSingle(id);
-      });
-      card.querySelector('.memo-sync-lib').addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.setSyncLib(id);
       });
       card.querySelector('.memo-pin').addEventListener('click', (e) => {
         e.stopPropagation();
@@ -307,7 +346,8 @@ const MemoPage = {
     const dirtyHtml = m.syncDirty ? '<span class="memo-dirty">待同步</span>' : '';
     const createdAt = m.createdAt ? new Date(m.createdAt).toLocaleDateString() : '';
     const updatedAt = m.updatedAt ? new Date(m.updatedAt).toLocaleString() : '';
-    const syncLib = m.syncLibId ? esc(m.syncLibId) : '未设置';
+    // 显示库名而不是裸 ID；没设过同步目标的显示「仅本地」
+    const syncLib = m.syncLibId ? esc(this.libNameOf(m.syncLibId)) : '仅本地';
 
     return `
       <div class="memo-card ${m.pinned ? 'pinned' : ''}" data-id="${m.id}" style="border-left: 3px solid ${color};">
@@ -319,12 +359,10 @@ const MemoPage = {
           <div class="memo-card-meta">
             <span>创建：${esc(createdAt)}</span>
             <span>更新：${esc(updatedAt)}</span>
-            <span>同步：${syncLib}</span>
+            <span class="memo-card-sync">同步：${syncLib}</span>
           </div>
         </div>
         <div class="memo-card-actions">
-          <button class="memo-sync-single" title="立即同步">同步</button>
-          <button class="memo-sync-lib" title="设置同步文档库">设置</button>
           <button class="memo-pin">${m.pinned ? '取消置顶' : '置顶'}</button>
           <button class="memo-edit">编辑</button>
           <button class="memo-delete">删除</button>
@@ -342,12 +380,20 @@ const MemoPage = {
     const tagsHtml = (memo.tags || []).map(t => `<span class="memo-tag">#${esc(t)}</span>`).join('');
     const dateStr = memo.updatedAt ? new Date(memo.updatedAt).toLocaleString() : '';
     const contentHtml = renderMarkdown(memo.content || '');
+    const dirtyHtml = memo.syncDirty ? '<span class="memo-dirty">待同步</span>' : '';
+    const syncLibName = memo.syncLibId ? esc(this.libNameOf(memo.syncLibId)) : '仅本地（未同步到禅道）';
 
     const overlay = showModal(`
-      <h3 class="memo-modal-title">${esc(memo.title)}</h3>
+      <h3 class="memo-modal-title">${esc(memo.title)} ${dirtyHtml}</h3>
       ${tagsHtml ? `<div class="memo-preview-tags">${tagsHtml}</div>` : ''}
       ${dateStr ? `<div class="memo-preview-date">${esc(dateStr)}</div>` : ''}
       ${contentHtml}
+      <div class="memo-preview-sync-row">
+        <span class="memo-preview-sync-label">同步目标</span>
+        <span class="memo-preview-sync-lib">${syncLibName}</span>
+        <button class="memo-btn memo-btn-ghost memo-btn-sm" id="memoPreviewChangeLib">更换</button>
+        <button class="memo-btn memo-btn-ghost memo-btn-sm" id="memoPreviewSyncNow">立即同步</button>
+      </div>
       <div class="memo-modal-actions">
         <button class="memo-btn memo-btn-danger" id="memoPreviewDelete">删除</button>
         <button class="memo-btn memo-btn-cancel" id="memoPreviewClose">关闭</button>
@@ -362,6 +408,14 @@ const MemoPage = {
       overlay.querySelector('#memoPreviewDelete').addEventListener('click', () => {
         overlay.remove();
         this.confirmDelete(id);
+      });
+      overlay.querySelector('#memoPreviewChangeLib').addEventListener('click', () => {
+        overlay.remove();
+        this.setSyncLib(id);
+      });
+      overlay.querySelector('#memoPreviewSyncNow').addEventListener('click', async () => {
+        await this.syncSingle(id);
+        overlay.remove();
       });
     });
   },
@@ -399,9 +453,14 @@ const MemoPage = {
     `, (overlay) => {
       const input = overlay.querySelector('#memoEditTitle');
       input.focus();
+      const trySave = () => overlay.querySelector('#memoEditSave').click();
       input.addEventListener('keydown', (e) => {
         // e.isComposing：输入法正在输入（组合状态）时为 true，避免回车上屏触发保存
-        if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); overlay.querySelector('#memoEditSave').click(); }
+        if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); trySave(); }
+      });
+      // 正文里 Ctrl/⌘+Enter 也能保存；Esc 关闭由 showModal 统一处理
+      overlay.querySelector('#memoEditContent').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); trySave(); }
       });
       overlay.querySelector('.memo-btn-cancel').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#memoEditSave').addEventListener('click', async () => {
@@ -453,6 +512,7 @@ const MemoPage = {
 
   // ==================== 同步 ====================
 
+  /** 单条同步：只上传这一条，不再牵连全部待同步 */
   async syncSingle(id) {
     const memo = this.memos.find(m => m.id === id);
     if (!memo) return;
@@ -461,16 +521,14 @@ const MemoPage = {
       return;
     }
     try {
-      const r = await MemoApi.syncPush();
+      const r = await MemoApi.syncOne(id);
       await this.loadList();
       if (r.skipped) {
         _toast.warning(r.reason || '同步未执行');
       } else if (r.failed > 0) {
-        _toast.warning(`同步完成：成功 ${(r.uploaded || 0) + (r.deleted || 0)}，失败 ${r.failed}`);
-      } else if ((r.uploaded || 0) + (r.deleted || 0) > 0) {
-        _toast.success(`已同步 ${(r.uploaded || 0) + (r.deleted || 0)} 条`);
+        _toast.warning(`同步失败：${(r.errors && r.errors[0] && r.errors[0].error) || '未知错误'}`);
       } else {
-        _toast.success('已是最新');
+        _toast.success('已同步');
       }
     } catch (err) {
       _toast.error(`同步失败：${err.message}`);
@@ -490,13 +548,17 @@ const MemoPage = {
     }, memo.syncLibId);
   },
 
+  /**
+   * 编辑 / 新建 / 删除后的自动上传：
+   *   - 有默认库但便签还没分配目标 → 先按默认库分配，再上传
+   *   - 什么都没配 → 提示一次去设置里配，不打断输入
+   */
   async afterEdit() {
     const dirty = this.memos.filter(m => m.syncDirty);
     if (dirty.length === 0) return;
 
     const noSyncLib = dirty.filter(m => !m.syncLibId);
     if (noSyncLib.length > 0) {
-      // 优先用全局默认文档库
       const config = await MemoApi.getSyncConfig();
       if (config.defaultLibId) {
         // 用默认文档库设置 syncLibId（setSyncLib 会自动创建文档并同步）
@@ -510,15 +572,8 @@ const MemoPage = {
           _toast.warning('自动同步失败，将稍后重试');
         }
       } else {
-        // 没有默认文档库，弹出选择
-        this.openLibPicker((libId) => {
-          Promise.all(noSyncLib.map(m =>
-            MemoApi.setSyncLib(m.id, libId)
-          )).then(() => {
-            this.loadList();
-            _toast.success('已自动同步');
-          }).catch(err => _toast.error(err.message));
-        });
+        // 没有默认文档库：提示去设置，不弹窗打断（设置入口在 设置 → 禅道集成）
+        _toast.warning('未配置同步：可在 设置 → 禅道集成 →「便签默认同步文档库」里开启，便签将加密备份到禅道');
       }
       return;
     }
@@ -536,11 +591,14 @@ const MemoPage = {
     }
   },
 
+  /** 头部「⇅ 同步」：先上传待同步的，再拉取远端 */
   async syncAll() {
     try {
       const r = await MemoApi.syncPush();
-      await this.loadList();
-      if (r.failed > 0) {
+      await this.syncDownload();
+      if (r.skipped) {
+        _toast.warning(r.reason || '同步未执行');
+      } else if (r.failed > 0) {
         _toast.warning(`同步完成：成功 ${(r.uploaded || 0) + (r.deleted || 0)}，失败 ${r.failed}`);
       } else if ((r.uploaded || 0) + (r.deleted || 0) > 0) {
         _toast.success(`已同步 ${(r.uploaded || 0) + (r.deleted || 0)} 条`);

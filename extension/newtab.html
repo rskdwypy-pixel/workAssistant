@@ -1113,6 +1113,16 @@
             </div>
 
             <div class="set-row">
+              <div class="sr-label">便签默认同步文档库<small>选填</small></div>
+              <div class="sr-control">
+                <select class="set-input" id="memoSyncLib" style="max-width:340px">
+                  <option value="">正在读取…</option>
+                </select>
+                <span class="input-hint">🗒️ 便签的加密备份目标：正文 AES-256-GCM 加密（口令为禅道用户 ID）、标题明文，每条便签对应库里的一个文档。选了库后，新建的便签自动加密备份到该库；不选则便签仅存本机。单条便签也可以在便签页的预览里单独更换目标。</span>
+              </div>
+            </div>
+
+            <div class="set-row">
               <div class="sr-label">全员报告成员<small>选填</small></div>
               <div class="sr-control">
                 <!-- 选中的账号（逗号分隔）；勾选框只是它的编辑界面，保存栏按这个值判断是否有改动 -->
@@ -1266,7 +1276,7 @@
           <!-- ========== 关于 ========== -->
           <section class="set-panel" id="p-about" role="tabpanel" aria-label="关于">
             <h4>关于</h4>
-            <p class="set-desc" id="aboutVersionDesc">禅道助手 v1.14.0</p>
+            <p class="set-desc" id="aboutVersionDesc">禅道助手 v1.15.0</p>
 
             <div class="set-row">
               <div class="sr-label">版本</div>

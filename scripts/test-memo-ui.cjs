@@ -29,16 +29,26 @@ const MEMOS = [
   { id: '3', docId: '', title: '重构想法', content: '考虑用策略模式重构 zentaoService', tags: ['工作'], pinned: false, createdAt: '2026-11-09T00:00:00Z', updatedAt: '2026-11-09T10:00:00Z', syncDirty: true, deleted: false }
 ];
 
-function setup(memos = MEMOS, syncState = { enabled: false }) {
+function setup(memos = MEMOS, syncState = { enabled: false }, opts = {}) {
   const dom = new JSDOM(HTML, { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true });
   const win = dom.window;
-  const state = { memos, syncState, calls: [] };
+  const state = { memos, syncState, calls: [], defaultLibId: opts.defaultLibId || '' };
 
   win.fetch = async (url, init = {}) => {
     const u = String(url);
     const method = (init.method || 'GET').toUpperCase();
     state.calls.push({ method, url: u, body: typeof init.body === 'string' ? JSON.parse(init.body) : null });
 
+    if (u.includes('/api/memos/sync/config') && method === 'GET') {
+      return { json: async () => ({ success: true, data: { defaultLibId: state.defaultLibId } }) };
+    }
+    if (u.includes('/api/memos/sync/config') && method === 'POST') {
+      state.defaultLibId = (typeof init.body === 'string' ? JSON.parse(init.body).defaultLibId : '') || '';
+      return { json: async () => ({ success: true, data: {} }) };
+    }
+    if (u.includes('/api/memos/sync/config')) {
+      return { json: async () => ({ success: true, data: { defaultLibId: state.defaultLibId } }) };
+    }
     if (u.includes('/api/memos') && u.includes('keyword')) {
       const kw = u.includes('keyword=') && u.split('keyword=')[1] ? decodeURIComponent(u.split('keyword=')[1]).toLowerCase() : '';
       const filtered = kw ? memos.filter(m => m.title.toLowerCase().includes(kw) || m.content.toLowerCase().includes(kw) || (m.tags || []).some(t => t.toLowerCase().includes(kw))) : memos;
@@ -58,6 +68,12 @@ function setup(memos = MEMOS, syncState = { enabled: false }) {
     }
     if (u.includes('/api/memos/sync/pull') || u.includes('/api/memos/sync/push')) {
       return { json: async () => ({ success: true, data: { uploaded: 0, deleted: 0, failed: 0, errors: [] } }) };
+    }
+    if (u.includes('/api/memos/') && u.endsWith('/sync') && method === 'POST') {
+      return { json: async () => ({ success: true, data: { uploaded: 1, deleted: 0, failed: 0, errors: [] } }) };
+    }
+    if (u.includes('/api/memos/') && u.endsWith('/sync-lib') && method === 'POST') {
+      return { json: async () => ({ success: true, data: {} }) };
     }
     if (u.includes('/api/memos') && method === 'POST' && !u.includes('/sync/') && !u.includes('/pin')) {
       return { json: async () => ({ success: true, data: { id: 'new', ...state.calls[state.calls.length - 1].body, syncDirty: false, createdAt: '2026-11-11T00:00:00Z', updatedAt: '2026-11-11T00:00:00Z' } }) };
@@ -96,7 +112,8 @@ function setup(memos = MEMOS, syncState = { enabled: false }) {
   check('卡片：标题显示', cards[0].querySelector('.memo-card-title').textContent.includes('周会要点'));
   check('卡片：预览显示', cards[0].querySelector('.memo-card-preview') !== null);
   check('卡片：标签显示', cards[0].querySelectorAll('.memo-tag').length === 2);
-  check('卡片：操作按钮 5 个', cards[0].querySelectorAll('.memo-card-actions button').length === 5);
+  check('卡片：操作按钮 3 个（置顶/编辑/删除）', cards[0].querySelectorAll('.memo-card-actions button').length === 3);
+  check('头部：同步全部按钮存在', !!win.document.querySelector('.memo-sync-all-btn'));
 
   // 3. 置顶标识
   check('卡片：置顶标识显示', cards[0].querySelector('.memo-pin-icon') !== null);
@@ -106,19 +123,19 @@ function setup(memos = MEMOS, syncState = { enabled: false }) {
   const dirtyCard = win.document.querySelectorAll('.memo-card')[2];
   check('卡片：待同步标记显示', dirtyCard.querySelector('.memo-dirty') !== null);
 
-  // 5. 搜索过滤
+  // 5. 搜索过滤（输入有 300ms 防抖，要等防抖窗口过去）
   const searchInput = win.document.querySelector('.memo-search');
   searchInput.value = '快递';
   searchInput.dispatchEvent(new win.Event('input'));
-  await tick(50);
+  await tick(400);
   const searchedCards = win.document.querySelectorAll('.memo-card');
   check('搜索：命中 1 条', searchedCards.length === 1, `${searchedCards.length}`);
   check('搜索：命中正确', searchedCards[0].querySelector('.memo-card-title').textContent.includes('快递'));
 
-  // 清空搜索
+  // 清空搜索（同样等防抖）
   searchInput.value = '';
   searchInput.dispatchEvent(new win.Event('input'));
-  await tick(50);
+  await tick(400);
 
   // 6. 空状态
   const { win: win2 } = setup([]);
@@ -163,22 +180,22 @@ function setup(memos = MEMOS, syncState = { enabled: false }) {
   check('卡片：显示更新时间', card5.querySelector('.memo-card-meta').textContent.includes('更新'));
   check('卡片：显示同步目标', card5.querySelector('.memo-card-meta').textContent.includes('同步'));
 
-  // 10. 卡片有同步和设置按钮
-  check('卡片：同步按钮', !!card5.querySelector('.memo-sync-single'));
-  check('卡片：设置按钮', !!card5.querySelector('.memo-sync-lib'));
+  // 10. 卡片 meta 显示同步目标（不再是裸 ID 的按钮）
+  check('卡片：meta 显示同步', card5.querySelector('.memo-card-sync') !== null);
 
-  // 11. 双击预览
-  card5.dispatchEvent(new win5.Event('dblclick', { bubbles: true }));
+  // 11. 单击预览（卡片主体），预览里有同步目标行
+  card5.click();
   await tick(50);
-  check('双击：弹出预览弹窗', !!win5.document.querySelector('.memo-modal'));
+  check('单击：弹出预览弹窗', !!win5.document.querySelector('.memo-modal'));
   check('预览：显示内容', !!win5.document.querySelector('.memo-preview-content') || !!win5.document.querySelector('.memo-modal-title'));
+  check('预览：同步目标行', !!win5.document.querySelector('#memoPreviewChangeLib') && !!win5.document.querySelector('#memoPreviewSyncNow'));
   // 关闭预览
   const previewClose = win5.document.querySelector('#memoPreviewClose');
   if (previewClose) previewClose.click();
   await tick(50);
 
-  // 12. 新建后自动同步：弹出文档库选择
-  const { win: win8, state: state8 } = setup();
+  // 12. 新建后自动同步：配置了默认库 → 自动 setSyncLib，不弹选择
+  const { win: win8, state: state8 } = setup(MEMOS, { enabled: false }, { defaultLibId: '202' });
   win8.MemoPage.show();
   await tick(50);
   win8.document.querySelector('.memo-new-btn').click();
@@ -187,14 +204,20 @@ function setup(memos = MEMOS, syncState = { enabled: false }) {
   win8.document.querySelector('#memoEditContent').value = '测试内容';
   win8.document.querySelector('#memoEditSave').click();
   await tick(200);
-  check('自动同步：新建后弹出文档库选择', !!win8.document.querySelector('.memo-lib-item'));
+  const syncLibCalls8 = state8.calls.filter(c => c.url.includes('/sync-lib'));
+  check('自动同步：已配默认库时自动 setSyncLib', syncLibCalls8.length > 0, `syncLib calls: ${syncLibCalls8.length}`);
+  check('自动同步：不弹文档库选择', !win8.document.querySelector('.memo-lib-item'));
 
-  // 13. 选择文档库后自动上传
-  win8.document.querySelector('.memo-lib-item').click();
+  // 13. 未配默认库 → 提示去设置，不弹选择、不自动分配
+  const { win: win9, state: state9 } = setup(MEMOS, { enabled: false }, { defaultLibId: '' });
+  win9.MemoPage.show();
+  await tick(50);
+  const dirtyCard9 = win9.document.querySelectorAll('.memo-card')[2]; // fixture id3 syncDirty=true
+  check('场景准备：有待同步便签', !!dirtyCard9 && dirtyCard9.querySelector('.memo-dirty') !== null);
+  win9.MemoPage.afterEdit();
   await tick(200);
-  const syncLibCalls = state8.calls.filter(c => c.url.includes('/sync-lib'));
-  check('自动同步：选择后调用 setSyncLib', syncLibCalls.length > 0, `syncLib calls: ${syncLibCalls.length}`);
-  check('自动同步：卡片显示同步目标', win8.document.querySelector('.memo-card-meta').textContent.includes('同步'));
+  check('自动同步：未配默认库不弹选择', !win9.document.querySelector('.memo-lib-item'));
+  check('自动同步：未配默认库不自动分配', state9.calls.filter(c => c.url.includes('/sync-lib')).length === 0);
 
   // 汇总
   const pass = results.filter(r => r.pass).length;

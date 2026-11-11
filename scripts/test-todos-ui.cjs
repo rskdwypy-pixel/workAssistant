@@ -3,7 +3,7 @@
  *   - 没有顶部总览卡；四张卡片排成两排：第一排 任务 | Bug，第二排 需求 | 文档
  *   - 逾期 / 今天标记；空卡片提示；页头统计与标签角标（总数，有紧急的变红）
  *   - 点击：切到对应标签页，并让目标那一条滚动 + 闪烁；需求 / 文档会先清掉过滤
- *   - 菜单顺序：待办 任务 Bug 需求 文档 报告；各页没有刷新按钮
+ *   - 菜单顺序：待办 任务 Bug 需求 文档 便签 报告；各页没有刷新按钮
  *   - 工时缺填提醒：没缺时不显示；缺了显示「昨天、10月20日 一小时工时都没填」，点击跳到工作日历并打开最近缺填那天的抽屉
  */
 const fs = require('fs');
@@ -60,7 +60,7 @@ const addTarget = (doc, parentSel, html) => { const p = doc.querySelector(parent
 (async () => {
   let { win, doc, st } = setup(DATA);
   const tabs = [...doc.querySelectorAll('.mode-tabs .tab-btn')].map(b => b.dataset.mode);
-  check('菜单顺序：待办 任务 Bug 需求 文档 报告', tabs.join() === 'todo,task,bug,story,doc,report', tabs.join());
+  check('菜单顺序：待办 任务 Bug 需求 文档 便签 报告', tabs.join() === 'todo,task,bug,story,doc,memo,report', tabs.join());
   check('四个页面容器都用统一外框 mode-card', ['todoMode', 'storyMode', 'docMode', 'reportMode'].every(i => doc.getElementById(i).classList.contains('mode-card')));
 
   win.TodoPage.show(); await tick(20);
