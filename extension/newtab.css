@@ -4135,3 +4135,10 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
 .memo-attach-hint { color: var(--text-muted, #9ca3af); font-weight: 400; }
 .memo-preview-attachments { margin-top: 14px; }
 .memo-preview-attach-title { font-size: 13px; font-weight: 500; color: var(--text-secondary, #6b7280); margin-bottom: 6px; }
+
+/* 便签卡片上的「在禅道打开对应文档」小入口 */
+.memo-open-doc {
+  border: none; background: none; cursor: pointer;
+  color: var(--accent, #3b82f6); font-size: 12px; padding: 0 2px;
+}
+.memo-open-doc:hover { text-decoration: underline; }

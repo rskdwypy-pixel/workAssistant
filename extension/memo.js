@@ -317,7 +317,19 @@ const MemoPage = {
         e.stopPropagation();
         this.confirmDelete(id);
       });
+      card.querySelector('.memo-open-doc')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const m = this.memos.find(x => x.id === id);
+        if (m && m.docId) this.openDoc(m.docId);
+      });
     });
+  },
+
+  /** 在禅道里打开便签对应的文档（复用全局 openInZentao，会自动带会话登录） */
+  openDoc(docId) {
+    if (!docId) return;
+    if (typeof openInZentao === 'function') openInZentao('doc', docId);
+    else _toast.warning('暂不支持在禅道打开');
   },
 
   renderTagsCloud() {
@@ -368,7 +380,7 @@ const MemoPage = {
           <div class="memo-card-meta">
             <span>创建：${esc(createdAt)}</span>
             <span>更新：${esc(updatedAt)}</span>
-            <span class="memo-card-sync">同步：${syncLib}</span>
+            <span class="memo-card-sync">同步：${syncLib}${m.docId ? ' · <button type="button" class="memo-open-doc" title="在禅道打开对应文档">↗</button>' : ''}</span>
           </div>
         </div>
         <div class="memo-card-actions">
@@ -412,6 +424,7 @@ const MemoPage = {
       <div class="memo-preview-sync-row">
         <span class="memo-preview-sync-label">同步目标</span>
         <span class="memo-preview-sync-lib">${syncLibName}</span>
+        ${memo.docId ? '<button class="memo-btn memo-btn-ghost memo-btn-sm" id="memoPreviewOpenDoc" title="在禅道打开这条便签对应的文档">在禅道打开 ↗</button>' : ''}
         <button class="memo-btn memo-btn-ghost memo-btn-sm" id="memoPreviewAddAttach">＋ 附件</button>
         <button class="memo-btn memo-btn-ghost memo-btn-sm" id="memoPreviewChangeLib">更换</button>
         <button class="memo-btn memo-btn-ghost memo-btn-sm" id="memoPreviewSyncNow">立即同步</button>
@@ -434,6 +447,10 @@ const MemoPage = {
       overlay.querySelector('#memoPreviewChangeLib').addEventListener('click', () => {
         overlay.remove();
         this.setSyncLib(id);
+      });
+      // 跳到禅道里这条便签对应的文档（自动带会话登录）
+      overlay.querySelector('#memoPreviewOpenDoc')?.addEventListener('click', () => {
+        this.openDoc(memo.docId);
       });
       // 预览里直接加附件：选完立即上传（大文件逐个传，完成后刷新预览）
       overlay.querySelector('#memoPreviewAddAttach').addEventListener('click', () => {

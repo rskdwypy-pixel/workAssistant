@@ -24,7 +24,7 @@ const check = (name, pass, extra = '') => results.push({ name, pass: !!pass, ext
 const tick = (ms = 0) => new Promise(r => setTimeout(r, ms));
 
 const MEMOS = [
-  { id: '1', docId: '', title: '周会要点', content: '1. Q4 排期\n2. 人员安排', tags: ['工作', '会议'], pinned: true, createdAt: '2026-11-11T00:00:00Z', updatedAt: '2026-11-11T10:00:00Z', syncDirty: false, deleted: false, attachments: [{ id: '88', name: '排期表.xlsx', size: 20480 }] },
+  { id: '1', docId: '10', title: '周会要点', content: '1. Q4 排期\n2. 人员安排', tags: ['工作', '会议'], pinned: true, createdAt: '2026-11-11T00:00:00Z', updatedAt: '2026-11-11T10:00:00Z', syncDirty: false, deleted: false, attachments: [{ id: '88', name: '排期表.xlsx', size: 20480 }] },
   { id: '2', docId: '', title: '取快递', content: '下午去取', tags: ['生活'], pinned: false, createdAt: '2026-11-10T00:00:00Z', updatedAt: '2026-11-10T10:00:00Z', syncDirty: false, deleted: false, attachments: [] },
   { id: '3', docId: '', title: '重构想法', content: '考虑用策略模式重构 zentaoService', tags: ['工作'], pinned: false, createdAt: '2026-11-09T00:00:00Z', updatedAt: '2026-11-09T10:00:00Z', syncDirty: true, deleted: false, attachments: [] }
 ];
@@ -118,6 +118,8 @@ function setup(memos = MEMOS, syncState = { enabled: false }, opts = {}) {
   check('卡片：操作按钮 3 个（置顶/编辑/删除）', cards[0].querySelectorAll('.memo-card-actions button').length === 3);
   check('卡片：附件角标显示数量', (cards[0].querySelector('.memo-attach-badge') || {}).textContent?.includes('1'));
   check('卡片：无附件不显示角标', cards[1].querySelector('.memo-attach-badge') === null);
+  check('卡片：已同步的显示「在禅道打开」入口', !!cards[0].querySelector('.memo-open-doc'));
+  check('卡片：未同步的不显示「在禅道打开」', cards[1].querySelector('.memo-open-doc') === null);
   check('头部：同步全部按钮存在', !!win.document.querySelector('.memo-sync-all-btn'));
 
   // 3. 置顶标识
@@ -200,6 +202,7 @@ function setup(memos = MEMOS, syncState = { enabled: false }, opts = {}) {
     return !!box && box.textContent.includes('排期表.xlsx') && !!box.querySelector('a[download]');
   })());
   check('预览：加附件按钮存在', !!win5.document.querySelector('#memoPreviewAddAttach'));
+  check('预览：在禅道打开对应文档按钮', !!win5.document.querySelector('#memoPreviewOpenDoc'));
   // 关闭预览
   const previewClose = win5.document.querySelector('#memoPreviewClose');
   if (previewClose) previewClose.click();
