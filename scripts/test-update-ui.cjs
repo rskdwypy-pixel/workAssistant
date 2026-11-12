@@ -156,10 +156,30 @@ function setup(s) {
   await win.UpdateUI.load();
   check('需要更新运行环境：提示重新运行安装命令', /重新运行一次安装命令/.test($('updateStatusText').textContent) && $('updateApplyBtn').hidden);
 
-  // 开发版
+  // 开发版（非 git 仓库）：没法跟随更新，维持原样
   ({ win, $ } = setup({ status: statusOf({ installed: false, state: 'dev', current: '1.2.0' }) }));
   await tick(10);
-  check('开发版：说明不自动更新，按钮和开关不可用', /开发版/.test($('updateStatusText').textContent) && $('updateCheckBtn').disabled && $('updateAutoToggle').disabled);
+  check('开发版（非 git 仓库）：说明不自动更新，按钮和开关不可用', /开发版/.test($('updateStatusText').textContent) && $('updateCheckBtn').disabled && $('updateAutoToggle').disabled);
+
+  // 开发版（git 仓库）：跟随仓库更新
+  ({ win, $ } = setup({ status: statusOf({ installed: false, state: 'idle', current: '1.2.0', latest: '1.2.0', behind: 0 }) }));
+  await tick(10);
+  check('开发版跟随：说明跟随仓库更新，检查按钮和自动更新开关可用', /跟随仓库更新/.test($('updateStatusText').textContent) && /已是最新/.test($('updateStatusText').textContent) && !$('updateCheckBtn').disabled && !$('updateAutoToggle').disabled && $('updateApplyBtn').hidden);
+  ({ win, $ } = setup({ status: statusOf({ installed: false, state: 'idle', current: '1.2.0', latest: '', behind: 0 }) }));
+  await tick(10);
+  check('开发版跟随：还没检查过时只显示跟随说明', /跟随仓库更新/.test($('updateStatusText').textContent) && !/已是最新/.test($('updateStatusText').textContent));
+  ({ win, $ } = setup({ status: statusOf({ installed: false, state: 'idle', current: '1.2.0', latest: '1.4.0', behind: 5 }) }));
+  await tick(10);
+  check('开发版跟随：远端有新版本（自动更新关着没拉）→ 提示远端版本', /远端已有 v1\.4\.0/.test($('updateStatusText').textContent), $('updateStatusText').textContent);
+  ({ win, $ } = setup({ status: statusOf({ installed: false, state: 'ready', current: '1.2.0', readyVersion: '1.3.0', behind: 2 }) }));
+  await tick(10);
+  check('开发版跟随：已快进待重启 → 显示「立即更新」', /已更新到 v1\.3\.0/.test($('updateStatusText').textContent) && !$('updateApplyBtn').hidden);
+  ({ win, $ } = setup({ status: statusOf({ installed: false, state: 'blocked', current: '1.2.0', behind: 3, error: '本地有未提交的改动（1 个文件），暂不自动更新' }) }));
+  await tick(10);
+  check('开发版跟随：本地有改动 → blocked 并说明原因', /本地有未提交的改动/.test($('updateStatusText').textContent), $('updateStatusText').textContent);
+  ({ win, $ } = setup({ status: statusOf({ installed: false, state: 'error', current: '1.2.0', error: 'fetch 失败' }) }));
+  await tick(10);
+  check('开发版跟随：检查失败 → 说明原因', /检查更新失败/.test($('updateStatusText').textContent));
   ({ win, $ } = setup({ status: statusOf({ installed: false, state: 'dev' }), about: { version: '1.2.0', installed: false, platform: 'darwin', node: '22.20.0', installDir: '/repo', dataDir: '/repo/data', logFile: '', extensionDir: '/repo/extension', port: 3721 } }));
   await tick(10);
   check('关于（开发版）：显示仓库目录，没有日志文件就不显示', [...win.document.querySelectorAll('#aboutInstall .about-path')].some(e => e.querySelector('.ap-k').textContent === '仓库（开发版）' && e.querySelector('.ap-v').textContent === '/repo') && win.document.querySelectorAll('#aboutData .about-path').length === 1);

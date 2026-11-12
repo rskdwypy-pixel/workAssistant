@@ -1,10 +1,9 @@
 /**
- * 自动更新（只在安装版里运行；在仓库里直接运行的开发版不更新）
+ * 自动更新
  *
- * 安装目录（见 installer/install-mac.sh）：
+ * 安装版（安装目录见 installer/install-mac.sh）：
  *   versions/<版本>/  current.txt  previous.txt  extension/  bin/  data/
  *
- * 流程：
  *   1. 检查：启动 1 分钟后、之后每 1 小时，看 GitHub Releases 的最新版本号
  *   2. 下载：新版本的安装包 + .sha256 + .sig，校验哈希和 Ed25519 签名（公钥见 releaseKey.js），
  *      解压到 versions/<新版本>/；新版本需要更高的 Node 时不装，提示重新运行安装命令
@@ -13,6 +12,15 @@
  *      切换 current.txt，写 update-pending，然后重启后台
  *   4. 自检：新版本正常运行 30 秒后删掉 update-pending；连续 3 次没撑过 30 秒，
  *      bin/workassistant-run 会退回上一个版本，并把这个版本记进 update-bad.txt，以后不再自动装它
+ *
+ * 开发版（在 git 仓库里直接运行）：跟随仓库更新（follow）
+ *   1. 检查：同样的节奏 git fetch 远端分支，对比落后多少、远端 package.json 的版本号
+ *   2. 更新：落后且工作区干净（tracked 文件无改动）时 git merge --ff-only 快进；
+ *      本地有未提交改动 / 本地领先（历史分叉）时不硬来，state=blocked 说明原因，等下次检查
+ *   3. 生效：等后台空闲后重启（拉起 node src/index.js，等端口空出来再监听），
+ *      扩展侧 checkSelfUpdate 看到 manifest 版本变了会自己重新加载
+ *
+ *   不是 git 仓库的开发版维持原样：不检查、不更新（state=dev）。
  *
  * 下载用系统自带的 curl（与安装器一致，Mac / Windows 10+ 都有）：
  * Node 的 fetch 不走 HTTPS_PROXY 等代理设置，公司网络里容易连不上 GitHub。
@@ -101,6 +109,9 @@ export function createUpdater(opts = {}) {
     try { return JSON.parse(readFileSync(join(root, '.wa-package'), 'utf8')); } catch { return null; }
   })();
   const installed = !!(waHome && pkgInfo && pkgInfo.app === 'workassistant');
+  // 开发版跟随更新只在 git 仓库里可用；没有 .git（比如解压的源码包）就不跟随
+  const devRepo = !installed && existsSync(join(root, '.git'));
+  const gitRun = opts.git || ((args, timeout = 120 * 1000) => run('git', args, timeout, root));
   const currentVersion = (() => {
     try { return JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version; } catch { return '0.0.0'; }
   })();
@@ -112,8 +123,10 @@ export function createUpdater(opts = {}) {
   let lastActivity = Date.now();
   let busy = false;
   let timers = [];
-  // 运行时状态（不落盘）：idle / checking / downloading / ready / error / needs-installer
-  let status = { state: 'idle', latest: '', error: '', readyVersion: '' };
+  // 运行时状态（不落盘）：
+  //   安装版：idle / checking / downloading / ready / restarting / error / needs-installer
+  //   开发版跟随：idle / checking / updating / ready / restarting / blocked（本地改动或领先，没法快进）/ error
+  let status = { state: 'idle', latest: '', error: '', readyVersion: '', behind: 0 };
 
   function loadSettings() {
     try {
@@ -137,12 +150,15 @@ export function createUpdater(opts = {}) {
     const bad = badVersions();
     return {
       installed,
+      devRepo,
       current: currentVersion,
       auto: s.auto,
       lastCheck: s.lastCheck,
       lastUpdate: s.lastUpdate,
-      state: installed ? status.state : 'dev',
+      state: installed || devRepo ? status.state : 'dev',
       latest: status.latest,
+      // 开发版：落后远端分支的提交数（blocked 时用来解释为什么没更新）
+      behind: status.behind || 0,
       readyVersion: status.readyVersion,
       // 下载进度：received / total 字节（total 为 0 表示服务器没告知大小），percent 为整数 0~100 或 null
       progress: status.state === 'downloading' ? (status.progress || { received: 0, total: 0, percent: null }) : null,
@@ -292,12 +308,89 @@ export function createUpdater(opts = {}) {
   }
 
   /**
+   * 开发版跟随：git fetch 当前分支的上游，返回落后 / 领先的提交数。
+   * 上游 remote 优先用 branch.<分支>.remote 的配置；它连不上（断网、要凭据）就依次试其他 remote——
+   * 仓库里常配加速镜像，镜像挂了直连还能用。统计和后续合并都基于 FETCH_HEAD（成功那次 fetch 的结果）。
+   */
+  async function devFetch() {
+    const branch = (await gitRun(['rev-parse', '--abbrev-ref', 'HEAD'], 10 * 1000)).trim();
+    if (!branch || branch === 'HEAD') throw new Error('HEAD 不在分支上，无法跟随更新');
+    const remotes = (await gitRun(['remote'], 10 * 1000)).split('\n').map(s => s.trim()).filter(Boolean);
+    if (!remotes.length) throw new Error('仓库没有配置远程，无法跟随更新');
+    let first = remotes.includes('origin') ? 'origin' : remotes[0];
+    try {
+      const configured = (await gitRun(['config', `branch.${branch}.remote`], 10 * 1000)).trim();
+      if (configured && remotes.includes(configured)) first = configured;
+    } catch { /* 没配上游就用 origin */ }
+    let lastErr = null;
+    for (const r of [first, ...remotes.filter(x => x !== first)]) {
+      try {
+        await gitRun(['fetch', r, branch], 300 * 1000);
+        return { branch, remote: r };
+      } catch (err) { lastErr = err; }
+    }
+    throw lastErr || new Error('fetch 失败');
+  }
+
+  /** 远端分支上的版本号（package.json）；读不到就空着，不影响合并 */
+  async function devRemoteVersion() {
+    try {
+      return JSON.parse(await gitRun(['show', 'FETCH_HEAD:package.json'], 30 * 1000)).version || '';
+    } catch { return ''; }
+  }
+
+  /**
+   * 开发版跟随检查：落后且能快进就合并（state=ready，等空闲重启生效）；
+   * 本地有未提交改动 / 本地领先远端时不硬来（state=blocked，说明原因，等下次检查）。
+   */
+  async function devCheck({ manual = false } = {}) {
+    if (!devRepo || busy) return getStatus();
+    if (!manual && !loadSettings().auto) return getStatus();
+    busy = true;
+    status = { ...status, state: 'checking', error: '', progress: null };
+    try {
+      await devFetch();
+      saveSettings({ lastCheck: now().toISOString() });
+      const behind = parseInt((await gitRun(['rev-list', '--count', 'HEAD..FETCH_HEAD'], 60 * 1000)).trim(), 10) || 0;
+      const ahead = parseInt((await gitRun(['rev-list', '--count', 'FETCH_HEAD..HEAD'], 60 * 1000)).trim(), 10) || 0;
+      status.latest = await devRemoteVersion();
+      status.behind = behind;
+      if (behind === 0) {
+        status = { ...status, state: 'idle', readyVersion: '', error: '' };
+        return getStatus();
+      }
+      if (ahead > 0) {
+        status = { ...status, state: 'blocked', error: `本地有 ${ahead} 个提交没推送、无法快进，推送后再看` };
+        return getStatus();
+      }
+      const dirty = (await gitRun(['status', '--porcelain', '--untracked-files=no'], 30 * 1000)).trim();
+      if (dirty) {
+        status = { ...status, state: 'blocked', error: `本地有未提交的改动（${dirty.split('\n').length} 个文件），暂不自动更新` };
+        return getStatus();
+      }
+      status = { ...status, state: 'updating', error: '' };
+      await gitRun(['merge', '--ff-only', 'FETCH_HEAD'], 120 * 1000);
+      saveSettings({ lastUpdate: { from: currentVersion, to: status.latest || '(远端)', at: now().toISOString() } });
+      status = { ...status, state: 'ready', readyVersion: status.latest || '(远端)', error: '' };
+      log(`跟随更新：${currentVersion} → ${status.readyVersion}，等空闲重启生效`);
+      return getStatus();
+    } catch (err) {
+      status = { ...status, state: 'error', error: err.message, progress: null };
+      log('跟随更新失败:', err.message);
+      return getStatus();
+    } finally {
+      busy = false;
+    }
+  }
+
+  /**
    * 检查更新；有新版本就下载好（auto 时随后在空闲时安装）。
    * @param {{manual?:boolean, detach?:boolean}} [options]
    *   detach：发现新版本后立刻返回（state=downloading，带 latest），下载在后台继续，界面轮询 getStatus().progress 显示进度；
    *   不带 detach（定时检查）则一直等到下载完成。
    */
   async function check({ manual = false, detach = false } = {}) {
+    if (devRepo) return devCheck({ manual });
     if (!installed) return getStatus();
     if (busy) return getStatus();
     busy = true;
@@ -347,10 +440,17 @@ export function createUpdater(opts = {}) {
     return !scheduleHours(d).some(h => minutesOfDay >= h * 60 - 2 && minutesOfDay < h * 60 + QUIET_MINUTES);
   }
 
-  /** 切换到已下载好的版本并重启后台 */
+  /** 切换到已下载好的版本并重启后台；开发版（代码已快进）直接重启 */
   function apply() {
     const version = status.readyVersion;
-    if (!installed || !version) return false;
+    if (!version) return false;
+    if (devRepo) {
+      log(`重启后台以启用 ${version}（当前 ${currentVersion}）`);
+      status = { ...status, state: 'restarting' };
+      restartImpl({ waHome, root, dev: true });
+      return true;
+    }
+    if (!installed) return false;
     const dir = join(waHome, 'versions', version);
     if (!existsSync(join(dir, 'src', 'index.js'))) {
       status = { ...status, state: 'idle', readyVersion: '' };
@@ -423,8 +523,8 @@ export function createUpdater(opts = {}) {
   }
 
   function start() {
-    if (!installed) return;
-    markHealthy();
+    if (!installed && !devRepo) return;
+    if (installed) markHealthy();
     const first = setTimeout(async () => {
       if (loadSettings().auto) await check();
       tryApply();
@@ -444,6 +544,7 @@ export function createUpdater(opts = {}) {
 
   return {
     installed,
+    devRepo,
     getStatus,
     check,
     apply,
@@ -462,12 +563,15 @@ export function createUpdater(opts = {}) {
  * 重启后台：由 launchd（Mac）或守护进程（Windows，bin/supervisor.cjs）拉起的进程以 75 退出，
  * 它们会马上按新的 current.txt 重新拉起；
  * 其他方式启动的，先拉起一个新进程（新进程会等端口空出来后再监听），再退出自己。
+ *
+ * 开发版（dev）：入口是仓库里的 src/index.js（用当前 node 跑，cwd 是仓库根），
+ * 重启同样分两种：launchd 拉起的直接退出重拉，其他方式拉起的先起一个等端口的新进程再退出。
  */
-function defaultRestart({ waHome }) {
+function defaultRestart({ waHome, root, dev }) {
   setTimeout(() => {
     if (['launchd', 'supervisor'].includes(process.env.WORKASSISTANT_LAUNCHED_BY)) process.exit(75);
-    if (process.platform === 'win32') {
-      // Windows 上统一交给守护进程（它会等端口空出来）
+    if (process.platform === 'win32' && !dev) {
+      // Windows 安装版统一交给守护进程（它会等端口空出来）
       spawn('wscript.exe', [join(waHome, 'bin', 'workassistant.vbs')], {
         detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, WA_RESTART_WAIT_PORT: '1' }
       }).unref();
@@ -477,9 +581,10 @@ function defaultRestart({ waHome }) {
     try {
       const logFile = process.env.WORKASSISTANT_LOG_FILE;
       const fd = logFile ? openSync(logFile, 'a', 0o600) : 'ignore';
-      spawn(join(waHome, 'bin', 'workassistant-run'), [], {
+      spawn(dev ? process.execPath : join(waHome, 'bin', 'workassistant-run'), dev ? [join(root, 'src', 'index.js')] : [], {
         detached: true,
         stdio: ['ignore', fd, fd],
+        cwd: dev ? root : undefined,
         env: { ...process.env, WA_RESTART_WAIT_PORT: '1' }
       }).unref();
     } catch (err) {

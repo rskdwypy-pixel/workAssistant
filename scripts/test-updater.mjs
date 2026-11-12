@@ -112,14 +112,91 @@ function updaterFor(home, extra = {}) {
 }
 const read = (f) => fs.readFileSync(f, 'utf8').trim();
 
+/**
+ * 开发版跟随更新用的 git 环境：bare 远端 + 发布克隆（推新版本）+ 更新器克隆（保持旧版本不动）。
+ * 提交都带 -c user.*：测试机不一定配过 git 身份。
+ */
+function makeDevRepo(name, version) {
+  const bare = path.join(TMP, `${name}.git`);
+  execFileSync('git', ['init', '--bare', bare]);
+  execFileSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], { cwd: bare });
+  const pub = path.join(TMP, `${name}-pub`);
+  execFileSync('git', ['clone', bare, pub]);
+  const git = (args, cwd) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd });
+  const commitVersion = (v) => {
+    fs.writeFileSync(path.join(pub, 'package.json'), JSON.stringify({ name: 'work-assistant', version: v }));
+    git(['add', '-A'], pub);
+    git(['commit', '-m', `v${v}`], pub);
+    git(['push', 'origin', 'main'], pub);
+  };
+  commitVersion(version);
+  const repo = path.join(TMP, name);
+  execFileSync('git', ['clone', bare, repo]);
+  return { bare, pub, repo, git, commitVersion };
+}
+
 try {
   console.log('\n🔄 自动更新');
   check('版本比较', compareVersions('1.10.0', '1.9.9') > 0 && compareVersions('1.1.3', '1.1.3') === 0 && compareVersions('1.1.3', '1.2.0') < 0);
 
-  // 开发版
-  const dev = createUpdater({ root: ROOT, waHome: '', dataDir: path.join(TMP, 'devdata'), baseUrl: BASE, log: () => {} });
+  // 开发版（非 git 仓库，比如解压的源码包）：不检查、不更新
+  const noGit = path.join(TMP, 'no-git');
+  fs.mkdirSync(path.join(noGit, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(noGit, 'package.json'), JSON.stringify({ name: 'work-assistant', version: '1.0.0' }));
+  const dev = createUpdater({ root: noGit, waHome: '', dataDir: path.join(TMP, 'devdata'), baseUrl: BASE, log: () => {} });
   const devStatus = await dev.check();
-  check('开发版（在仓库里运行）：不检查、不更新', !dev.installed && devStatus.state === 'dev');
+  check('开发版（非 git 仓库）：不检查、不更新', !dev.installed && !dev.devRepo && devStatus.state === 'dev');
+
+  // 开发版跟随更新：真实 git 仓库（bare 远端 + 发布克隆 + 更新器克隆）
+  const dr = makeDevRepo('devfollow', '1.0.0');
+  const devRestarts = [];
+  const du = createUpdater({ root: dr.repo, waHome: '', dataDir: path.join(TMP, 'devfollow-data'), restart: (a) => devRestarts.push(a), log: () => {} });
+  check('开发版跟随：识别为 git 仓库', !du.installed && du.devRepo === true);
+  let ds = await du.check({ manual: true });
+  check('开发版跟随：已是最新 → idle，带远端版本号，记下检查时间', ds.state === 'idle' && ds.latest === '1.0.0' && !!JSON.parse(fs.readFileSync(path.join(TMP, 'devfollow-data', 'update.json'), 'utf8')).lastCheck, JSON.stringify(ds));
+
+  dr.commitVersion('1.1.0');
+  ds = await du.check({ manual: true });
+  check('开发版跟随：远端有新版本 → 快进合并，ready + readyVersion + behind', ds.state === 'ready' && ds.readyVersion === '1.1.0' && ds.behind >= 1, JSON.stringify(ds));
+  check('开发版跟随：工作区已快进到 1.1.0，记下更新记录', JSON.parse(fs.readFileSync(path.join(dr.repo, 'package.json'), 'utf8')).version === '1.1.0' && JSON.parse(fs.readFileSync(path.join(TMP, 'devfollow-data', 'update.json'), 'utf8')).lastUpdate.to === '1.1.0');
+  const applied = du.apply();
+  ds = du.getStatus();
+  check('开发版跟随：apply → 重启后台', applied === true && ds.state === 'restarting' && devRestarts.length === 1 && devRestarts[0].dev === true, JSON.stringify(ds));
+
+  // 本地有未提交改动：跳过不硬来
+  const dr2 = makeDevRepo('devdirty', '1.0.0');
+  const du2 = createUpdater({ root: dr2.repo, waHome: '', dataDir: path.join(TMP, 'devdirty-data'), restart: () => {}, log: () => {} });
+  dr2.commitVersion('1.2.0');
+  fs.writeFileSync(path.join(dr2.repo, 'package.json'), JSON.stringify({ name: 'work-assistant', version: '1.0.0', local: true }));
+  ds = await du2.check({ manual: true });
+  check('开发版跟随：本地有未提交改动 → blocked，不合并', ds.state === 'blocked' && /未提交/.test(ds.error) && JSON.parse(fs.readFileSync(path.join(dr2.repo, 'package.json'), 'utf8')).version === '1.0.0', JSON.stringify(ds));
+
+  // 本地领先远端：无法快进 → blocked
+  const dr3 = makeDevRepo('devahead', '1.0.0');
+  const du3 = createUpdater({ root: dr3.repo, waHome: '', dataDir: path.join(TMP, 'devahead-data'), restart: () => {}, log: () => {} });
+  dr3.git(['commit', '--allow-empty', '-m', 'local'], dr3.repo);
+  dr3.commitVersion('1.3.0');
+  ds = await du3.check({ manual: true });
+  check('开发版跟随：本地领先（历史分叉）→ blocked', ds.state === 'blocked' && /没推送/.test(ds.error), JSON.stringify(ds));
+
+  // 自动更新关闭：定时检查不动作；手动检查仍然会更新
+  const dr4 = makeDevRepo('devauto', '1.0.0');
+  const du4 = createUpdater({ root: dr4.repo, waHome: '', dataDir: path.join(TMP, 'devauto-data'), restart: () => {}, log: () => {} });
+  du4.setAuto(false);
+  dr4.commitVersion('1.4.0');
+  ds = await du4.check();
+  check('开发版跟随：自动更新关闭 → 定时检查不动作', ds.state === 'idle' && ds.behind === 0, JSON.stringify(ds));
+  ds = await du4.check({ manual: true });
+  check('开发版跟随：自动更新关闭 → 手动检查仍会更新', ds.state === 'ready' && ds.readyVersion === '1.4.0', JSON.stringify(ds));
+
+  // 远端连不上：报错，状态回到 error
+  const dr5 = makeDevRepo('devfail', '1.0.0');
+  const du5 = createUpdater({
+    root: dr5.repo, waHome: '', dataDir: path.join(TMP, 'devfail-data'), restart: () => {}, log: () => {},
+    git: (args, timeout) => (args[0] === 'fetch' ? Promise.reject(new Error('网络不通')) : execFileSync('git', args, { cwd: dr5.repo, timeout }).toString())
+  });
+  ds = await du5.check({ manual: true });
+  check('开发版跟随：fetch 失败 → error 并说明', ds.state === 'error' && /网络不通/.test(ds.error), JSON.stringify(ds));
 
   // 正常流程
   publish('1.1.0');

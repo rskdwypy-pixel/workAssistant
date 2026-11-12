@@ -24,13 +24,16 @@ router.get('/changelog', (req, res) => {
 });
 
 /**
- * POST /api/update/check - 立即检查。发现新版本就立刻返回（state=downloading + latest），下载在后台继续，
- * 插件轮询 GET /api/update/status 的 progress 显示进度条；下载完变成 ready，等空闲时安装，或点「立即更新」
+ * POST /api/update/check - 立即检查。安装版：发现新版本就立刻返回（state=downloading + latest），下载在后台继续，
+ * 插件轮询 GET /api/update/status 的 progress 显示进度条；下载完变成 ready，等空闲时安装，或点「立即更新」。
+ * 开发版（git 仓库）：直接 fetch 对比远端，能快进就合并，返回最终状态（ready = 已更新、等重启生效）。
  */
 router.post('/update/check', async (req, res) => {
   const updater = getUpdater();
-  if (!updater.installed) return res.json({ success: false, message: '开发版（在仓库里运行）不自动更新', data: updater.getStatus() });
-  res.json({ success: true, data: await updater.check({ manual: true, detach: true }) });
+  if (!updater.installed && !updater.devRepo) {
+    return res.json({ success: false, message: '开发版（不在 git 仓库里）无法跟随更新', data: updater.getStatus() });
+  }
+  res.json({ success: true, data: await updater.check({ manual: true, detach: updater.installed }) });
 });
 
 /** POST /api/update/apply - 立即安装已下载好的新版本（后台会重启，插件随后自动重新加载） */

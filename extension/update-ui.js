@@ -223,12 +223,6 @@ const UpdateUI = {
     this.showProgress(s.state === 'downloading' ? (s.progress || { percent: null }) : null);
     // 后台正在下载（自动检查触发的）：打开设置时也要把进度显示出来
     if (s.state === 'downloading' && !this.polling) setTimeout(() => this.poll(), 0);
-    if (!s.installed) {
-      toggle.disabled = true;
-      checkBtn.disabled = true;
-      this.setText(`v${s.current} · 开发版（在仓库里运行），不自动更新`);
-      return;
-    }
     const fmt = (iso) => {
       if (!iso) return '';
       const d = new Date(iso);
@@ -236,6 +230,35 @@ const UpdateUI = {
       return `${d.getMonth() + 1}-${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
     };
     const lastCheck = s.lastCheck ? `，${fmt(s.lastCheck)} 检查过` : '';
+    if (!s.installed) {
+      // 不是 git 仓库的开发版（解压的源码包等）：没法跟随更新，维持原样
+      if (s.state === 'dev') {
+        toggle.disabled = true;
+        checkBtn.disabled = true;
+        this.setText(`v${s.current} · 开发版（在仓库里运行），不自动更新`);
+        return;
+      }
+      // 仓库里的开发版：跟随仓库更新（定时 git fetch，落后就快进，空闲时重启后台）
+      toggle.disabled = false;
+      checkBtn.disabled = false;
+      const prefix = `v${s.current} · 开发版（跟随仓库更新）`;
+      if (message) return this.setText(message, 'warn');
+      switch (s.state) {
+        case 'checking': return this.setText(`${prefix}，正在检查远端…`);
+        case 'updating': return this.setText(`${prefix}，落后远端 ${s.behind} 个提交，正在更新…`);
+        case 'ready':
+          return this.setText(`已更新到 v${s.readyVersion}，${s.auto ? '空闲时会自动重启后台，也可以' : '可以'}点「立即更新」马上生效`, 'ok');
+        case 'restarting': return this.setText('已更新，后台重启中…');
+        case 'blocked': return this.setText(`${prefix}；${s.error}`, 'warn');
+        case 'error': return this.setText(`${prefix}，检查更新失败：${s.error}`, 'warn');
+        default: {
+          const note = s.latest && s.latest !== s.current ? `，远端已有 v${s.latest}` : '';
+          return this.setText(s.latest && s.latest === s.current
+            ? `${prefix}，已是最新${lastCheck}`
+            : `${prefix}${note}${lastCheck}`);
+        }
+      }
+    }
     const lastUpdate = s.lastUpdate && s.lastUpdate.to === s.current ? `（${fmt(s.lastUpdate.at)} 从 ${s.lastUpdate.from} 自动更新）` : '';
     const rolledBack = s.rolledBack ? `；${s.lastUpdate.to} 安装后启动失败，已自动退回` : '';
     if (message) return this.setText(message, 'warn');
