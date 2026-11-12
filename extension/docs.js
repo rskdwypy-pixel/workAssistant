@@ -270,6 +270,7 @@ const DocViewer = {
           <h2 id="docViewerTitle" class="doc-viewer-title"></h2>
           <div class="doc-viewer-actions">
             <button type="button" class="doc-viewer-act" data-collect hidden title="收藏">☆</button>
+            <button type="button" class="doc-viewer-act" data-attach hidden title="添加附件">📎</button>
             <button type="button" class="doc-viewer-act" data-edit hidden>✏️ 编辑</button>
             <button type="button" class="doc-viewer-act" data-delete hidden>🗑 删除</button>
             <button type="button" class="doc-viewer-open" data-open hidden>在禅道打开</button>
@@ -323,6 +324,31 @@ const DocViewer = {
     const editBtn = el.querySelector('[data-edit]');
     editBtn.hidden = !doc.editable;
     editBtn.onclick = () => { this.close(); DocEditor.openEdit(doc); };
+
+    // 添加附件（仅正文型文档，走编辑表单的 files[]；一次一个，逐个传）
+    const attachBtn = el.querySelector('[data-attach]');
+    attachBtn.hidden = !doc.editable;
+    attachBtn.onclick = () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.onchange = async () => {
+        const list = [...input.files];
+        if (!list.length) return;
+        attachBtn.disabled = true;
+        let ok = 0; const failed = [];
+        for (const f of list) {
+          if (f.size > DOC_MAX_FILE) { failed.push(`${f.name}（超过 50MB）`); continue; }
+          try { await DocApi.addFile(doc.id, f); ok++; }
+          catch (err) { failed.push(`${f.name}（${err.message}）`); }
+        }
+        attachBtn.disabled = false;
+        if (ok && typeof Toast !== 'undefined') Toast.success(`已上传 ${ok} 个附件`);
+        if (failed.length && typeof Toast !== 'undefined') Toast.warning(`没传上去：${failed.join('、')}`);
+        if (ok) this.open(doc.id); // 重新拉取（附件列表、编辑时间都变了）
+      };
+      input.click();
+    };
 
     // 删除
     const delBtn = el.querySelector('[data-delete]');

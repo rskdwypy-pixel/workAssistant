@@ -58,6 +58,7 @@ function setup(s) {
   let { win, $ } = setup(s);
   await tick(10);
   check('打开页面：让 background 看一下扩展文件是否已更新', s.messages.some(m => m.action === 'checkSelfUpdate'));
+  check('已是最新：显示版本和检查时间，不显示「立即更新」，检查按钮在', !$('updateCheckBtn').hidden) ||
   check('已是最新：显示版本和检查时间，不显示「立即更新」', /v1\.2\.0 已是最新版本/.test($('updateStatusText').textContent) && /检查过/.test($('updateStatusText').textContent) && $('updateApplyBtn').hidden && $('updateAutoToggle').checked);
 
   const paths = [...win.document.querySelectorAll('.about-path')].map(e => `${e.querySelector('.ap-k').textContent}=${e.querySelector('.ap-v').textContent}`);
@@ -77,6 +78,7 @@ function setup(s) {
   $('updateCheckBtn').click();
   await tick(10);
   check('检查更新：发请求，新版本已下载好时显示「立即更新」', s.requests.some(r => r.url === '/api/update/check' && r.method === 'POST') && !$('updateApplyBtn').hidden && /1\.3\.0 已下载完成/.test($('updateStatusText').textContent) && !$('updateCheckBtn').disabled);
+  check('ready 时只留「立即更新」一个主按钮（检查更新隐藏）', $('updateCheckBtn').hidden);
 
   // 检查 → 发现新版本 → 下载进度条 → 立即更新
   s = { status: statusOf({ current: '1.2.0' }) };
@@ -100,7 +102,7 @@ function setup(s) {
     await tick(5);
   }
   check('下载中：进度条宽度和百分比文字随进度变化（25% → 50% → 87%）', seen.some(w => w === '25%') && seen.some(w => w === '50%') && seen.some(w => w === '87%'), seen.join(','));
-  check('下载完成：进度条消失，显示「已下载完成」和「立即更新」，检查按钮恢复', $('updateProgress').hidden && !$('updateApplyBtn').hidden && /v1\.3\.0 已下载完成/.test($('updateStatusText').textContent) && !$('updateCheckBtn').disabled && $('updateCheckBtn').textContent === '检查更新');
+  check('下载完成：进度条消失，显示「已下载完成」和「立即更新」', $('updateProgress').hidden && !$('updateApplyBtn').hidden && /v1\.3\.0 已下载完成/.test($('updateStatusText').textContent) && $('updateCheckBtn').hidden);
   check('下载中文字带已下载 / 总大小', s.requests.filter(r => r.url === '/api/update/status').length >= 4);
   // 不知道总大小：不确定进度
   s = { status: statusOf() };
@@ -122,7 +124,7 @@ function setup(s) {
   ({ win, $ } = setup(s));
   win.UpdateUI.pollMs = 5;
   await tick(60);
-  check('打开设置时后台正在下载：自动显示进度并跟到完成', $('updateProgress').hidden && !$('updateApplyBtn').hidden);
+  check('打开设置时后台正在下载：自动显示进度并跟到完成', $('updateProgress').hidden && !$('updateApplyBtn').hidden && $('updateCheckBtn').hidden);
 
   // 自动更新开关
   s = { status: statusOf() };
@@ -149,7 +151,7 @@ function setup(s) {
   check('新版本启动失败已退回：说明', /1\.3\.0 安装后启动失败，已自动退回/.test($('updateStatusText').textContent));
   s.status = statusOf({ state: 'ready', latest: '1.3.0', readyVersion: '1.3.0', readyIsBad: true });
   await win.UpdateUI.load();
-  check('失败过的版本又被下载：说明不会自动安装', /不会自动安装/.test($('updateStatusText').textContent) && !$('updateApplyBtn').hidden);
+  check('失败过的版本又被下载：说明不会自动安装', /不会自动安装/.test($('updateStatusText').textContent) && !$('updateApplyBtn').hidden && $('updateCheckBtn').hidden);
 
   // 需要重新运行安装命令
   s.status = statusOf({ state: 'needs-installer', latest: '2.0.0', error: '新版本 2.0.0 需要更新运行环境（Node 24.0.0），请重新运行一次安装命令' });

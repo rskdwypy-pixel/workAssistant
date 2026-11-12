@@ -12,6 +12,7 @@ const check = (name, ok, extra = '') => { total++; if (ok) pass++; console.log(`
 // ==================== memoCrypto ====================
 
 const memo = { content: '# 测试\n正文', tags: ['工作'], pinned: false, refs: [], createdAt: '2026-11-11T00:00:00Z', updatedAt: '2026-11-11T00:00:00Z' };
+const memoWithAttach = { ...memo, attachments: [{ id: '88', name: '截图.png', size: 12345 }] };
 const userId = 123;
 
 // 加密
@@ -64,6 +65,11 @@ check('解密：其他用户的密文报错', errMsg.includes('其他用户'));
 
 // 两次加密结果不同（salt/iv 随机）
 check('加密：两次加密结果不同', encryptMemo(memo, userId) !== encrypted);
+
+// 附件索引随正文加密往返
+const encAtt = encryptMemo(memoWithAttach, userId);
+check('附件：索引随正文加密往返', JSON.stringify(decryptMemo(encAtt, userId).attachments) === JSON.stringify(memoWithAttach.attachments));
+check('附件：密文不含文件名', !encAtt.includes('截图'));
 
 // ==================== memoService CRUD ====================
 

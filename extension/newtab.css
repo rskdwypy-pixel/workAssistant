@@ -4116,3 +4116,22 @@ button.bug-assignee-btn.is-empty { color: var(--text-muted); }
 }
 .memo-btn-ghost:hover { background: var(--bg-accent-light, #eff6ff); }
 .memo-btn-sm { padding: 4px 10px; font-size: 13px; }
+
+/* 便签附件 */
+.memo-attach-badge { font-size: 12px; color: var(--text-muted, #9ca3af); font-weight: 400; margin-left: 4px; }
+.memo-attach-box { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.memo-attach-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; padding: 6px 10px;
+  background: var(--bg-secondary, #f9fafb); border-radius: 6px;
+  font-size: 13px; color: var(--text-primary, #111827);
+}
+.memo-attach-item a { color: var(--accent, #3b82f6); text-decoration: none; font-size: 13px; white-space: nowrap; }
+.memo-attach-item a:hover { text-decoration: underline; }
+.memo-attach-existing { opacity: .8; }
+.memo-attach-pending span { color: var(--text-secondary, #6b7280); }
+.memo-attach-rm { border: none; background: none; cursor: pointer; color: var(--text-muted, #9ca3af); font-size: 12px; }
+.memo-attach-rm:hover { color: #dc2626; }
+.memo-attach-hint { color: var(--text-muted, #9ca3af); font-weight: 400; }
+.memo-preview-attachments { margin-top: 14px; }
+.memo-preview-attach-title { font-size: 13px; font-weight: 500; color: var(--text-secondary, #6b7280); margin-bottom: 6px; }

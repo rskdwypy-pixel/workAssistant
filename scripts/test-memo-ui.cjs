@@ -24,9 +24,9 @@ const check = (name, pass, extra = '') => results.push({ name, pass: !!pass, ext
 const tick = (ms = 0) => new Promise(r => setTimeout(r, ms));
 
 const MEMOS = [
-  { id: '1', docId: '', title: '周会要点', content: '1. Q4 排期\n2. 人员安排', tags: ['工作', '会议'], pinned: true, createdAt: '2026-11-11T00:00:00Z', updatedAt: '2026-11-11T10:00:00Z', syncDirty: false, deleted: false },
-  { id: '2', docId: '', title: '取快递', content: '下午去取', tags: ['生活'], pinned: false, createdAt: '2026-11-10T00:00:00Z', updatedAt: '2026-11-10T10:00:00Z', syncDirty: false, deleted: false },
-  { id: '3', docId: '', title: '重构想法', content: '考虑用策略模式重构 zentaoService', tags: ['工作'], pinned: false, createdAt: '2026-11-09T00:00:00Z', updatedAt: '2026-11-09T10:00:00Z', syncDirty: true, deleted: false }
+  { id: '1', docId: '', title: '周会要点', content: '1. Q4 排期\n2. 人员安排', tags: ['工作', '会议'], pinned: true, createdAt: '2026-11-11T00:00:00Z', updatedAt: '2026-11-11T10:00:00Z', syncDirty: false, deleted: false, attachments: [{ id: '88', name: '排期表.xlsx', size: 20480 }] },
+  { id: '2', docId: '', title: '取快递', content: '下午去取', tags: ['生活'], pinned: false, createdAt: '2026-11-10T00:00:00Z', updatedAt: '2026-11-10T10:00:00Z', syncDirty: false, deleted: false, attachments: [] },
+  { id: '3', docId: '', title: '重构想法', content: '考虑用策略模式重构 zentaoService', tags: ['工作'], pinned: false, createdAt: '2026-11-09T00:00:00Z', updatedAt: '2026-11-09T10:00:00Z', syncDirty: true, deleted: false, attachments: [] }
 ];
 
 function setup(memos = MEMOS, syncState = { enabled: false }, opts = {}) {
@@ -75,6 +75,9 @@ function setup(memos = MEMOS, syncState = { enabled: false }, opts = {}) {
     if (u.includes('/api/memos/') && u.endsWith('/sync-lib') && method === 'POST') {
       return { json: async () => ({ success: true, data: {} }) };
     }
+    if (u.includes('/api/memos/') && u.includes('/attachments') && method === 'POST') {
+      return { json: async () => ({ success: true, data: { id: '1', file: { id: '99', name: '新附件.pdf', size: 1024 } } }) };
+    }
     if (u.includes('/api/memos') && method === 'POST' && !u.includes('/sync/') && !u.includes('/pin')) {
       return { json: async () => ({ success: true, data: { id: 'new', ...state.calls[state.calls.length - 1].body, syncDirty: false, createdAt: '2026-11-11T00:00:00Z', updatedAt: '2026-11-11T00:00:00Z' } }) };
     }
@@ -113,6 +116,8 @@ function setup(memos = MEMOS, syncState = { enabled: false }, opts = {}) {
   check('卡片：预览显示', cards[0].querySelector('.memo-card-preview') !== null);
   check('卡片：标签显示', cards[0].querySelectorAll('.memo-tag').length === 2);
   check('卡片：操作按钮 3 个（置顶/编辑/删除）', cards[0].querySelectorAll('.memo-card-actions button').length === 3);
+  check('卡片：附件角标显示数量', (cards[0].querySelector('.memo-attach-badge') || {}).textContent?.includes('1'));
+  check('卡片：无附件不显示角标', cards[1].querySelector('.memo-attach-badge') === null);
   check('头部：同步全部按钮存在', !!win.document.querySelector('.memo-sync-all-btn'));
 
   // 3. 置顶标识
@@ -154,6 +159,7 @@ function setup(memos = MEMOS, syncState = { enabled: false }, opts = {}) {
   check('新建弹窗：正文输入框', !!win3.document.querySelector('#memoEditContent'));
   check('新建弹窗：标签输入框', !!win3.document.querySelector('#memoEditTags'));
   check('新建弹窗：保存按钮', !!win3.document.querySelector('#memoEditSave'));
+  check('新建弹窗：添加附件按钮', !!win3.document.querySelector('#memoEditAttachPick'));
   // 取消关闭
   win3.document.querySelector('.memo-modal .memo-btn-cancel').click();
   await tick(50);
@@ -189,6 +195,11 @@ function setup(memos = MEMOS, syncState = { enabled: false }, opts = {}) {
   check('单击：弹出预览弹窗', !!win5.document.querySelector('.memo-modal'));
   check('预览：显示内容', !!win5.document.querySelector('.memo-preview-content') || !!win5.document.querySelector('.memo-modal-title'));
   check('预览：同步目标行', !!win5.document.querySelector('#memoPreviewChangeLib') && !!win5.document.querySelector('#memoPreviewSyncNow'));
+  check('预览：附件列表显示文件名和下载', (() => {
+    const box = win5.document.querySelector('.memo-preview-attachments');
+    return !!box && box.textContent.includes('排期表.xlsx') && !!box.querySelector('a[download]');
+  })());
+  check('预览：加附件按钮存在', !!win5.document.querySelector('#memoPreviewAddAttach'));
   // 关闭预览
   const previewClose = win5.document.querySelector('#memoPreviewClose');
   if (previewClose) previewClose.click();
@@ -218,6 +229,26 @@ function setup(memos = MEMOS, syncState = { enabled: false }, opts = {}) {
   await tick(200);
   check('自动同步：未配默认库不弹选择', !win9.document.querySelector('.memo-lib-item'));
   check('自动同步：未配默认库不自动分配', state9.calls.filter(c => c.url.includes('/sync-lib')).length === 0);
+
+  // 14. 新建便签带附件：保存后自动上传到该便签
+  const { win: win10, state: state10 } = setup(MEMOS, { enabled: false }, { defaultLibId: '202' });
+  win10.MemoPage.show();
+  await tick(50);
+  win10.document.querySelector('.memo-new-btn').click();
+  await tick(50);
+  win10.document.querySelector('#memoEditTitle').value = '带附件的便签';
+  const fileInput = win10.document.querySelector('#memoEditAttachInput');
+  const fakeFile = new win10.File(['hello'], '说明.txt', { type: 'text/plain' });
+  Object.defineProperty(fileInput, 'files', { value: [fakeFile], configurable: true });
+  fileInput.dispatchEvent(new win10.Event('change'));
+  await tick(50);
+  check('附件：选中后显示待上传项', !!win10.document.querySelector('.memo-attach-pending'));
+  win10.document.querySelector('#memoEditSave').click();
+  await tick(300);
+  const attachCalls = state10.calls.filter(c => c.url.includes('/attachments') && c.method === 'POST');
+  check('附件：保存后自动上传', attachCalls.length === 1, `attach calls: ${attachCalls.length}`);
+  check('附件：上传请求带文件名', attachCalls.length > 0 && attachCalls[0].url.includes(encodeURIComponent('说明.txt')));
+  check('附件：上传后弹窗关闭', !win10.document.querySelector('#memoEditSave'));
 
   // 汇总
   const pass = results.filter(r => r.pass).length;

@@ -221,6 +221,9 @@ async function uploadOne(memo, userId, syncState = {}) {
     tags: memo.tags,
     pinned: memo.pinned,
     refs: memo.refs,
+    // 附件记录（id/name/size）：文件本体挂在禅道文档的附件区（明文），
+    // 这里只存索引，让多端知道这条便签有哪些附件、可下载。
+    attachments: (memo.attachments || []).map(a => ({ id: String(a.id), name: String(a.name || ''), size: Number(a.size) || 0 })),
     createdAt: memo.createdAt,
     updatedAt: memo.updatedAt
   }, userId);
@@ -462,6 +465,10 @@ async function syncDownload() {
         continue;
       }
       const memo = decryptMemo(detail.raw, userId);
+      // 附件索引：正文里记录的（多端同步的真源）∪ 文档上实际挂的文件（在禅道里手动加的也能看到）
+      const byId = new Map();
+      for (const f of (detail.files || [])) byId.set(String(f.id), { id: String(f.id), name: String(f.name || ''), size: Number(f.size) || 0 });
+      for (const a of (memo.attachments || [])) byId.set(String(a.id), { id: String(a.id), name: String(a.name || ''), size: Number(a.size) || 0 });
       remoteMemos.push({
         id: String(doc.id),
         docId: String(doc.id),
@@ -470,6 +477,7 @@ async function syncDownload() {
         tags: memo.tags || [],
         pinned: !!memo.pinned,
         refs: memo.refs || [],
+        attachments: [...byId.values()],
         createdAt: memo.createdAt || doc.addedDate || '',
         updatedAt: memo.updatedAt || doc.editedDate || '',
         syncDirty: false,
@@ -555,9 +563,58 @@ async function setSyncLib(id, libId) {
   return updateMemo(id, { syncLibId: newLibId, docId: r.id, syncDirty: false });
 }
 
+/**
+ * 给一条便签追加附件：文件本体传到便签对应的禅道文档（addDocFile，回读确认禅道收下了），
+ * 附件索引（id/name/size）记进本地并随加密正文同步到多端。
+ *   - 便签还没有禅道文档（未同步过）→ 先按当前目标库把正文建上去，再传文件
+ *   - 文件传成功后立刻把带附件记录的新正文写回禅道；这步失败只标 dirty 让下轮上行补
+ * @param {{id:string, file:{name:string, mime?:string, buffer:Buffer}}} opts
+ * @returns {Promise<{id:string, file:{id:string,name:string,size:number}}>}
+ */
+async function addMemoAttachment({ id, file } = {}) {
+  const memo = await getMemo(id);
+  const data = await readMemoData();
+  const syncState = data.syncState || {};
+
+  let userId;
+  try {
+    userId = await getCurrentUserId();
+  } catch (err) {
+    err.message = `附件要存到禅道：${err.message}`;
+    throw err;
+  }
+
+  // 还没有远端文档：先把正文建上去（需要能解析出目标库）
+  let target = memo;
+  if (!target.docId) {
+    if (!resolveLib(target, syncState)) {
+      const err = new Error('这条便签还没有同步目标，先在预览里选择同步文档库，再上传附件');
+      err.code = 'MEMO_NO_LIB';
+      throw err;
+    }
+    const r = await uploadOne(target, userId, syncState);
+    if (!r.ok) throw new Error(r.error || '创建禅道文档失败');
+    target = await updateMemo(id, { docId: r.docId, syncDirty: false });
+  }
+
+  // 文件本体 → 禅道文档附件区
+  const r = await docService.addDocFile({ id: target.docId, file });
+
+  // 索引进本地 + 新正文（含附件记录）写回禅道
+  const attachments = [...(target.attachments || []), r.file];
+  const updated = await updateMemo(id, { attachments, syncDirty: true });
+  try {
+    const up = await uploadOne(updated, userId, syncState);
+    if (up.ok) await updateMemo(id, { syncDirty: false });
+  } catch {
+    // 正文回写失败：保留 dirty，下轮 syncUpload 自动补
+  }
+  return { id, file: r.file };
+}
+
 export {
   listMemos, getMemo, createMemo, updateMemo, deleteMemo, togglePin,
   syncUpload, syncDownload, syncOne, mergeRemoteMemos,
-  getSyncState, setSyncState, listMemoLibs, setSyncLib,
+  getSyncState, setSyncState, listMemoLibs, setSyncLib, addMemoAttachment,
   getCurrentUserId, invalidateUserId
 };

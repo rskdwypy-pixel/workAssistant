@@ -21,12 +21,18 @@ import * as memoService from '../services/memoService.js';
 
 const router = express.Router();
 
+// 与文档附件同一个上限（POST /api/docs/:id/files）
+const MAX_MEMO_FILE_BYTES = 50 * 1024 * 1024;
+
 function fail(res, err) {
   if (err && err.code === 'ZENTAO_DISABLED') {
     return res.status(409).json({ success: false, code: err.code, message: '请先在设置里登录禅道' });
   }
   if (err && err.code === 'MEMO_NOT_FOUND') {
     return res.status(404).json({ success: false, code: err.code, message: err.message });
+  }
+  if (err && err.code === 'MEMO_NO_LIB') {
+    return res.status(409).json({ success: false, code: err.code, message: err.message });
   }
   return res.status(500).json({ success: false, message: (err && err.message) || '服务异常' });
 }
@@ -133,6 +139,23 @@ router.post('/memos/:id/sync-lib', async (req, res) => {
     const b = req.body || {};
     res.json({ success: true, data: await memoService.setSyncLib(req.params.id, String(b.libId || '')) });
   } catch (err) { fail(res, err); }
+});
+
+/** 给便签追加一个附件（请求体是文件二进制，一次一个；文件传到便签对应的禅道文档） */
+router.post('/memos/:id/attachments', express.raw({ type: () => true, limit: MAX_MEMO_FILE_BYTES + 1024 }), async (req, res) => {
+  try {
+    const name = String(req.query.name || '').trim();
+    if (!name) return res.status(400).json({ success: false, message: '缺少文件名' });
+    const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (!buffer.length) return res.status(400).json({ success: false, message: '文件是空的' });
+    res.json({ success: true, data: await memoService.addMemoAttachment({
+      id: req.params.id,
+      file: { name, mime: String(req.query.mime || ''), buffer }
+    }) });
+  } catch (err) {
+    if (err && err.type === 'entity.too.large') return res.status(413).json({ success: false, message: '文件超过 50MB' });
+    fail(res, err);
+  }
 });
 
 router.delete('/memos/:id', async (req, res) => {

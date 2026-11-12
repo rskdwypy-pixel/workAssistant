@@ -62,6 +62,23 @@ const MemoApi = {
     if (!j.success) throw new Error(j.message || '同步失败');
     return j.data;
   },
+  /** 给便签追加附件（文件传到它对应的禅道文档；请求体就是文件本身） */
+  async addAttachment(id, file) {
+    const r = await fetch(`${MEMO_API_BASE}/api/memos/${encodeURIComponent(id)}/attachments?name=${encodeURIComponent(file.name)}&mime=${encodeURIComponent(file.type || '')}`, {
+      method: 'POST', body: file
+    });
+    const j = await r.json();
+    if (!j.success) throw new Error(j.message || '上传失败');
+    return j.data;
+  },
+  /** 附件下载 / 预览地址（后端带禅道会话代理） */
+  fileUrl(fileId, name, download) {
+    const q = new URLSearchParams();
+    if (download) q.set('download', '1');
+    if (name) q.set('name', name);
+    const s = q.toString();
+    return `${MEMO_API_BASE}/api/zentao/files/${encodeURIComponent(fileId)}/content${s ? `?${s}` : ''}`;
+  },
   async syncLibs() {
     const r = await fetch(`${MEMO_API_BASE}/api/memos/sync/libs`);
     const j = await r.json();
@@ -335,6 +352,7 @@ const MemoPage = {
     const tagsHtml = (m.tags || []).map(t => `<span class="memo-tag">#${esc(t)}</span>`).join('');
     const pinHtml = m.pinned ? '<span class="memo-pin-icon">📌</span>' : '';
     const dirtyHtml = m.syncDirty ? '<span class="memo-dirty">待同步</span>' : '';
+    const attachHtml = (m.attachments && m.attachments.length) ? `<span class="memo-attach-badge" title="${m.attachments.length} 个附件">📎 ${m.attachments.length}</span>` : '';
     const createdAt = m.createdAt ? new Date(m.createdAt).toLocaleDateString() : '';
     const updatedAt = m.updatedAt ? new Date(m.updatedAt).toLocaleString() : '';
     // 显示库名而不是裸 ID；没设过同步目标的显示「仅本地」
@@ -344,7 +362,7 @@ const MemoPage = {
       <div class="memo-card ${m.pinned ? 'pinned' : ''}" data-id="${m.id}" style="border-left: 3px solid ${color};">
         ${pinHtml}
         <div class="memo-card-body">
-          <div class="memo-card-title">${esc(m.title)} ${dirtyHtml}</div>
+          <div class="memo-card-title">${esc(m.title)} ${dirtyHtml} ${attachHtml}</div>
           ${preview ? `<div class="memo-card-preview">${esc(preview)}</div>` : ''}
           ${tagsHtml ? `<div class="memo-card-tags">${tagsHtml}</div>` : ''}
           <div class="memo-card-meta">
@@ -373,15 +391,28 @@ const MemoPage = {
     const contentHtml = renderMarkdown(memo.content || '');
     const dirtyHtml = memo.syncDirty ? '<span class="memo-dirty">待同步</span>' : '';
     const syncLibName = memo.syncLibId ? esc(this.libNameOf(memo.syncLibId)) : '仅本地（未同步到禅道）';
+    const attachments = memo.attachments || [];
+    const attachHtml = attachments.length ? `
+      <div class="memo-preview-attachments">
+        <div class="memo-preview-attach-title">附件（${attachments.length}）</div>
+        ${attachments.map(f => `
+          <div class="memo-attach-item">
+            <span class="memo-attach-name">📎 ${esc(f.name)}${f.size ? ` · ${(f.size / 1024).toFixed(0)} KB` : ''}</span>
+            <a href="${esc(MemoApi.fileUrl(f.id, f.name, true))}" download="${esc(f.name)}">下载</a>
+          </div>
+        `).join('')}
+      </div>` : '';
 
     const overlay = showModal(`
       <h3 class="memo-modal-title">${esc(memo.title)} ${dirtyHtml}</h3>
       ${tagsHtml ? `<div class="memo-preview-tags">${tagsHtml}</div>` : ''}
       ${dateStr ? `<div class="memo-preview-date">${esc(dateStr)}</div>` : ''}
       ${contentHtml}
+      ${attachHtml}
       <div class="memo-preview-sync-row">
         <span class="memo-preview-sync-label">同步目标</span>
         <span class="memo-preview-sync-lib">${syncLibName}</span>
+        <button class="memo-btn memo-btn-ghost memo-btn-sm" id="memoPreviewAddAttach">＋ 附件</button>
         <button class="memo-btn memo-btn-ghost memo-btn-sm" id="memoPreviewChangeLib">更换</button>
         <button class="memo-btn memo-btn-ghost memo-btn-sm" id="memoPreviewSyncNow">立即同步</button>
       </div>
@@ -404,6 +435,30 @@ const MemoPage = {
         overlay.remove();
         this.setSyncLib(id);
       });
+      // 预览里直接加附件：选完立即上传（大文件逐个传，完成后刷新预览）
+      overlay.querySelector('#memoPreviewAddAttach').addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.multiple = true;
+        input.onchange = async () => {
+          const list = [...input.files];
+          if (!list.length) return;
+          let ok = 0; const failed = [];
+          for (const f of list) {
+            if (f.size > 50 * 1024 * 1024) { failed.push(`${f.name}（超过 50MB）`); continue; }
+            try { await MemoApi.addAttachment(id, f); ok++; }
+            catch (err) { failed.push(`${f.name}（${err.message}）`); }
+          }
+          if (ok) {
+            _toast.success(`已上传 ${ok} 个附件`);
+            await this.loadList();
+            overlay.remove();
+            this.previewMemo(id); // 重新打开以显示新附件
+          }
+          if (failed.length) _toast.warning(`附件没传上去：${failed.join('、')}`);
+        };
+        input.click();
+      });
       overlay.querySelector('#memoPreviewSyncNow').addEventListener('click', async () => {
         await this.syncSingle(id);
         overlay.remove();
@@ -420,6 +475,7 @@ const MemoPage = {
     const title = memo ? memo.title : '';
     const content = memo ? memo.content : '';
     const tags = memo ? (memo.tags || []).join(', ') : '';
+    const existingFiles = memo ? (memo.attachments || []) : [];
 
     const overlay = showModal(`
       <h3 class="memo-modal-title">${memo ? '编辑便签' : '新建便签'}</h3>
@@ -436,6 +492,16 @@ const MemoPage = {
           <label>标签</label>
           <input type="text" class="memo-input" id="memoEditTags" value="${esc(tags)}" placeholder="用逗号分隔，如：工作, 会议">
         </div>
+        <div class="memo-form-row">
+          <label>附件 <small class="memo-attach-hint">存到禅道文档，单个不超过 50MB；多端可见（文件本身不加密）</small></label>
+          <div class="memo-attach-box" id="memoEditAttach">
+            ${existingFiles.map(f => `
+              <div class="memo-attach-item memo-attach-existing">📎 ${esc(f.name)}${f.size ? ` · ${(f.size / 1024).toFixed(0)} KB` : ''}</div>
+            `).join('')}
+            <button type="button" class="memo-btn memo-btn-ghost memo-btn-sm" id="memoEditAttachPick">＋ 添加附件</button>
+            <input type="file" id="memoEditAttachInput" multiple hidden>
+          </div>
+        </div>
       </div>
       <div class="memo-modal-actions">
         <button class="memo-btn memo-btn-cancel">取消</button>
@@ -444,6 +510,29 @@ const MemoPage = {
     `, (overlay) => {
       const input = overlay.querySelector('#memoEditTitle');
       input.focus();
+      const pending = []; // 保存后一起上传的附件
+
+      const renderPending = () => {
+        overlay.querySelectorAll('.memo-attach-pending').forEach(el => el.remove());
+        const pick = overlay.querySelector('#memoEditAttachPick');
+        pending.forEach((f, i) => {
+          const div = document.createElement('div');
+          div.className = 'memo-attach-item memo-attach-pending';
+          div.innerHTML = `<span>⏳ ${esc(f.name)} · ${(f.size / 1024).toFixed(0)} KB</span><button type="button" class="memo-attach-rm" title="不上传">✕</button>`;
+          div.querySelector('.memo-attach-rm').addEventListener('click', () => { pending.splice(i, 1); renderPending(); });
+          overlay.querySelector('#memoEditAttach').insertBefore(div, pick);
+        });
+      };
+      overlay.querySelector('#memoEditAttachPick').addEventListener('click', () => overlay.querySelector('#memoEditAttachInput').click());
+      overlay.querySelector('#memoEditAttachInput').addEventListener('change', (e) => {
+        for (const f of e.target.files) {
+          if (f.size > 50 * 1024 * 1024) { _toast.warning(`${f.name} 超过 50MB`); continue; }
+          if (!pending.some(x => x.name === f.name && x.size === f.size)) pending.push(f);
+        }
+        e.target.value = '';
+        renderPending();
+      });
+
       const trySave = () => overlay.querySelector('#memoEditSave').click();
       input.addEventListener('keydown', (e) => {
         // e.isComposing：输入法正在输入（组合状态）时为 true，避免回车上屏触发保存
@@ -460,11 +549,24 @@ const MemoPage = {
         const c = overlay.querySelector('#memoEditContent').value;
         const tagStr = overlay.querySelector('#memoEditTags').value.trim();
         const tags = tagStr ? tagStr.split(/[,，]/).map(s => s.trim()).filter(Boolean) : [];
+        const saveBtn = overlay.querySelector('#memoEditSave');
         try {
+          saveBtn.disabled = true;
+          saveBtn.textContent = pending.length ? '保存并上传附件…' : '保存中…';
+          let saved;
           if (memo) {
-            await MemoApi.update(memo.id, { title: t, content: c, tags });
+            saved = await MemoApi.update(memo.id, { title: t, content: c, tags });
           } else {
-            await MemoApi.create({ title: t, content: c, tags });
+            saved = await MemoApi.create({ title: t, content: c, tags });
+          }
+          // 附件在便签保存成功后逐个上传（新便签此时已有 id；没同步目标的会得到明确提示）
+          if (pending.length) {
+            const failed = [];
+            for (const f of pending) {
+              try { await MemoApi.addAttachment(saved.id, f); }
+              catch (err) { failed.push(`${f.name}（${err.message}）`); }
+            }
+            if (failed.length) _toast.warning(`附件没传上去：${failed.join('、')}`);
           }
           overlay.remove();
           await this.loadList();
@@ -472,6 +574,8 @@ const MemoPage = {
           await this.afterEdit();
         } catch (err) {
           _toast.error(err.message);
+          saveBtn.disabled = false;
+          saveBtn.textContent = '保存';
         }
       });
     });

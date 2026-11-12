@@ -220,6 +220,9 @@ const UpdateUI = {
     toggle.checked = !!s.auto;
     toggleText.textContent = s.auto ? '开启' : '关闭';
     applyBtn.hidden = s.state !== 'ready';
+    // 新版本已下载好（ready）时只留「立即更新」一个主按钮——此时再检查没有意义；
+    // 其余状态只有「检查更新」。任何时刻界面上都只出现一个主操作。
+    checkBtn.hidden = s.state === 'ready';
     this.showProgress(s.state === 'downloading' ? (s.progress || { percent: null }) : null);
     // 后台正在下载（自动检查触发的）：打开设置时也要把进度显示出来
     if (s.state === 'downloading' && !this.polling) setTimeout(() => this.poll(), 0);
