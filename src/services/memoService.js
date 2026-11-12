@@ -348,6 +348,74 @@ async function syncOne(id) {
 }
 
 /**
+ * 下行合并（纯函数，便于单测）：
+ *
+ * 本地便签与远端按 docId 对齐，「文档还在不在禅道」以全量文档列表 allDocIds 为准——
+ * 以前只拿「解密成功的结果」当存在性判据，正文被人在禅道里改坏（前缀没了）会被误判成
+ * 「禅道已删除」而把本地数据清掉。现在分三态：
+ *   - 文档真不在了（列表里没有）→ 以禅道为准，非 dirty 的本地删除（回收站可恢复）
+ *   - 文档在、但正文不是便签密文（brokenIds）→ 本地保留并标 dirty，下轮上行把密文写回去
+ *   - 文档在、是密文但解密失败（别人的便签 / 被篡改）→ 本地原样保留，不动
+ *
+ * @param {Array} localMemos 本地全部便签（含 deleted / dirty）
+ * @param {Array} remoteMemos 远端解密成功的便签（docId 已填）
+ * @param {Set<string>} allDocIds 禅道全量文档列表里的 docId 集合
+ * @param {Set<string>} brokenIds 拉过详情、确认正文已不是便签密文的 docId 集合
+ * @returns {{merged:Array, removed:number, repaired:number}}
+ */
+function mergeRemoteMemos(localMemos, remoteMemos, allDocIds, brokenIds) {
+  const remoteMap = new Map(remoteMemos.map(m => [m.docId, m]));
+  const merged = [];
+  let removed = 0, repaired = 0;
+
+  // 1. 本地无 docId（新建未上传）→ 保留
+  for (const m of localMemos) {
+    if (!m.docId && !m.deleted) merged.push(m);
+  }
+
+  // 2. 本地有 docId 且未删
+  for (const m of localMemos) {
+    if (!m.docId || m.deleted) continue;
+    const rm = remoteMap.get(m.docId);
+    if (rm) {
+      // 两端都有 → 取 updatedAt 较新者
+      merged.push(String(rm.updatedAt || '') > String(m.updatedAt || '') ? rm : m);
+    } else if (allDocIds.has(String(m.docId))) {
+      // 文档还在禅道，只是没解出便签（正文被改坏 / 解密失败）→ 不删
+      if (brokenIds.has(String(m.docId)) && !m.syncDirty) {
+        // 正文被换成普通内容 → 标 dirty，下轮上行把密文恢复回去
+        merged.push({ ...m, syncDirty: true });
+        repaired++;
+      } else {
+        merged.push(m);
+      }
+    } else if (m.syncDirty) {
+      // 文档不在了但本地还有未上传的修改（含换库重建的中间态）→ 保留等上传
+      merged.push(m);
+    } else {
+      // 文档真被删了 → 以禅道为准，本地移除（禅道回收站里可恢复）
+      removed++;
+    }
+  }
+
+  // 3. 已删除的：删除还没同步成功的保留（等 syncUpload 调禅道删除），其余丢弃
+  for (const m of localMemos) {
+    if (m.deleted && m.syncDirty && m.docId) merged.push(m);
+  }
+
+  // 4. 远端有、本地没有 → 加入；但跳过「换库重建」留下的旧副本
+  //    （setSyncLib 换库 = 删旧建新，删旧失败时旧文档还在：与本地新副本 title+updatedAt 完全相同）
+  for (const rm of remoteMemos) {
+    const dup = localMemos.some(m => !m.deleted && m.docId !== rm.docId
+      && String(m.title) === String(rm.title) && String(m.updatedAt) === String(rm.updatedAt));
+    if (dup) continue;
+    if (!localMemos.some(m => m.docId === rm.docId && !m.deleted)) merged.push(rm);
+  }
+
+  return { merged, removed, repaired };
+}
+
+/**
  * 下行：列出文档库全部文档 → 逐条解密 → 条目级合并 → 写回本地
  * @returns {{synced:number}}
  */
@@ -371,21 +439,28 @@ async function syncDownload() {
     return { skipped: true, reason: err.message };
   }
 
-  // 列出所有文档（跨所有库），按 docId 匹配（每条备忘录可以同步到不同库）
+  // 全量文档列表（跨所有库）——它同时回答两个问题：哪些文档值得拉详情、哪些文档确实还在
   const docs = await docService.listDocs({});
+  const allDocIds = new Set(docs.map(d => String(d.id)));
 
-  // 预筛后再拉正文：便签文档只可能在自己配置过的库里，或与便签一样是 markdown 型；
+  // 预筛后再拉正文：便签文档只可能在「配置过的库」或「本地已同步过的文档（含被移库）」里，
+  // 再兜底同型的 markdown 文档（老便签未记 syncLibId 时靠它识别）；
   // 不加筛选的话禅道里每一篇文档都要 getDoc 一次，文档多时每轮同步要打几百个请求
+  const localDocIds = new Set((data.memos || []).map(m => String(m.docId || '')).filter(Boolean));
   const candidates = docs.filter(d =>
-    memoLibs.has(String(d.lib || '')) || String(d.type || '') === 'markdown'
+    memoLibs.has(String(d.lib || '')) || localDocIds.has(String(d.id)) || String(d.type || '') === 'markdown'
   );
 
   // 逐条拉取正文并解密
   const remoteMemos = [];
+  const brokenIds = new Set(); // 文档在、正文已不是便签密文（被人在禅道改成普通文档）
   for (const doc of candidates) {
     try {
       const detail = await docService.getDoc(doc.id);
-      if (!detail.raw || !isMemoEncrypted(detail.raw)) continue; // 非备忘录文档跳过
+      if (!detail.raw || !isMemoEncrypted(detail.raw)) {
+        brokenIds.add(String(doc.id)); // 只有本地有同 docId 便签时这个标记才有意义
+        continue;
+      }
       const memo = decryptMemo(detail.raw, userId);
       remoteMemos.push({
         id: String(doc.id),
@@ -402,64 +477,26 @@ async function syncDownload() {
         syncLibId: String(doc.lib)
       });
     } catch {
-      // 解密失败（口令不对 / 格式不对）→ 跳过，不影响其他备忘录
+      // 是密文但解密失败（别人的便签 / 被篡改）→ 跳过，合并时本地对应条目原样保留
     }
   }
 
   // 条目级合并
-  const remoteMap = new Map(remoteMemos.map(m => [m.docId, m]));
+  const localSnapshot = data.memos || [];
+  const { merged, removed, repaired } = mergeRemoteMemos(localSnapshot, remoteMemos, allDocIds, brokenIds);
 
   await updateMemos(d => {
-    const localMemos = d.memos || [];
-    const merged = [];
-
-    // 1. 无 docId 的本地备忘录（新建未上传）→ 保留
-    for (const m of localMemos) {
-      if (!m.docId && !m.deleted) merged.push(m);
-    }
-
-    // 2. 有 docId 的本地未删除备忘录
-    for (const m of localMemos) {
-      if (!m.docId || m.deleted) continue;
-      const rm = remoteMap.get(m.docId);
-      if (rm) {
-        // 两端都有 → 取 updatedAt 较新者
-        if (String(rm.updatedAt || '') > String(m.updatedAt || '')) {
-          merged.push(rm);
-        } else {
-          merged.push(m);
-        }
-      } else if (!m.syncDirty) {
-        // 远端没有且不是 dirty → 以禅道为准删除（不加入 merged）
-      } else {
-        // dirty 但远端没有 → 上传失败过，保留等下次重试
-        merged.push(m);
-      }
-    }
-
-    // 3. 已删除的本地备忘录
-    for (const m of localMemos) {
-      if (m.deleted && m.syncDirty && m.docId) {
-        // 删除还没成功上传 → 保留等下次 syncUpload
-        merged.push(m);
-      }
-      // 其他已删除的 → 不加入 merged（已从本地移除）
-    }
-
-    // 4. 远端有但本地未删除的没有 → 加入
-    for (const rm of remoteMemos) {
-      if (!localMemos.some(m => m.docId === rm.docId && !m.deleted)) {
-        merged.push(rm);
-      }
-    }
-
+    // d 里的 memos 可能在这期间被并发改过（编辑/新建），无 docId 的新条目以 d 为准补回来
+    const fresh = (d.memos || []).filter(m => !m.docId && !m.deleted
+      && !merged.some(x => x.id === m.id));
     return {
-      ...d, memos: merged,
+      ...d,
+      memos: [...merged, ...fresh],
       syncState: { ...d.syncState, lastSyncAt: new Date().toISOString(), lastSyncResult: 'ok' }
     };
   });
 
-  return { synced: remoteMemos.length };
+  return { synced: remoteMemos.length, removed, repaired };
 }
 
 // ==================== 同步配置 ====================
@@ -520,7 +557,7 @@ async function setSyncLib(id, libId) {
 
 export {
   listMemos, getMemo, createMemo, updateMemo, deleteMemo, togglePin,
-  syncUpload, syncDownload, syncOne,
+  syncUpload, syncDownload, syncOne, mergeRemoteMemos,
   getSyncState, setSyncState, listMemoLibs, setSyncLib,
   getCurrentUserId, invalidateUserId
 };

@@ -33,6 +33,14 @@ const AutoSync = {
         if (typeof loadTasks === 'function') await loadTasks();
         if (typeof BugManager !== 'undefined' && BugManager.loadBugs) await BugManager.loadBugs();
       }
+      // 便签与任务同一个节奏同步（登录后 / 打开页面 / 切回标签 / 每 5 分钟），
+      // 不然便签只在打开便签页时才拉。失败悄悄忽略；便签页没打开过就不刷新（show() 会自己拉）。
+      try {
+        const mr = await (await fetch(`${base}/api/memos/sync/pull`, { method: 'POST' })).json();
+        if (mr && mr.success && typeof MemoPage !== 'undefined' && MemoPage.container) {
+          MemoPage.loadList();
+        }
+      } catch { /* 便签同步失败不影响任务同步 */ }
       return true;
     } catch (err) {
       console.warn('[AutoSync] 自动同步失败（忽略）:', err && err.message);

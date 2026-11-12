@@ -10,8 +10,18 @@ async function make(reply, visible = 'visible') {
   const dom = new JSDOM('<html data-no-autosync><body></body></html>', { url: 'http://localhost/', runScripts: 'outside-only' });
   const w = dom.window;
   Object.defineProperty(w.document, 'visibilityState', { get: () => visible, configurable: true });
-  const s = { fetches: 0, loaded: 0, bugs: 0, t: 1e9 };
-  w.fetch = async () => { s.fetches++; if (reply === 'throw') throw new TypeError('x'); return { json: async () => reply }; };
+  const s = { fetches: 0, loaded: 0, bugs: 0, memoPulls: 0, memoFail: false, t: 1e9 };
+  w.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('/api/memos/sync/pull')) {
+      s.memoPulls++; // 便签与任务同一节奏拉取；失败静默，不影响任务同步
+      if (s.memoFail || reply === 'throw') throw new TypeError('x');
+      return { json: async () => ({ success: true, data: { synced: 0 } }) };
+    }
+    s.fetches++;
+    if (reply === 'throw') throw new TypeError('x');
+    return { json: async () => reply };
+  };
   w.loadTasks = async () => { s.loaded++; };
   w.BugManager = { loadBugs: async () => { s.bugs++; } };
   w.eval(SRC + ';window.__A = AutoSync;');
@@ -49,6 +59,14 @@ const none = { success: true, data: { added: 0, updated: 0, removed: 0, bugs: { 
   const p1 = A.run(); const p2 = A.run({ force: true });
   await Promise.all([p1, p2]);
   check('上一次没完成时不重叠', s.fetches === 1);
+
+  // 便签与任务同节奏同步
+  ({ A, s } = await make(none));
+  await A.run();
+  check('便签：每轮任务同步后顺带拉一次', s.memoPulls === 1 && s.fetches === 1);
+  ({ A, s } = await make(none));
+  s.memoFail = true;
+  check('便签：拉取失败不影响任务同步', (await A.run()) === true && s.loaded === 0);
 
   let bad = 0;
   for (const r of results) { console.log(`  ${r.pass ? '✓' : '✗'} ${r.name}`); if (!r.pass) bad++; }

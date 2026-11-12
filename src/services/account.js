@@ -329,7 +329,16 @@ async function clearLocalData() {
   const { updateTasks } = await import('../utils/storage.js');
   await updateTasks((data) => ({ ...data, tasks: [] }));
   const dir = config.paths.data;
-  for (const f of ['reports.json', 'history.json', 'executions.json', 'projects.json', 'executionLearning.json', 'zentao-users.json', 'tasks.json.backup', 'autofill-log.json', 'data-scope.json', 'notify-state.json', 'notifications.json', 'timer.json']) {
+  // 便签也是账号私有数据（正文用禅道用户 ID 加密），切换前备份，切回原账号时打开便签页会重新拉回
+  const memoFile = join(dir, 'memo.json');
+  if (existsSync(memoFile)) {
+    try {
+      const backups = join(dir, 'backups');
+      mkdirSync(backups, { recursive: true });
+      copyFileSync(memoFile, join(backups, `memo__switch-${new Date().toISOString().replace(/[:.]/g, '-')}.json`));
+    } catch { /* 备份失败不挡切换，但下面照常清 */ }
+  }
+  for (const f of ['reports.json', 'history.json', 'executions.json', 'projects.json', 'executionLearning.json', 'zentao-users.json', 'tasks.json.backup', 'autofill-log.json', 'data-scope.json', 'notify-state.json', 'notifications.json', 'timer.json', 'memo.json']) {
     rmSync(join(dir, f), { force: true });
   }
   // 需求 / 文档 / 工时等缓存（本来按地址隔离，这里一并清掉，免得留着占地方）
@@ -342,6 +351,8 @@ async function clearLocalData() {
     for (const name of readdirSync(att)) rmSync(join(att, name), { recursive: true, force: true });
   }
   config.zentao.users = {};
+  // 便签的加密口令（用户 ID）缓存跟着账号走，一并作废
+  try { (await import('./memoService.js')).invalidateUserId(); } catch { /* memoService 不可用不挡切换 */ }
 }
 
 // ==================== 已保存的账号（快速切换）====================

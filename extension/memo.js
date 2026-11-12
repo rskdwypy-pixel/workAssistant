@@ -201,21 +201,12 @@ const MemoPage = {
     if (!this.container) {
       this.container = document.getElementById('memoMode');
       this.render();
-      this.startAutoSync();
     }
     this.loadList();
     this.loadLibNames();
     this.syncDownload();
   },
-
-  startAutoSync() {
-    if (this.autoSyncTimer) return;
-    this.autoSyncTimer = setInterval(() => {
-      // 便签页不可见（切到其他标签页 / 浏览器最小化）时不打禅道，回来时 show() 会再拉一次
-      if (document.hidden || !this.container || !this.container.offsetParent) return;
-      this.syncDownload();
-    }, 5 * 60 * 1000);
-  },
+  // 定时同步由全局 AutoSync 统一负责（与任务 / Bug 同节奏），这里不再自设计时器
 
   async loadLibNames() {
     try {

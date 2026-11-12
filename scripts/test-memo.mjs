@@ -4,7 +4,7 @@
  *   - memoService：CRUD（本地，不涉及禅道）
  */
 import { encryptMemo, decryptMemo, isMemoEncrypted } from '../src/utils/memoCrypto.js';
-import { listMemos, createMemo, updateMemo, deleteMemo, togglePin, getSyncState, setSyncState } from '../src/services/memoService.js';
+import { listMemos, createMemo, updateMemo, deleteMemo, togglePin, getSyncState, setSyncState, mergeRemoteMemos } from '../src/services/memoService.js';
 
 let pass = 0, total = 0;
 const check = (name, ok, extra = '') => { total++; if (ok) pass++; console.log(`${ok ? '✅' : '❌'} ${name}${extra ? `  (${extra})` : ''}`); };
@@ -149,6 +149,64 @@ check('置顶：再次切换为 false', m1unpin.pinned === false);
 
 // 清理
 await deleteMemo(m1.id);
+
+// ==================== mergeRemoteMemos 下行合并（纯函数） ====================
+
+const L = (over = {}) => ({ id: 'a', docId: '10', title: '旧标题', content: 'c', tags: [], pinned: false, refs: [], createdAt: '2026-11-01T00:00:00Z', updatedAt: '2026-11-01T00:00:00Z', syncDirty: false, deleted: false, ...over });
+const R = (over = {}) => ({ id: '10', docId: '10', title: '新标题', content: 'c2', tags: [], pinned: false, refs: [], createdAt: '2026-11-01T00:00:00Z', updatedAt: '2026-11-02T00:00:00Z', syncDirty: false, deleted: false, syncLibId: '185', ...over });
+
+// 两端都有 → 取新者
+{
+  const { merged } = mergeRemoteMemos([L()], [R({ updatedAt: '2026-11-02T00:00:00Z' })], new Set(['10']), new Set());
+  check('合并：远端较新取远端', merged[0].title === '新标题');
+}
+{
+  const { merged } = mergeRemoteMemos([L({ updatedAt: '2026-11-03T00:00:00Z' })], [R()], new Set(['10']), new Set());
+  check('合并：本地较新取本地', merged[0].title === '旧标题');
+}
+
+// 文档真删了（列表里没有）→ 非 dirty 本地移除
+{
+  const { merged, removed } = mergeRemoteMemos([L()], [], new Set(), new Set());
+  check('合并：远端真删除 → 本地移除', merged.length === 0 && removed === 1);
+}
+// 文档真删了但本地 dirty → 保留等重传
+{
+  const { merged } = mergeRemoteMemos([L({ syncDirty: true })], [], new Set(), new Set());
+  check('合并：真删除但本地 dirty → 保留', merged.length === 1);
+}
+// 文档在但正文被改成普通文档（broken）→ 本地保留 + 标 dirty 修复
+{
+  const { merged, repaired } = mergeRemoteMemos([L()], [], new Set(['10']), new Set(['10']));
+  check('合并：正文被改坏 → 保留并标 dirty 重传', merged.length === 1 && merged[0].syncDirty === true && repaired === 1);
+}
+// 文档在、是密文但解密失败（别人的 / 被篡改）→ 本地原样保留不动
+{
+  const { merged, repaired } = mergeRemoteMemos([L()], [], new Set(['10']), new Set());
+  check('合并：解密失败 → 原样保留', merged.length === 1 && merged[0].syncDirty === false && repaired === 0);
+}
+// 本地新建未上传（无 docId）→ 保留
+{
+  const { merged } = mergeRemoteMemos([L({ id: 'b', docId: '' })], [], new Set(), new Set());
+  check('合并：无 docId 新建 → 保留', merged.length === 1);
+}
+// 已删除且 dirty → 保留等上传删除
+{
+  const { merged } = mergeRemoteMemos([L({ deleted: true, syncDirty: true })], [], new Set(['10']), new Set());
+  check('合并：删除待同步 → 保留', merged.length === 1 && merged[0].deleted === true);
+}
+// 远端新增（本地没有）→ 加入
+{
+  const { merged } = mergeRemoteMemos([], [R()], new Set(['10']), new Set());
+  check('合并：远端新增 → 加入', merged.length === 1);
+}
+// 换库重建的旧副本（同 title+updatedAt、不同 docId）→ 不重复加入
+{
+  // 本地这条已经换库重建（docId 指向新文档 20），远端 10 是删除失败的旧副本，内容完全相同
+  const local = [L({ docId: '20', syncLibId: '200', title: '新标题', updatedAt: '2026-11-02T00:00:00Z' })];
+  const { merged } = mergeRemoteMemos(local, [R()], new Set(['10', '20']), new Set());
+  check('合并：换库旧副本不重复加入', merged.length === 1 && merged[0].docId === '20');
+}
 
 console.log(`\n备忘录后端：${pass}/${total} 通过`);
 process.exit(pass === total ? 0 : 1);
